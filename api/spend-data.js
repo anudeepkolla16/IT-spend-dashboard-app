@@ -143,13 +143,30 @@ function parseWorkbook(buffer) {
   return records;
 }
 
+// Best-effort in-memory cache. Serverless instances are ephemeral (cold starts
+// bypass it entirely), but it cuts down redundant Graph calls from the 5-min
+// auto-poll and from multiple people viewing the dashboard within the same window.
+const CACHE_TTL_MS = 60 * 1000;
+let cache = { data: null, expiresAt: 0 };
+
 module.exports = async (req, res) => {
   try {
+    const forceRefresh = req.query && (req.query.refresh === '1' || req.query.refresh === 'true');
+    const now = Date.now();
+    if (!forceRefresh && cache.data && now < cache.expiresAt) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Cache', 'HIT');
+      res.status(200).json(cache.data);
+      return;
+    }
     const token = await getGraphToken();
     const buffer = await downloadWorkbook(token);
     const rows = parseWorkbook(buffer);
+    const payload = { syncedAt: new Date().toISOString(), source: 'sharepoint', rowCount: rows.length, rows };
+    cache = { data: payload, expiresAt: now + CACHE_TTL_MS };
     res.setHeader('Cache-Control', 'no-store');
-    res.status(200).json({ syncedAt: new Date().toISOString(), source: 'sharepoint', rowCount: rows.length, rows });
+    res.setHeader('X-Cache', 'MISS');
+    res.status(200).json(payload);
   } catch (err) {
     res.setHeader('Cache-Control', 'no-store');
     res.status(502).json({ error: err.message || String(err) });

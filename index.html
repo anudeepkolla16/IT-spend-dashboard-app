@@ -24,8 +24,6 @@
   .btn{background:var(--accent);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer}
   .btn:hover{filter:brightness(1.08)}
   .btn.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
-  .fx{display:flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-size:12.5px;color:var(--muted)}
-  .fx input{width:64px;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:5px 7px;font-size:13px}
   main{padding:22px 26px;max-width:1400px;margin:0 auto}
   .banner{background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.4);color:#ffb3b3;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:16px;display:none}
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:20px}
@@ -38,7 +36,8 @@
   .grid3{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:16px}
   .card h3{margin:0 0 4px;font-size:14.5px;font-weight:650}
-  .card .cap{color:var(--muted);font-size:12px;margin-bottom:12px}
+  .cap{color:var(--muted);font-size:12px}
+  .card > .cap{margin-bottom:12px}
   .chartwrap{position:relative;height:300px}
   .chartwrap.sm{height:260px}
   table{width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap}
@@ -54,11 +53,54 @@
   select,.filters input{background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 9px;font-size:12.5px}
   .hidden{display:none}
   .foot{color:var(--muted);font-size:11.5px;text-align:center;padding:26px 0 8px}
-  .pill{font-size:11px;padding:2px 8px;border-radius:20px}
+  .pill{font-size:11px;padding:2px 8px;border-radius:20px;white-space:nowrap}
   .pill.up{background:rgba(255,107,107,.15);color:#ff8f8f}
   .pill.down{background:rgba(61,220,151,.15);color:#7ff0c2}
+  .pill.danger{background:rgba(255,107,107,.2);color:#ffb0b0}
+  .pill.warn{background:rgba(255,176,32,.18);color:#ffd28a}
+  .pill.ok{background:rgba(108,140,255,.15);color:#a9bcff}
   .skeleton{color:var(--muted);text-align:center;padding:60px 0}
+
+  /* Upcoming renewals */
+  .renewals{display:flex;flex-direction:column;gap:2px;max-height:260px;overflow:auto}
+  .renewal-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 4px;border-bottom:1px solid var(--line);font-size:12.5px}
+  .renewal-row:last-child{border-bottom:none}
+  .renewal-name{font-weight:600}
+  .renewal-dept{color:var(--muted);font-weight:400;margin-left:8px;font-size:11.5px}
+  .renewal-when{display:flex;align-items:center;gap:8px;flex-shrink:0}
+
+  /* Cost-spike badge in table cells */
+  .spike{color:#ffb0b0;font-weight:700}
+  .spike::after{content:' ▲';font-size:9px}
+
+  /* Row click affordance */
+  tbody tr{cursor:pointer}
+  tbody tr:hover td{background:rgba(255,255,255,.03)}
+
+  /* Drill-down modal */
+  .modal-overlay{position:fixed;inset:0;background:rgba(5,7,15,.7);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal-overlay.show{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;max-width:640px;width:100%;max-height:85vh;overflow:auto}
+  .modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px}
+  .modal-head h3{margin:0;font-size:17px}
+  .modal-close{background:none;border:0;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;padding:2px 6px}
+  .modal-meta{color:var(--muted);font-size:12.5px;margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px}
+  .modal-meta b{color:var(--txt)}
+  .modal-chartwrap{height:220px;position:relative;margin-bottom:12px}
+
+  /* Mobile card list (shown instead of the wide table below the breakpoint) */
+  .cardlist{display:none}
+  .appcard{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .appcard-top{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13.5px}
+  .appcard-sub{color:var(--muted);font-size:11.5px;margin-top:3px}
+  .appcard-nums{display:flex;gap:20px;margin-top:8px}
+  .appcard-nums .cap{margin-bottom:2px;display:block}
+
   @media(max-width:900px){.grid,.grid3{grid-template-columns:1fr}}
+  @media(max-width:700px){
+    .tblwrap{display:none}
+    .cardlist{display:flex;flex-direction:column;gap:8px}
+  }
 </style>
 </head>
 <body>
@@ -79,6 +121,12 @@
 
   <div id="dash" class="hidden">
     <div class="kpis" id="kpis"></div>
+
+    <div class="card">
+      <h3>📅 Upcoming Renewals</h3>
+      <div class="cap">Apps with a specific renewal date coming up in the next 60 days (click a table row for full detail)</div>
+      <div class="renewals" id="renewalsList"></div>
+    </div>
 
     <div class="grid3">
       <div class="card">
@@ -133,6 +181,18 @@
       <div class="tblwrap">
         <table id="tbl"><thead></thead><tbody></tbody></table>
       </div>
+      <div class="cardlist" id="tblCards"></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="modalTitle"></h3>
+        <button class="modal-close" id="modalClose">✕</button>
+      </div>
+      <div class="modal-meta" id="modalMeta"></div>
+      <div class="modal-chartwrap"><canvas id="modalChart"></canvas></div>
     </div>
   </div>
 
@@ -185,17 +245,63 @@ function cycleMonths(c){
   return 1;
 }
 
+/* Renewal Date text in the sheet is either a real date ("1/21/2027") or a
+   recurring day-of-month description ("1st of every month"). Parse both. */
+function parseRenewal(text){
+  if (!text) return null;
+  text = String(text).trim();
+  let m = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m){
+    const d = new Date(+m[3], +m[1]-1, +m[2]);
+    if (!isNaN(d)) return { date: d, recurring: false };
+  }
+  m = text.match(/^(\d{1,2})(st|nd|rd|th)?\s+of\s+every\s+month/i);
+  if (m){
+    const day = +m[1];
+    const now = new Date();
+    let d = new Date(now.getFullYear(), now.getMonth(), day);
+    if (d < new Date(now.getFullYear(), now.getMonth(), now.getDate())) d = new Date(now.getFullYear(), now.getMonth()+1, day);
+    return { date: d, recurring: true };
+  }
+  return null;
+}
+function renderRenewals(all){
+  const apps = latestRowsPerApp(all.filter(r=>r.kind==='Apps'));
+  const today = new Date(); today.setHours(0,0,0,0);
+  const items = apps.map(a=>{
+    const p = parseRenewal(a.renewalDate);
+    if (!p) return null;
+    const days = Math.round((p.date - today)/86400000);
+    return { name:a.name, dept:a.dept, days, recurring:p.recurring, date:p.date };
+  }).filter(x=>x && x.days>=0 && x.days<=60).sort((a,b)=>a.days-b.days);
+
+  const el = $('#renewalsList');
+  if (!items.length){ el.innerHTML = '<div class="cap" style="padding:8px 4px">No renewals with a specific date in the next 60 days.</div>'; return; }
+  el.innerHTML = items.slice(0,10).map(x=>{
+    const urgency = x.days<=7 ? 'danger' : (x.days<=30 ? 'warn' : 'ok');
+    const when = x.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    return `<div class="renewal-row" data-name="${encodeURIComponent(x.name)}">
+      <div class="renewal-name">${x.name}<span class="renewal-dept">${x.dept}</span></div>
+      <div class="renewal-when">
+        <span class="cap">${when}${x.recurring?' · monthly':''}</span>
+        <span class="pill ${urgency}">${x.days===0?'today':x.days+'d'}</span>
+      </div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.renewal-row').forEach(row=>row.onclick=()=>openModal(decodeURIComponent(row.dataset.name)));
+}
+
 /* ---------------- live sync ---------------- */
 async function syncFromApi(manual){
   try{
     $('#syncLabel').textContent = manual ? 'Refreshing…' : 'Syncing…';
-    const res = await fetch('/api/spend-data', {cache:'no-store'});
+    const res = await fetch(`/api/spend-data${manual ? '?refresh=1' : ''}`, {cache:'no-store'});
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
     appRows = (json.rows||[]).map(r => ({
       kind:r.kind||'Apps', month:r.month, name:r.name, dept:r.dept||'Unassigned',
       cat:r.cycle||'Monthly', cycle:r.cycle||'Monthly', cur:r.cur||'USD', amt:Number(r.amt)||0,
-      status:'Active', poc:r.poc||''
+      status:'Active', poc:r.poc||'', renewalDate:r.renewalDate||''
     }));
     lastSyncedAt = json.syncedAt ? new Date(json.syncedAt) : new Date();
     $('#syncDot').classList.remove('err');
@@ -236,6 +342,7 @@ function build(){
   const all = appRows.map(x => ({...x, usd: x.amt}));
   window.MODEL = all;
   renderKPIs(all);
+  renderRenewals(all);
   renderTrend(all);
   renderSplit(all);
   renderDept(all);
@@ -420,6 +527,13 @@ function setupTable(all){
   });
   draw();
 }
+// registered once (not per-sync) since #tbl tbody / #tblCards persist across re-syncs
+$('#tbl tbody').addEventListener('click', e=>{
+  const tr = e.target.closest('tr[data-name]'); if (tr) openModal(decodeURIComponent(tr.dataset.name));
+});
+$('#tblCards').addEventListener('click', e=>{
+  const card = e.target.closest('.appcard[data-name]'); if (card) openModal(decodeURIComponent(card.dataset.name));
+});
 function draw(){
   const all=window.MODEL||[];
   const t=$('#fType').value, d=$('#fDept').value, q=$('#fSearch').value.toLowerCase();
@@ -429,30 +543,96 @@ function draw(){
   // pivot: one row per app name, spend broken out by month
   const groups = {};
   rows.forEach(r=>{
-    if (!groups[r.name]) groups[r.name] = {name:r.name, kind:r.kind, dept:r.dept, cat:r.cat, cur:r.cur, poc:r.poc, total:0};
+    if (!groups[r.name]) groups[r.name] = {name:r.name, kind:r.kind, dept:r.dept, cat:r.cat, cur:r.cur, poc:r.poc, renewalDate:r.renewalDate, total:0};
     const g = groups[r.name];
     if (r.month) g[r.month] = (g[r.month]||0) + r.usd;
     g.total += r.usd;
-    if (r.month >= (g._latestMonth||'')) { g._latestMonth = r.month; g.kind=r.kind; g.dept=r.dept; g.cat=r.cat; g.cur=r.cur; g.poc=r.poc; }
+    if (r.month >= (g._latestMonth||'')) { g._latestMonth = r.month; g.kind=r.kind; g.dept=r.dept; g.cat=r.cat; g.cur=r.cur; g.poc=r.poc; g.renewalDate=r.renewalDate; }
   });
   let pivoted = Object.values(groups);
+
+  // cost-spike detection: flag a month where spend jumped >30% vs the app's prior month
+  pivoted.forEach(g=>{
+    g._spikes = {};
+    let prev = null;
+    ALL_MONTHS.forEach(m=>{
+      const v = g[m];
+      if (v!=null && prev!=null && prev>0 && (v-prev)/prev > 0.3) g._spikes[m]=true;
+      if (v!=null) prev = v;
+    });
+  });
+
   pivoted.sort((a,b)=>{
     let x=a[sortKey], y=b[sortKey];
     if (typeof x==='number' || typeof y==='number') return ((x||0)-(y||0))*sortDir;
     return String(x||'').localeCompare(String(y||''))*sortDir;
   });
 
-  $('#tbl tbody').innerHTML = pivoted.map(g=>`<tr>
+  $('#tbl tbody').innerHTML = pivoted.map(g=>`<tr data-name="${encodeURIComponent(g.name)}">
     <td><span class="chip">${g.kind}</span></td><td class="stickycol">${g.name}</td>
     <td>${g.dept}</td><td>${g.poc||'—'}</td><td>${g.cat}</td><td>${g.cur}</td>
-    ${ALL_MONTHS.map(m=>`<td class="num">${fmtCell(g[m])}</td>`).join('')}
+    ${ALL_MONTHS.map(m=>`<td class="num ${g._spikes[m]?'spike':''}" title="${g._spikes[m]?'>30% jump vs prior month':''}">${fmtCell(g[m])}</td>`).join('')}
     <td class="num total">${fmtUSD(g.total)}</td></tr>`).join('')
     || `<tr><td colspan="${6+ALL_MONTHS.length+1}" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>`;
+
+  $('#tblCards').innerHTML = pivoted.map(g=>{
+    const lastM = [...ALL_MONTHS].reverse().find(m=>g[m]!=null);
+    return `<div class="appcard" data-name="${encodeURIComponent(g.name)}">
+      <div class="appcard-top"><b>${g.name}</b><span class="chip">${g.kind}</span></div>
+      <div class="appcard-sub">${g.dept}${g.poc?' · '+g.poc:''} · ${g.cat}</div>
+      <div class="appcard-nums">
+        <div><span class="cap">Latest</span>${lastM?fmtUSD(g[lastM]):'—'}${g._spikes[lastM]?' <span class="spike"></span>':''}</div>
+        <div><span class="cap">Total</span><b>${fmtUSD(g.total)}</b></div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="cap" style="text-align:center;padding:20px">No matching records</div>';
 
   const sum = pivoted.reduce((s,g)=>s+g.total,0);
   $('#rowCount').textContent = `${pivoted.length} apps · ${fmtUSD(sum)}`;
   window.PIVOTED = pivoted;
 }
+
+/* ---------------- per-app drill-down modal ---------------- */
+function openModal(name){
+  const g = (window.PIVOTED||[]).find(x=>x.name===name);
+  if (!g) return;
+  $('#modalTitle').textContent = g.name;
+  const renewal = parseRenewal(g.renewalDate);
+  const renewalText = renewal
+    ? `${renewal.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}${renewal.recurring?' (monthly billing)':''}`
+    : (g.renewalDate || '—');
+  $('#modalMeta').innerHTML = `
+    <span><span class="cap">Type</span><br><b>${g.kind}</b></span>
+    <span><span class="cap">Department</span><br><b>${g.dept}</b></span>
+    <span><span class="cap">POC</span><br><b>${g.poc||'—'}</b></span>
+    <span><span class="cap">Cycle</span><br><b>${g.cat}</b></span>
+    <span><span class="cap">Renewal</span><br><b>${renewalText}</b></span>
+    <span><span class="cap">Total (all-time)</span><br><b>${fmtUSD(g.total)}</b></span>`;
+
+  destroy('modal');
+  charts.modal = new Chart($('#modalChart'),{
+    type:'line',
+    data:{labels:ALL_MONTHS.map(monthLabel),datasets:[{
+      label:g.name, data:ALL_MONTHS.map(m=>g[m]??null),
+      borderColor:'#6c8cff', backgroundColor:'rgba(108,140,255,.15)', fill:true, tension:.3,
+      pointRadius:ALL_MONTHS.map(m=>g._spikes&&g._spikes[m]?6:3),
+      pointBackgroundColor:ALL_MONTHS.map(m=>g._spikes&&g._spikes[m]?'#ff6b6b':'#6c8cff'),
+      spanGaps:true
+    }]},
+    options:{maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.parsed.y==null?'no data':fmtUSD(c.parsed.y)}}},
+      scales:{y:{ticks:{callback:v=>fmtShort(v)},grid:{color:'rgba(255,255,255,.04)'}},x:{grid:{display:false}}}}
+  });
+
+  $('#modalOverlay').classList.add('show');
+}
+function closeModal(){
+  $('#modalOverlay').classList.remove('show');
+  destroy('modal');
+}
+$('#modalClose').onclick = closeModal;
+$('#modalOverlay').addEventListener('click', e=>{ if (e.target.id==='modalOverlay') closeModal(); });
+document.addEventListener('keydown', e=>{ if (e.key==='Escape') closeModal(); });
 </script>
 </body>
 </html>
