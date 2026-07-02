@@ -83,10 +83,12 @@ async function downloadWorkbook(token) {
 }
 
 function parseWorkbook(buffer) {
-  const wb = XLSX.read(buffer, { type: 'buffer' });
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   const sheetName = wb.SheetNames[0];
   const sheet = wb.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  // raw:false renders cells using their Excel number format (so date-formatted
+  // headers like "Jan-26" come through as that display text, not a serial number).
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
 
   let headerRowIdx = -1;
   let headers = [];
@@ -96,7 +98,10 @@ function parseWorkbook(buffer) {
     const hasNameCol = row.some(c => /application|sw\s*\/\s*license/i.test(String(c)));
     if (hasMonthCol && hasNameCol) { headerRowIdx = i; headers = row; break; }
   }
-  if (headerRowIdx === -1) throw new Error('Could not locate header row in the sheet');
+  if (headerRowIdx === -1) {
+    const sample = rows.slice(0, 15).map((r, i) => `${i}: ${JSON.stringify(r.slice(0, 10))}`).join('\n');
+    throw new Error(`Could not locate header row in the sheet. First rows seen:\n${sample}`);
+  }
 
   const colIdx = (patterns) => headers.findIndex(h => patterns.some(p => p.test(String(h))));
   const nameCol = colIdx([/application|sw\s*\/\s*license/i]);
@@ -125,7 +130,7 @@ function parseWorkbook(buffer) {
 
     for (const { idx, month } of monthCols) {
       const raw = row[idx];
-      const amt = typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/,/g, ''));
+      const amt = typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/[^0-9.\-]/g, ''));
       if (!amt || Number.isNaN(amt)) continue;
       records.push({ name, dept, poc, renewalDate, cycle, cur, month, amt, paymentMethod });
     }
