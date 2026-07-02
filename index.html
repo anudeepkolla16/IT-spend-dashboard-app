@@ -171,7 +171,7 @@
 
     <div class="card">
       <h3>🔮 Annual Run-Rate Projection</h3>
-      <div class="cap">Recurring monthly cost of active subscriptions, annualised (One-time items excluded)</div>
+      <div class="cap">Each app's trailing 3-month average spend, annualised — smooths out volatile usage-based costs like cloud/API metering (One-time items excluded)</div>
       <div class="chartwrap sm"><canvas id="runrateChart"></canvas></div>
       <div id="runrateNote" class="cap" style="margin-top:10px"></div>
     </div>
@@ -402,8 +402,29 @@ function latestActualRowsPerApp(apps){
   const todayKey = realMonthKey(0);
   return latestRowsPerApp(apps.filter(a => a.month <= todayKey));
 }
+// Per app: average of its last (up to) 3 ACTUAL months' spend, annualized.
+// Deliberately not "latest month × 12" — usage-based costs (cloud, API metering)
+// swing a lot month to month, so a single month badly over/under-states the true
+// run-rate. A trailing average smooths that out. One-time purchases are excluded
+// entirely (they're not a recurring cost to project).
+function trailingRunRateByApp(apps){
+  const todayKey = realMonthKey(0);
+  const byApp = {};
+  apps.forEach(r => {
+    if (r.month > todayKey) return; // ignore budgeted future months already in the sheet
+    (byApp[r.name] = byApp[r.name] || []).push(r);
+  });
+  return Object.entries(byApp).map(([name, rows]) => {
+    rows.sort((a, b) => a.month.localeCompare(b.month));
+    const latest = rows[rows.length - 1];
+    if (cycleMonths(latest.cycle) === 0) return null; // one-time item
+    const last3 = rows.slice(-3);
+    const avg = last3.reduce((s, r) => s + r.usd, 0) / last3.length;
+    return { name, dept: latest.dept, m: avg };
+  }).filter(Boolean);
+}
 function monthlyRunRate(apps){
-  return latestActualRowsPerApp(apps).reduce((s,a)=>{ const cm=cycleMonths(a.cycle); return s+(cm>0?a.amt/cm:0); },0);
+  return trailingRunRateByApp(apps).reduce((s,x)=>s+x.m,0);
 }
 
 function renderKPIs(all){
@@ -532,8 +553,7 @@ function renderTop(apps){
 }
 function renderRunRate(apps){
   destroy('runrate');
-  const latest = latestActualRowsPerApp(apps).map(a=>({name:a.name, m: cycleMonths(a.cycle)>0 ? a.amt/cycleMonths(a.cycle) : 0}))
-                  .filter(x=>x.m>0).sort((a,b)=>b.m-a.m);
+  const latest = trailingRunRateByApp(apps).filter(x=>x.m>0).sort((a,b)=>b.m-a.m);
   const top = latest.slice(0,12);
   const rr = latest.reduce((s,x)=>s+x.m,0);
   charts.runrate = new Chart($('#runrateChart'),{
@@ -544,7 +564,7 @@ function renderRunRate(apps){
   });
   $('#runrateNote').innerHTML =
     `Current recurring run-rate: <b style="color:var(--txt)">${fmtUSD(rr)}/mo</b> → <b style="color:var(--txt)">${fmtUSD(rr*12)}/yr</b> across ${latest.length} active subscriptions. ` +
-    `One-time purchases are excluded. Figures are in $ (USD), the sheet's native currency.`;
+    `Each app's rate is its trailing 3-month average (smooths out volatile usage-based costs), annualised. One-time purchases are excluded. Figures are in $ (USD), the sheet's native currency.`;
 }
 
 let sortKey='total', sortDir=-1;
