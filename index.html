@@ -196,7 +196,7 @@ async function syncFromApi(manual){
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
     appRows = (json.rows||[]).map(r => ({
-      kind:'Apps', month:r.month, name:r.name, dept:r.dept||'Unassigned',
+      kind:r.kind||'Apps', month:r.month, name:r.name, dept:r.dept||'Unassigned',
       cat:r.cycle||'Monthly', cycle:r.cycle||'Monthly', cur:r.cur||'USD', amt:Number(r.amt)||0,
       status:'Active', notes:r.poc?`POC: ${r.poc}`:''
     }));

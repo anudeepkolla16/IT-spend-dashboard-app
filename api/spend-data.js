@@ -129,12 +129,15 @@ function parseWorkbook(buffer) {
     const paymentMethod = String(row[payCol] || '').trim();
     const cycle = cycleFromRow(recurringOnetime, frequency);
     const cur = inferCurrency(paymentMethod);
+    // This sheet tracks laptop procurement as a line item alongside app subscriptions
+    // (e.g. row ~41, "Laptops Procurement") rather than in a separate source.
+    const kind = /laptop/i.test(name) ? 'Laptops' : 'Apps';
 
     for (const { idx, month } of monthCols) {
       const raw = row[idx];
       const amt = typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/[^0-9.\-]/g, ''));
       if (!amt || Number.isNaN(amt)) continue;
-      records.push({ name, dept, poc, renewalDate, cycle, cur, month, amt, paymentMethod });
+      records.push({ name, dept, poc, renewalDate, cycle, cur, month, amt, paymentMethod, kind });
     }
   }
   return records;
