@@ -41,15 +41,15 @@
   .card .cap{color:var(--muted);font-size:12px;margin-bottom:12px}
   .chartwrap{position:relative;height:300px}
   .chartwrap.sm{height:260px}
-  table{width:100%;border-collapse:collapse;font-size:12.7px;white-space:nowrap}
-  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
-  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel);cursor:pointer;z-index:2}
-  td.num,th.num{text-align:right}
+  table{width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap}
+  th,td{text-align:left;padding:4px 7px;border-bottom:1px solid var(--line);line-height:1.3}
+  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel);cursor:pointer;z-index:2;padding-top:6px;padding-bottom:6px}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
   th.stickycol,td.stickycol{position:sticky;left:0;background:var(--panel);z-index:1}
   th.stickycol{z-index:3}
   td.total,th.total{border-left:2px solid var(--line);font-weight:650}
   .tblwrap{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
-  .chip{display:inline-block;background:var(--chip);color:var(--muted);border-radius:20px;padding:2px 9px;font-size:11px}
+  .chip{display:inline-block;background:var(--chip);color:var(--muted);border-radius:14px;padding:1px 7px;font-size:10px}
   .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   select,.filters input{background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 9px;font-size:12.5px}
   .hidden{display:none}
@@ -155,6 +155,11 @@ const fmtShort = n => {
   if (abs >= 1e6) return sign + '$' + (abs/1e6).toFixed(2) + 'M';
   if (abs >= 1e3) return sign + '$' + (abs/1e3).toFixed(1) + 'K';
   return sign + '$' + Math.round(abs);
+};
+const fmtCell = n => {
+  n = n||0; if (!n) return '';
+  if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(1).replace(/\.0$/,'') + 'K';
+  return String(Math.round(n));
 };
 const COLORS = ['#6c8cff','#3ddc97','#ffb020','#ff6b6b','#b07cff','#37c2e0','#ff9f68','#8bd450','#e06c9f','#5ad1c2'];
 let charts = {};
@@ -479,7 +484,7 @@ function draw(){
   $('#tbl tbody').innerHTML = pivoted.map(g=>`<tr>
     <td><span class="chip">${g.kind}</span></td><td class="stickycol">${g.name}</td>
     <td>${g.dept}</td><td>${g.poc||'—'}</td><td>${g.cat}</td><td>${g.cur}</td>
-    ${ALL_MONTHS.map(m=>`<td class="num">${g[m]?Math.round(g[m]).toLocaleString('en-US'):''}</td>`).join('')}
+    ${ALL_MONTHS.map(m=>`<td class="num">${fmtCell(g[m])}</td>`).join('')}
     <td class="num total">${fmtUSD(g.total)}</td></tr>`).join('')
     || `<tr><td colspan="${6+ALL_MONTHS.length+1}" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>`;
 
