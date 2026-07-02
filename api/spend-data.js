@@ -52,16 +52,32 @@ async function getGraphToken() {
   return json.access_token;
 }
 
-async function downloadWorkbook(token) {
-  const upn = process.env.TARGET_USER_UPN;
-  const filePath = process.env.TARGET_FILE_PATH || 'Anudeep Excel sheets/Saras Apps & Subscriptions Purchase from Jan 26 .xlsx';
-  if (!upn) throw new Error('Missing TARGET_USER_UPN env var');
-  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
-  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(upn)}/drive/root:/${encodedPath}:/content`;
+async function resolveDriveId(token, upn) {
+  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(upn)}/drive`;
+  console.log('[spend-data] resolving drive for upn:', upn);
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Graph file download failed (${res.status}): ${text.slice(0, 300)}`);
+    throw new Error(`Graph drive lookup failed (${res.status}) for upn "${upn}": ${text.slice(0, 300)}`);
+  }
+  const json = await res.json();
+  console.log('[spend-data] resolved driveId:', json.id);
+  return json.id;
+}
+
+async function downloadWorkbook(token) {
+  const upn = (process.env.TARGET_USER_UPN || '').trim();
+  const filePath = (process.env.TARGET_FILE_PATH || 'Anudeep Excel sheets/Saras Apps & Subscriptions Purchase from Jan 26 .xlsx').trim();
+  if (!upn) throw new Error('Missing TARGET_USER_UPN env var');
+
+  const driveId = await resolveDriveId(token, upn);
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  const url = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root:/${encodedPath}:/content`;
+  console.log('[spend-data] downloading file, path:', filePath);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Graph file download failed (${res.status}) for path "${filePath}": ${text.slice(0, 300)}`);
   }
   return Buffer.from(await res.arrayBuffer());
 }
