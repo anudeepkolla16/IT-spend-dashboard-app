@@ -58,8 +58,7 @@ module.exports = async (req, res) => {
       `session=${session}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
       `oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
     ]);
-    res.writeHead(302, { Location: '/' });
-    res.end();
+    res.redirect(302, '/');
   } catch (err) {
     htmlError(res, 500, (err && err.message) || String(err));
   }

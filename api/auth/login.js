@@ -19,6 +19,5 @@ module.exports = async (req, res) => {
   authorizeUrl.searchParams.set('state', state);
 
   res.setHeader('Set-Cookie', `oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600`);
-  res.writeHead(302, { Location: authorizeUrl.toString() });
-  res.end();
+  res.redirect(302, authorizeUrl.toString());
 };
