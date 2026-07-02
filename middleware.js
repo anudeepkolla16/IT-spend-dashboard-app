@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { next } from '@vercel/functions';
 
 export const config = {
   matcher: '/:path*',
@@ -33,11 +34,11 @@ export default function middleware(request) {
   const url = new URL(request.url);
 
   // Let the sign-in flow itself through unauthenticated (that's the point of it).
-  if (url.pathname.startsWith('/api/auth/')) return;
+  if (url.pathname.startsWith('/api/auth/')) return next();
 
   const secret = process.env.SESSION_SECRET;
   const session = verifySession(request.headers.get('cookie'), secret);
-  if (session) return; // valid session, let the request through
+  if (session) return next(); // valid session, let the request through
 
   // API calls (e.g. the dashboard's own fetch()) get a JSON 401, not an HTML redirect,
   // so the frontend can show a clear error instead of trying to parse a login page as JSON.
