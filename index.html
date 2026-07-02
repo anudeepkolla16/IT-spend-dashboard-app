@@ -69,11 +69,7 @@
   </div>
   <div class="grow"></div>
   <div class="toolbar">
-    <div class="fx" title="Only used to convert manually-added INR laptop entries into USD">INR → USD rate <input id="fx" type="number" step="0.5" value="88" /></div>
     <button class="btn ghost" id="refreshBtn">↻ Refresh now</button>
-    <button class="btn ghost" id="lapTmplBtn">⬇ Laptop Template</button>
-    <button class="btn ghost" id="lapUploadBtn">📂 Add Laptop Spend</button>
-    <input id="lapFile" type="file" accept=".xlsx,.xls,.csv" class="hidden" />
   </div>
 </header>
 
@@ -132,6 +128,7 @@
         <input id="fSearch" placeholder="Search name / POC…" />
         <div class="grow"></div>
         <span class="chip" id="rowCount"></span>
+        <button class="btn ghost" id="exportBtn">⬇ Export</button>
       </div>
       <div class="tblwrap">
         <table id="tbl"><thead></thead><tbody></tbody></table>
@@ -140,7 +137,7 @@
   </div>
 
   <div class="foot">
-    Apps data auto-synced from SharePoint every 5 minutes · amounts shown in $ (USD), the sheet's native currency · Laptop spend added manually until a live source is wired up
+    Data auto-synced from SharePoint every 5 minutes · amounts shown in $ (USD), the sheet's native currency
   </div>
 </main>
 
@@ -164,16 +161,8 @@ const fmtCell = n => {
 const COLORS = ['#6c8cff','#3ddc97','#ffb020','#ff6b6b','#b07cff','#37c2e0','#ff9f68','#8bd450','#e06c9f','#5ad1c2'];
 let charts = {};
 let appRows = [];      // from live API (always USD)
-let laptopRows = [];   // from manual upload (may be INR or USD)
 let lastSyncedAt = null;
 
-function fx(){ return parseFloat($('#fx').value) || 88; }
-// Base display currency is USD (the sheet's native currency). Only manually
-// entered INR rows (e.g. laptop purchases) get converted using the rate above.
-function toUSD(amount, cur){
-  amount = Number(amount)||0;
-  return (String(cur||'USD').toUpperCase().trim()==='INR') ? amount/fx() : amount;
-}
 function monthLabel(ym){
   const p = String(ym).split('-'); if (p.length<2) return ym;
   const names=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -224,55 +213,27 @@ async function syncFromApi(manual){
   }
 }
 $('#refreshBtn').onclick = () => syncFromApi(true);
-$('#fx').oninput = () => { if (appRows.length || laptopRows.length) build(); };
 syncFromApi(false);
 setInterval(() => syncFromApi(false), 5*60*1000);
 
-/* ---------------- laptop template + upload (manual, optional) ---------------- */
-$('#lapTmplBtn').onclick = () => {
-  const laps = [
-    ['Month','Asset / Employee','Model','Vendor','Type','Currency','Amount','Notes'],
-    ['2026-01','Rahul S.','Dell Latitude 5540','Dell','Purchase','INR',72000,'New joiner'],
-    ['2026-01','Priya M.','MacBook Air M3','Apple','Purchase','INR',114000,'Design team'],
-    ['2026-02','Amit K.','Lenovo ThinkPad E14','Lenovo','Purchase','INR',68000,'Replacement'],
-  ];
+/* ---------------- export currently-shown table ---------------- */
+$('#exportBtn').onclick = () => {
+  const rows = window.PIVOTED || [];
+  const header = ['Type','Name','Department','POC','Cycle','Currency', ...ALL_MONTHS.map(monthLabel), 'Total'];
+  const data = rows.map(g => [
+    g.kind, g.name, g.dept, g.poc||'', g.cat, g.cur,
+    ...ALL_MONTHS.map(m => g[m] ? Math.round(g[m]*100)/100 : ''),
+    Math.round(g.total*100)/100
+  ]);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(laps), 'Laptops');
-  XLSX.writeFile(wb, 'Laptop_Spend_Template.xlsx');
-};
-$('#lapUploadBtn').onclick = () => $('#lapFile').click();
-$('#lapFile').onchange = e => {
-  const file = e.target.files[0]; if (!file) return;
-  const r = new FileReader();
-  r.onload = ev => {
-    try{
-      const wb = XLSX.read(ev.target.result, {type:'array', cellDates:true});
-      const sheetName = wb.SheetNames.find(n=>/laptop|hardware|asset|device/i.test(n)) || wb.SheetNames[0];
-      const raw = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {defval:''});
-      laptopRows = raw.map(row => {
-        const col = keys => { for (const k of Object.keys(row)){ const kk=k.toLowerCase().replace(/[^a-z]/g,''); if (keys.some(w=>kk.includes(w))) return row[k]; } return ''; };
-        return {
-          kind:'Laptops',
-          month: String(col(['month','date','period'])||'').trim(),
-          name: col(['asset','employee','user','name','model']) || 'Laptop',
-          dept: col(['department','dept','team']) || 'IT / Hardware',
-          cat: col(['type','category']) || 'Purchase',
-          cycle:'One-time',
-          cur: col(['currency','cur']) || 'INR',
-          amt: Number(col(['amount','cost','price','spend'])) || 0,
-          status:'Active',
-          notes: col(['notes','remark','comment']) || ''
-        };
-      }).filter(x=>x.amt||x.month);
-      build();
-    }catch(err){ alert('Could not read the file: '+err.message); }
-  };
-  r.readAsArrayBuffer(file);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...data]), 'Spend');
+  const stamp = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `Saras_App_Spend_${stamp}.xlsx`);
 };
 
 /* ---------------- build model + render ---------------- */
 function build(){
-  const all = appRows.concat(laptopRows).map(x => ({...x, usd: toUSD(x.amt, x.cur)}));
+  const all = appRows.map(x => ({...x, usd: x.amt}));
   window.MODEL = all;
   renderKPIs(all);
   renderTrend(all);
@@ -293,7 +254,7 @@ function latestRowsPerApp(apps){
   return Object.values(byApp);
 }
 function monthlyRunRate(apps){
-  return latestRowsPerApp(apps).reduce((s,a)=>{ const cm=cycleMonths(a.cycle); return s+(cm>0?toUSD(a.amt,a.cur)/cm:0); },0);
+  return latestRowsPerApp(apps).reduce((s,a)=>{ const cm=cycleMonths(a.cycle); return s+(cm>0?a.amt/cm:0); },0);
 }
 
 function renderKPIs(all){
@@ -422,7 +383,7 @@ function renderTop(apps){
 }
 function renderRunRate(apps){
   destroy('runrate');
-  const latest = latestRowsPerApp(apps).map(a=>({name:a.name, m: cycleMonths(a.cycle)>0 ? toUSD(a.amt,a.cur)/cycleMonths(a.cycle) : 0}))
+  const latest = latestRowsPerApp(apps).map(a=>({name:a.name, m: cycleMonths(a.cycle)>0 ? a.amt/cycleMonths(a.cycle) : 0}))
                   .filter(x=>x.m>0).sort((a,b)=>b.m-a.m);
   const top = latest.slice(0,12);
   const rr = latest.reduce((s,x)=>s+x.m,0);
@@ -490,6 +451,7 @@ function draw(){
 
   const sum = pivoted.reduce((s,g)=>s+g.total,0);
   $('#rowCount').textContent = `${pivoted.length} apps · ${fmtUSD(sum)}`;
+  window.PIVOTED = pivoted;
 }
 </script>
 </body>
