@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Saras — App Spend Dashboard</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1220; --panel:#171a2b; --panel2:#1e2238; --line:#2a2f4a;
+    --txt:#e7e9f3; --muted:#9aa0bd; --accent:#6c8cff; --accent2:#3ddc97;
+    --warn:#ffb020; --danger:#ff6b6b; --chip:#242942;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);color:var(--txt);}
+  header{padding:16px 26px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:linear-gradient(180deg,#141830,#0f1220)}
+  header h1{font-size:20px;margin:0;font-weight:650}
+  header .sub{color:var(--muted);font-size:12px;margin-top:2px;display:flex;align-items:center;gap:6px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--accent2);display:inline-block}
+  .dot.err{background:var(--danger)}
+  .grow{flex:1}
+  .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:9px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  .fx{display:flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-size:12.5px;color:var(--muted)}
+  .fx input{width:64px;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:5px 7px;font-size:13px}
+  main{padding:22px 26px;max-width:1400px;margin:0 auto}
+  .banner{background:rgba(255,107,107,.12);border:1px solid rgba(255,107,107,.4);color:#ffb3b3;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:16px;display:none}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:20px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;position:relative;overflow:hidden}
+  .kpi .lab{color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  .kpi .val{font-size:26px;font-weight:750;margin-top:6px}
+  .kpi .hint{font-size:11.5px;color:var(--muted);margin-top:5px}
+  .kpi .bar{position:absolute;left:0;top:0;height:100%;width:4px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:16px}
+  .card h3{margin:0 0 4px;font-size:14.5px;font-weight:650}
+  .card .cap{color:var(--muted);font-size:12px;margin-bottom:12px}
+  .chartwrap{position:relative;height:300px}
+  .chartwrap.sm{height:260px}
+  table{width:100%;border-collapse:collapse;font-size:12.7px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel);cursor:pointer}
+  td.num,th.num{text-align:right}
+  .tblwrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .chip{display:inline-block;background:var(--chip);color:var(--muted);border-radius:20px;padding:2px 9px;font-size:11px}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  select,.filters input{background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 9px;font-size:12.5px}
+  .hidden{display:none}
+  .foot{color:var(--muted);font-size:11.5px;text-align:center;padding:26px 0 8px}
+  .pill{font-size:11px;padding:2px 8px;border-radius:20px}
+  .pill.up{background:rgba(255,107,107,.15);color:#ff8f8f}
+  .pill.down{background:rgba(61,220,151,.15);color:#7ff0c2}
+  .skeleton{color:var(--muted);text-align:center;padding:60px 0}
+  @media(max-width:900px){.grid,.grid3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>💻 Saras — App Spend Dashboard</h1>
+    <div class="sub"><span class="dot" id="syncDot"></span><span id="syncLabel">Connecting to SharePoint…</span></div>
+  </div>
+  <div class="grow"></div>
+  <div class="toolbar">
+    <div class="fx">USD → INR <input id="fx" type="number" step="0.5" value="88" /></div>
+    <button class="btn ghost" id="refreshBtn">↻ Refresh now</button>
+    <button class="btn ghost" id="lapTmplBtn">⬇ Laptop Template</button>
+    <button class="btn ghost" id="lapUploadBtn">📂 Add Laptop Spend</button>
+    <input id="lapFile" type="file" accept=".xlsx,.xls,.csv" class="hidden" />
+  </div>
+</header>
+
+<main>
+  <div class="banner" id="banner"></div>
+  <div id="loading" class="skeleton">Loading spend data from SharePoint…</div>
+
+  <div id="dash" class="hidden">
+    <div class="kpis" id="kpis"></div>
+
+    <div class="grid3">
+      <div class="card">
+        <h3>Monthly Spend Trend &amp; Forecast</h3>
+        <div class="cap">Actual monthly spend with a 6-month trend forecast (dashed)</div>
+        <div class="chartwrap"><canvas id="trendChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Apps vs Laptops</h3>
+        <div class="cap">Total spend split by category</div>
+        <div class="chartwrap sm"><canvas id="splitChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Spend by Department</h3>
+        <div class="cap">Which teams drive the cost</div>
+        <div class="chartwrap"><canvas id="deptChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Spend by Billing Cycle</h3>
+        <div class="cap">Monthly / Quarterly / Annual / One-time mix</div>
+        <div class="chartwrap"><canvas id="catChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Top Apps by Spend</h3>
+      <div class="cap">Highest total spend per application (all-time, in ₹)</div>
+      <div class="chartwrap"><canvas id="topChart"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h3>🔮 Annual Run-Rate Projection</h3>
+      <div class="cap">Recurring monthly cost of active subscriptions, annualised (One-time items excluded)</div>
+      <div class="chartwrap sm"><canvas id="runrateChart"></canvas></div>
+      <div id="runrateNote" class="cap" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h3>Line-Item Detail</h3>
+      <div class="filters">
+        <select id="fType"><option value="">All records</option><option>Apps</option><option>Laptops</option></select>
+        <select id="fDept"></select>
+        <select id="fMonth"></select>
+        <input id="fSearch" placeholder="Search name / POC…" />
+        <div class="grow"></div>
+        <span class="chip" id="rowCount"></span>
+      </div>
+      <div class="tblwrap">
+        <table id="tbl"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    Apps data auto-synced from SharePoint every 5 minutes · normalized to ₹ (INR) · Laptop spend added manually until a live source is wired up
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmtINR = n => '₹' + Math.round(n||0).toLocaleString('en-IN');
+const fmtShort = n => {
+  n = n||0;
+  if (Math.abs(n) >= 1e7) return '₹' + (n/1e7).toFixed(2) + ' Cr';
+  if (Math.abs(n) >= 1e5) return '₹' + (n/1e5).toFixed(2) + ' L';
+  if (Math.abs(n) >= 1e3) return '₹' + (n/1e3).toFixed(1) + 'K';
+  return '₹' + Math.round(n);
+};
+const COLORS = ['#6c8cff','#3ddc97','#ffb020','#ff6b6b','#b07cff','#37c2e0','#ff9f68','#8bd450','#e06c9f','#5ad1c2'];
+let charts = {};
+let appRows = [];      // from live API
+let laptopRows = [];   // from manual upload
+let lastSyncedAt = null;
+
+function fx(){ return parseFloat($('#fx').value) || 88; }
+function toINR(amount, cur){
+  amount = Number(amount)||0;
+  return (String(cur||'INR').toUpperCase().trim()==='USD') ? amount*fx() : amount;
+}
+function monthLabel(ym){
+  const p = String(ym).split('-'); if (p.length<2) return ym;
+  const names=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${names[+p[1]]||p[1]} ${p[0]}`;
+}
+function cycleMonths(c){
+  c = String(c||'Monthly').toLowerCase();
+  const nYear = c.match(/(\d+)\s*year/);
+  if (nYear) return parseInt(nYear[1],10)*12;
+  if (c.includes('annual')) return 12;
+  if (c.includes('quarter')) return 3;
+  if (c.includes('half')) return 6;
+  if (c.includes('week')) return 0.23;
+  if (c.includes('one')) return 0;
+  return 1;
+}
+
+/* ---------------- live sync ---------------- */
+async function syncFromApi(manual){
+  try{
+    $('#syncLabel').textContent = manual ? 'Refreshing…' : 'Syncing…';
+    const res = await fetch('/api/spend-data', {cache:'no-store'});
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    appRows = (json.rows||[]).map(r => ({
+      kind:'Apps', month:r.month, name:r.name, dept:r.dept||'Unassigned',
+      cat:r.cycle||'Monthly', cycle:r.cycle||'Monthly', cur:r.cur||'INR', amt:Number(r.amt)||0,
+      status:'Active', notes:r.poc?`POC: ${r.poc}`:''
+    }));
+    lastSyncedAt = json.syncedAt ? new Date(json.syncedAt) : new Date();
+    $('#syncDot').classList.remove('err');
+    $('#syncLabel').textContent = `Synced from SharePoint · ${lastSyncedAt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})} (${appRows.length} records)`;
+    $('#banner').style.display='none';
+    $('#loading').classList.add('hidden');
+    $('#dash').classList.remove('hidden');
+    build();
+  }catch(err){
+    $('#syncDot').classList.add('err');
+    $('#syncLabel').textContent = 'Sync failed — showing last loaded data';
+    $('#banner').textContent = `Couldn't sync from SharePoint: ${err.message}. ${appRows.length?'Showing previously loaded data.':'No data loaded yet.'}`;
+    $('#banner').style.display='block';
+    if (appRows.length){ $('#loading').classList.add('hidden'); $('#dash').classList.remove('hidden'); build(); }
+  }
+}
+$('#refreshBtn').onclick = () => syncFromApi(true);
+$('#fx').oninput = () => { if (appRows.length || laptopRows.length) build(); };
+syncFromApi(false);
+setInterval(() => syncFromApi(false), 5*60*1000);
+
+/* ---------------- laptop template + upload (manual, optional) ---------------- */
+$('#lapTmplBtn').onclick = () => {
+  const laps = [
+    ['Month','Asset / Employee','Model','Vendor','Type','Currency','Amount','Notes'],
+    ['2026-01','Rahul S.','Dell Latitude 5540','Dell','Purchase','INR',72000,'New joiner'],
+    ['2026-01','Priya M.','MacBook Air M3','Apple','Purchase','INR',114000,'Design team'],
+    ['2026-02','Amit K.','Lenovo ThinkPad E14','Lenovo','Purchase','INR',68000,'Replacement'],
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(laps), 'Laptops');
+  XLSX.writeFile(wb, 'Laptop_Spend_Template.xlsx');
+};
+$('#lapUploadBtn').onclick = () => $('#lapFile').click();
+$('#lapFile').onchange = e => {
+  const file = e.target.files[0]; if (!file) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    try{
+      const wb = XLSX.read(ev.target.result, {type:'array', cellDates:true});
+      const sheetName = wb.SheetNames.find(n=>/laptop|hardware|asset|device/i.test(n)) || wb.SheetNames[0];
+      const raw = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {defval:''});
+      laptopRows = raw.map(row => {
+        const col = keys => { for (const k of Object.keys(row)){ const kk=k.toLowerCase().replace(/[^a-z]/g,''); if (keys.some(w=>kk.includes(w))) return row[k]; } return ''; };
+        return {
+          kind:'Laptops',
+          month: String(col(['month','date','period'])||'').trim(),
+          name: col(['asset','employee','user','name','model']) || 'Laptop',
+          dept: col(['department','dept','team']) || 'IT / Hardware',
+          cat: col(['type','category']) || 'Purchase',
+          cycle:'One-time',
+          cur: col(['currency','cur']) || 'INR',
+          amt: Number(col(['amount','cost','price','spend'])) || 0,
+          status:'Active',
+          notes: col(['notes','remark','comment']) || ''
+        };
+      }).filter(x=>x.amt||x.month);
+      build();
+    }catch(err){ alert('Could not read the file: '+err.message); }
+  };
+  r.readAsArrayBuffer(file);
+};
+
+/* ---------------- build model + render ---------------- */
+function build(){
+  const all = appRows.concat(laptopRows).map(x => ({...x, inr: toINR(x.amt, x.cur)}));
+  window.MODEL = all;
+  renderKPIs(all);
+  renderTrend(all);
+  renderSplit(all);
+  renderDept(all);
+  renderCat(all);
+  renderTop(all.filter(r=>r.kind==='Apps'));
+  renderRunRate(all.filter(r=>r.kind==='Apps'));
+  setupTable(all);
+}
+
+function monthTotals(rows){
+  const m = {}; rows.forEach(r => { if(!r.month) return; m[r.month]=(m[r.month]||0)+r.inr; }); return m;
+}
+function latestRowsPerApp(apps){
+  const byApp = {};
+  apps.forEach(a => { if (!byApp[a.name] || a.month > byApp[a.name].month) byApp[a.name]=a; });
+  return Object.values(byApp);
+}
+function monthlyRunRate(apps){
+  return latestRowsPerApp(apps).reduce((s,a)=>{ const cm=cycleMonths(a.cycle); return s+(cm>0?toINR(a.amt,a.cur)/cm:0); },0);
+}
+
+function renderKPIs(all){
+  const apps = all.filter(r=>r.kind==='Apps'), laps = all.filter(r=>r.kind==='Laptops');
+  const totals = monthTotals(all);
+  const months = Object.keys(totals).sort();
+  const last = months[months.length-1], prev = months[months.length-2];
+  const totalAll = all.reduce((s,r)=>s+r.inr,0);
+  const thisMonth = last ? totals[last] : 0;
+  const lastMonth = prev ? totals[prev] : 0;
+  const mom = lastMonth ? ((thisMonth-lastMonth)/lastMonth*100) : 0;
+  const rr = monthlyRunRate(apps);
+  const annual = rr*12;
+  const activeApps = latestRowsPerApp(apps).length;
+  const lapTotal = laps.reduce((s,r)=>s+r.inr,0);
+
+  const cards = [
+    {lab:'Total Spend (all-time)', val:fmtShort(totalAll), hint:`${months.length} month(s) of data`, c:'#6c8cff'},
+    {lab:`Spend · ${last?monthLabel(last):'—'}`, val:fmtShort(thisMonth),
+       hint: prev? `<span class="pill ${mom>=0?'up':'down'}">${mom>=0?'▲':'▼'} ${Math.abs(mom).toFixed(0)}% vs prev</span>`:'latest month', c:'#ffb020'},
+    {lab:'Monthly Run-Rate', val:fmtShort(rr), hint:`${activeApps} active subscriptions`, c:'#3ddc97'},
+    {lab:'Projected Annual Run-Rate', val:fmtShort(annual), hint:'recurring apps × 12', c:'#b07cff'},
+    {lab:'Laptop / Hardware Spend', val:fmtShort(lapTotal), hint:`${laps.length} manual record(s)`, c:'#ff6b6b'},
+  ];
+  $('#kpis').innerHTML = cards.map(k=>`
+    <div class="kpi"><div class="bar" style="background:${k.c}"></div>
+      <div class="lab">${k.lab}</div><div class="val">${k.val}</div><div class="hint">${k.hint}</div></div>`).join('');
+}
+
+function destroy(id){ if(charts[id]){charts[id].destroy(); delete charts[id];} }
+Chart.defaults.color = '#9aa0bd';
+Chart.defaults.borderColor = 'rgba(255,255,255,.05)';
+Chart.defaults.font.family = "'Segoe UI',system-ui,Arial";
+
+function linreg(ys){
+  const n=ys.length; if(n<2) return null;
+  let sx=0,sy=0,sxx=0,sxy=0;
+  ys.forEach((y,i)=>{sx+=i;sy+=y;sxx+=i*i;sxy+=i*y;});
+  const b=(n*sxy-sx*sy)/(n*sxx-sx*sx||1); const a=(sy-b*sx)/n;
+  return {a,b};
+}
+
+function renderTrend(all){
+  destroy('trend');
+  const appsM = monthTotals(all.filter(r=>r.kind==='Apps'));
+  const lapsM = monthTotals(all.filter(r=>r.kind==='Laptops'));
+  const months = [...new Set(all.filter(r=>r.month).map(r=>r.month))].sort();
+  const totalSeries = months.map(m=>(appsM[m]||0)+(lapsM[m]||0));
+  const reg = linreg(totalSeries);
+  const fMonths=[], fVals=[];
+  if (reg && months.length>=2){
+    let [y,mo] = months[months.length-1].split('-').map(Number);
+    for (let i=1;i<=6;i++){
+      mo++; if(mo>12){mo=1;y++;}
+      fMonths.push(`${y}-${String(mo).padStart(2,'0')}`);
+      fVals.push(Math.max(0, reg.a + reg.b*(months.length-1+i)));
+    }
+  }
+  const labels = months.concat(fMonths).map(monthLabel);
+  const forecast = months.map(()=>null);
+  if(fVals.length){ forecast[months.length-1]=totalSeries[totalSeries.length-1]; forecast.push(...fVals); }
+
+  charts.trend = new Chart($('#trendChart'),{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'Apps', data:months.map(m=>appsM[m]||0).concat(fMonths.map(()=>null)), borderColor:'#6c8cff', backgroundColor:'rgba(108,140,255,.12)', fill:true, tension:.3, pointRadius:3},
+      {label:'Laptops', data:months.map(m=>lapsM[m]||0).concat(fMonths.map(()=>null)), borderColor:'#3ddc97', backgroundColor:'rgba(61,220,151,.10)', fill:true, tension:.3, pointRadius:3},
+      {label:'Forecast', data:forecast, borderColor:'#ffb020', borderDash:[6,5], borderWidth:2, pointRadius:3, tension:.3}
+    ]},
+    options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{position:'bottom',labels:{boxWidth:12,padding:14}},
+        tooltip:{callbacks:{label:c=>c.dataset.label+': '+(c.parsed.y==null?'—':fmtINR(c.parsed.y))}}},
+      scales:{y:{ticks:{callback:v=>fmtShort(v)},grid:{color:'rgba(255,255,255,.04)'}},x:{grid:{display:false}}}}
+  });
+}
+
+function renderSplit(all){
+  destroy('split');
+  const a = all.filter(r=>r.kind==='Apps').reduce((s,r)=>s+r.inr,0);
+  const l = all.filter(r=>r.kind==='Laptops').reduce((s,r)=>s+r.inr,0);
+  charts.split = new Chart($('#splitChart'),{
+    type:'doughnut',
+    data:{labels:['Apps / Software','Laptops / Hardware'],datasets:[{data:[a,l],backgroundColor:['#6c8cff','#3ddc97'],borderWidth:0}]},
+    options:{maintainAspectRatio:false,cutout:'62%',
+      plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:c=>c.label+': '+fmtINR(c.parsed)+' ('+(c.parsed/(a+l||1)*100).toFixed(0)+'%)'}}}}
+  });
+}
+
+function groupSum(rows, key){
+  const g={}; rows.forEach(r=>{const k=r[key]||'—'; g[k]=(g[k]||0)+r.inr;});
+  return Object.entries(g).sort((a,b)=>b[1]-a[1]);
+}
+function renderDept(all){
+  destroy('dept');
+  const g = groupSum(all,'dept');
+  charts.dept = new Chart($('#deptChart'),{
+    type:'bar',
+    data:{labels:g.map(x=>x[0]),datasets:[{data:g.map(x=>x[1]),backgroundColor:g.map((_,i)=>COLORS[i%COLORS.length]),borderRadius:6}]},
+    options:{maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtINR(c.parsed.x)}}},
+      scales:{x:{ticks:{callback:v=>fmtShort(v)},grid:{color:'rgba(255,255,255,.04)'}},y:{grid:{display:false}}}}
+  });
+}
+function renderCat(all){
+  destroy('cat');
+  const g = groupSum(all,'cat').slice(0,10);
+  charts.cat = new Chart($('#catChart'),{
+    type:'doughnut',
+    data:{labels:g.map(x=>x[0]),datasets:[{data:g.map(x=>x[1]),backgroundColor:g.map((_,i)=>COLORS[i%COLORS.length]),borderWidth:0}]},
+    options:{maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'right',labels:{boxWidth:12,padding:8,font:{size:11}}},
+      tooltip:{callbacks:{label:c=>c.label+': '+fmtINR(c.parsed)}}}}
+  });
+}
+function renderTop(apps){
+  destroy('top');
+  const g={}; apps.forEach(r=>{g[r.name]=(g[r.name]||0)+r.inr;});
+  const top = Object.entries(g).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  charts.top = new Chart($('#topChart'),{
+    type:'bar',
+    data:{labels:top.map(x=>x[0]),datasets:[{data:top.map(x=>x[1]),backgroundColor:'#6c8cff',borderRadius:6}]},
+    options:{maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtINR(c.parsed.x)}}},
+      scales:{x:{ticks:{callback:v=>fmtShort(v)},grid:{color:'rgba(255,255,255,.04)'}},y:{grid:{display:false}}}}
+  });
+}
+function renderRunRate(apps){
+  destroy('runrate');
+  const latest = latestRowsPerApp(apps).map(a=>({name:a.name, m: cycleMonths(a.cycle)>0 ? toINR(a.amt,a.cur)/cycleMonths(a.cycle) : 0}))
+                  .filter(x=>x.m>0).sort((a,b)=>b.m-a.m);
+  const top = latest.slice(0,12);
+  const rr = latest.reduce((s,x)=>s+x.m,0);
+  charts.runrate = new Chart($('#runrateChart'),{
+    type:'bar',
+    data:{labels:top.map(x=>x.name),datasets:[{label:'Annual cost',data:top.map(x=>x.m*12),backgroundColor:'#b07cff',borderRadius:6}]},
+    options:{maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtINR(c.parsed.y)+' /yr'}}},
+      scales:{y:{ticks:{callback:v=>fmtShort(v)},grid:{color:'rgba(255,255,255,.04)'}},x:{grid:{display:false},ticks:{maxRotation:60,minRotation:40}}}}
+  });
+  $('#runrateNote').innerHTML =
+    `Current recurring run-rate: <b style="color:var(--txt)">${fmtINR(rr)}/mo</b> → <b style="color:var(--txt)">${fmtINR(rr*12)}/yr</b> across ${latest.length} active subscriptions. ` +
+    `One-time purchases are excluded. Adjust the USD→INR rate above to re-price instantly.`;
+}
+
+let sortKey='month', sortDir=-1;
+function setupTable(all){
+  const depts=[...new Set(all.map(r=>r.dept))].sort();
+  const months=[...new Set(all.filter(r=>r.month).map(r=>r.month))].sort().reverse();
+  $('#fDept').innerHTML = '<option value="">All departments</option>'+depts.map(d=>`<option>${d}</option>`).join('');
+  $('#fMonth').innerHTML = '<option value="">All months</option>'+months.map(m=>`<option value="${m}">${monthLabel(m)}</option>`).join('');
+  ['#fType','#fDept','#fMonth'].forEach(s=>$(s).onchange=draw);
+  $('#fSearch').oninput = draw;
+  const cols=[['month','Month'],['kind','Type'],['name','Name'],['dept','Department'],['cat','Cycle'],['cur','Cur'],['amt','Amount'],['inr','₹ (INR)'],['notes','Notes']];
+  $('#tbl thead').innerHTML = '<tr>'+cols.map(c=>`<th class="${['amt','inr'].includes(c[0])?'num':''}" data-k="${c[0]}">${c[1]}</th>`).join('')+'</tr>';
+  $('#tbl thead').querySelectorAll('th').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k; sortDir = (sortKey===k)? -sortDir : 1; sortKey=k; draw();
+  });
+  draw();
+}
+function draw(){
+  const all=window.MODEL||[];
+  const t=$('#fType').value, d=$('#fDept').value, m=$('#fMonth').value, q=$('#fSearch').value.toLowerCase();
+  let rows=all.filter(r=>(!t||r.kind===t)&&(!d||r.dept===d)&&(!m||r.month===m)&&
+    (!q||(r.name+r.notes+r.cat).toLowerCase().includes(q)));
+  rows.sort((a,b)=>{let x=a[sortKey],y=b[sortKey]; if(typeof x==='number')return (x-y)*sortDir; return String(x).localeCompare(String(y))*sortDir;});
+  $('#tbl tbody').innerHTML = rows.map(r=>`<tr>
+    <td>${r.month||'—'}</td><td><span class="chip">${r.kind}</span></td><td>${r.name}</td>
+    <td>${r.dept}</td><td>${r.cat}</td><td>${r.cur}</td>
+    <td class="num">${(r.amt||0).toLocaleString('en-IN')}</td><td class="num">${fmtINR(r.inr)}</td><td>${r.notes||''}</td></tr>`).join('')
+    || '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>';
+  const sum=rows.reduce((s,r)=>s+r.inr,0);
+  $('#rowCount').textContent = `${rows.length} rows · ${fmtINR(sum)}`;
+}
+</script>
+</body>
+</html>
