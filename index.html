@@ -201,7 +201,7 @@ async function syncFromApi(manual){
     appRows = (json.rows||[]).map(r => ({
       kind:r.kind||'Apps', month:r.month, name:r.name, dept:r.dept||'Unassigned',
       cat:r.cycle||'Monthly', cycle:r.cycle||'Monthly', cur:r.cur||'USD', amt:Number(r.amt)||0,
-      status:'Active', notes:r.poc?`POC: ${r.poc}`:''
+      status:'Active', poc:r.poc||''
     }));
     lastSyncedAt = json.syncedAt ? new Date(json.syncedAt) : new Date();
     $('#syncDot').classList.remove('err');
@@ -441,7 +441,7 @@ function setupTable(all){
   ['#fType','#fDept'].forEach(s=>$(s).onchange=draw);
   $('#fSearch').oninput = draw;
 
-  const cols=[['kind','Type'],['name','Name'],['dept','Department'],['cat','Cycle'],['cur','Cur']]
+  const cols=[['kind','Type'],['name','Name'],['dept','Department'],['poc','POC'],['cat','Cycle'],['cur','Cur']]
     .concat(ALL_MONTHS.map(m=>[m, monthLabel(m)]))
     .concat([['total','Total']]);
   $('#tbl thead').innerHTML = '<tr>'+cols.map(c=>{
@@ -450,7 +450,7 @@ function setupTable(all){
     return `<th class="${cls}" data-k="${c[0]}">${c[1]}</th>`;
   }).join('')+'</tr>';
   $('#tbl thead').querySelectorAll('th').forEach(th=>th.onclick=()=>{
-    const k=th.dataset.k; sortDir = (sortKey===k)? -sortDir : (k==='name'||k==='dept'||k==='cat'||k==='cur'||k==='kind') ? 1 : -1; sortKey=k; draw();
+    const k=th.dataset.k; sortDir = (sortKey===k)? -sortDir : (k==='name'||k==='dept'||k==='cat'||k==='cur'||k==='kind'||k==='poc') ? 1 : -1; sortKey=k; draw();
   });
   draw();
 }
@@ -458,16 +458,16 @@ function draw(){
   const all=window.MODEL||[];
   const t=$('#fType').value, d=$('#fDept').value, q=$('#fSearch').value.toLowerCase();
   let rows=all.filter(r=>(!t||r.kind===t)&&(!d||r.dept===d)&&
-    (!q||(r.name+r.notes+r.cat).toLowerCase().includes(q)));
+    (!q||(r.name+(r.poc||'')+r.cat).toLowerCase().includes(q)));
 
   // pivot: one row per app name, spend broken out by month
   const groups = {};
   rows.forEach(r=>{
-    if (!groups[r.name]) groups[r.name] = {name:r.name, kind:r.kind, dept:r.dept, cat:r.cat, cur:r.cur, notes:r.notes, total:0};
+    if (!groups[r.name]) groups[r.name] = {name:r.name, kind:r.kind, dept:r.dept, cat:r.cat, cur:r.cur, poc:r.poc, total:0};
     const g = groups[r.name];
     if (r.month) g[r.month] = (g[r.month]||0) + r.usd;
     g.total += r.usd;
-    if (r.month >= (g._latestMonth||'')) { g._latestMonth = r.month; g.kind=r.kind; g.dept=r.dept; g.cat=r.cat; g.cur=r.cur; g.notes=r.notes; }
+    if (r.month >= (g._latestMonth||'')) { g._latestMonth = r.month; g.kind=r.kind; g.dept=r.dept; g.cat=r.cat; g.cur=r.cur; g.poc=r.poc; }
   });
   let pivoted = Object.values(groups);
   pivoted.sort((a,b)=>{
@@ -478,10 +478,10 @@ function draw(){
 
   $('#tbl tbody').innerHTML = pivoted.map(g=>`<tr>
     <td><span class="chip">${g.kind}</span></td><td class="stickycol">${g.name}</td>
-    <td>${g.dept}</td><td>${g.cat}</td><td>${g.cur}</td>
+    <td>${g.dept}</td><td>${g.poc||'—'}</td><td>${g.cat}</td><td>${g.cur}</td>
     ${ALL_MONTHS.map(m=>`<td class="num">${g[m]?Math.round(g[m]).toLocaleString('en-US'):''}</td>`).join('')}
     <td class="num total">${fmtUSD(g.total)}</td></tr>`).join('')
-    || `<tr><td colspan="${5+ALL_MONTHS.length+1}" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>`;
+    || `<tr><td colspan="${6+ALL_MONTHS.length+1}" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>`;
 
   const sum = pivoted.reduce((s,g)=>s+g.total,0);
   $('#rowCount').textContent = `${pivoted.length} apps · ${fmtUSD(sum)}`;
