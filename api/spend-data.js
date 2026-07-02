@@ -24,8 +24,10 @@ function cycleFromRow(recurringOnetime, frequency) {
   return 'Monthly';
 }
 
-function inferCurrency(paymentMethod) {
-  return /\bUS\b/i.test(String(paymentMethod || '')) ? 'USD' : 'INR';
+function inferCurrency() {
+  // Confirmed with the sheet owner: every amount in this workbook is in USD,
+  // regardless of which card/bank (US or Indian) was used to pay it.
+  return 'USD';
 }
 
 async function getGraphToken() {
