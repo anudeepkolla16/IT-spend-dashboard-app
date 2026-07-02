@@ -437,8 +437,8 @@ function setupTable(all){
   $('#fMonth').innerHTML = '<option value="">All months</option>'+months.map(m=>`<option value="${m}">${monthLabel(m)}</option>`).join('');
   ['#fType','#fDept','#fMonth'].forEach(s=>$(s).onchange=draw);
   $('#fSearch').oninput = draw;
-  const cols=[['month','Month'],['kind','Type'],['name','Name'],['dept','Department'],['cat','Cycle'],['cur','Cur'],['amt','Amount'],['usd','$ (USD)'],['notes','Notes']];
-  $('#tbl thead').innerHTML = '<tr>'+cols.map(c=>`<th class="${['amt','usd'].includes(c[0])?'num':''}" data-k="${c[0]}">${c[1]}</th>`).join('')+'</tr>';
+  const cols=[['month','Month'],['kind','Type'],['name','Name'],['dept','Department'],['cat','Cycle'],['cur','Cur'],['usd','$ (USD)'],['notes','Notes']];
+  $('#tbl thead').innerHTML = '<tr>'+cols.map(c=>`<th class="${['usd'].includes(c[0])?'num':''}" data-k="${c[0]}">${c[1]}</th>`).join('')+'</tr>';
   $('#tbl thead').querySelectorAll('th').forEach(th=>th.onclick=()=>{
     const k=th.dataset.k; sortDir = (sortKey===k)? -sortDir : 1; sortKey=k; draw();
   });
@@ -453,8 +453,8 @@ function draw(){
   $('#tbl tbody').innerHTML = rows.map(r=>`<tr>
     <td>${r.month||'—'}</td><td><span class="chip">${r.kind}</span></td><td>${r.name}</td>
     <td>${r.dept}</td><td>${r.cat}</td><td>${r.cur}</td>
-    <td class="num">${(r.amt||0).toLocaleString('en-US')}</td><td class="num">${fmtUSD(r.usd)}</td><td>${r.notes||''}</td></tr>`).join('')
-    || '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>';
+    <td class="num">${fmtUSD(r.usd)}</td><td>${r.notes||''}</td></tr>`).join('')
+    || '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>';
   const sum=rows.reduce((s,r)=>s+r.usd,0);
   $('#rowCount').textContent = `${rows.length} rows · ${fmtUSD(sum)}`;
 }
