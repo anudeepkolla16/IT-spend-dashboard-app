@@ -111,6 +111,7 @@
   </div>
   <div class="grow"></div>
   <div class="toolbar">
+    <span class="cap" id="whoami"></span>
     <button class="btn ghost" id="refreshBtn">↻ Refresh now</button>
   </div>
 </header>
@@ -291,11 +292,22 @@ function renderRenewals(all){
   el.querySelectorAll('.renewal-row').forEach(row=>row.onclick=()=>openModal(decodeURIComponent(row.dataset.name)));
 }
 
+/* ---------------- who's signed in ---------------- */
+(async () => {
+  try{
+    const me = await (await fetch('/api/auth/me', {cache:'no-store'})).json();
+    $('#whoami').innerHTML = me.authenticated
+      ? `${me.name} · <a href="/api/auth/logout" style="color:var(--muted)">Logout</a>`
+      : '';
+  }catch{}
+})();
+
 /* ---------------- live sync ---------------- */
 async function syncFromApi(manual){
   try{
     $('#syncLabel').textContent = manual ? 'Refreshing…' : 'Syncing…';
     const res = await fetch(`/api/spend-data${manual ? '?refresh=1' : ''}`, {cache:'no-store'});
+    if (res.status === 401){ window.location.href = '/api/auth/login'; return; }
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
     appRows = (json.rows||[]).map(r => ({
