@@ -41,11 +41,14 @@
   .card .cap{color:var(--muted);font-size:12px;margin-bottom:12px}
   .chartwrap{position:relative;height:300px}
   .chartwrap.sm{height:260px}
-  table{width:100%;border-collapse:collapse;font-size:12.7px}
+  table{width:100%;border-collapse:collapse;font-size:12.7px;white-space:nowrap}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
-  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel);cursor:pointer}
+  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel);cursor:pointer;z-index:2}
   td.num,th.num{text-align:right}
-  .tblwrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  th.stickycol,td.stickycol{position:sticky;left:0;background:var(--panel);z-index:1}
+  th.stickycol{z-index:3}
+  td.total,th.total{border-left:2px solid var(--line);font-weight:650}
+  .tblwrap{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
   .chip{display:inline-block;background:var(--chip);color:var(--muted);border-radius:20px;padding:2px 9px;font-size:11px}
   .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   select,.filters input{background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 9px;font-size:12.5px}
@@ -122,10 +125,10 @@
 
     <div class="card">
       <h3>Line-Item Detail</h3>
+      <div class="cap">One row per app, spend broken out by month · all figures in $ (USD)</div>
       <div class="filters">
         <select id="fType"><option value="">All records</option><option>Apps</option><option>Laptops</option></select>
         <select id="fDept"></select>
-        <select id="fMonth"></select>
         <input id="fSearch" placeholder="Search name / POC…" />
         <div class="grow"></div>
         <span class="chip" id="rowCount"></span>
@@ -429,34 +432,59 @@ function renderRunRate(apps){
     `One-time purchases are excluded. Figures are in $ (USD), the sheet's native currency.`;
 }
 
-let sortKey='month', sortDir=-1;
+let sortKey='total', sortDir=-1;
+let ALL_MONTHS = [];
 function setupTable(all){
   const depts=[...new Set(all.map(r=>r.dept))].sort();
-  const months=[...new Set(all.filter(r=>r.month).map(r=>r.month))].sort().reverse();
+  ALL_MONTHS = [...new Set(all.filter(r=>r.month).map(r=>r.month))].sort();
   $('#fDept').innerHTML = '<option value="">All departments</option>'+depts.map(d=>`<option>${d}</option>`).join('');
-  $('#fMonth').innerHTML = '<option value="">All months</option>'+months.map(m=>`<option value="${m}">${monthLabel(m)}</option>`).join('');
-  ['#fType','#fDept','#fMonth'].forEach(s=>$(s).onchange=draw);
+  ['#fType','#fDept'].forEach(s=>$(s).onchange=draw);
   $('#fSearch').oninput = draw;
-  const cols=[['month','Month'],['kind','Type'],['name','Name'],['dept','Department'],['cat','Cycle'],['cur','Cur'],['usd','$ (USD)'],['notes','Notes']];
-  $('#tbl thead').innerHTML = '<tr>'+cols.map(c=>`<th class="${['usd'].includes(c[0])?'num':''}" data-k="${c[0]}">${c[1]}</th>`).join('')+'</tr>';
+
+  const cols=[['kind','Type'],['name','Name'],['dept','Department'],['cat','Cycle'],['cur','Cur']]
+    .concat(ALL_MONTHS.map(m=>[m, monthLabel(m)]))
+    .concat([['total','Total']]);
+  $('#tbl thead').innerHTML = '<tr>'+cols.map(c=>{
+    const isNum = ALL_MONTHS.includes(c[0]) || c[0]==='total';
+    const cls = [isNum?'num':'', c[0]==='name'?'stickycol':'', c[0]==='total'?'total':''].filter(Boolean).join(' ');
+    return `<th class="${cls}" data-k="${c[0]}">${c[1]}</th>`;
+  }).join('')+'</tr>';
   $('#tbl thead').querySelectorAll('th').forEach(th=>th.onclick=()=>{
-    const k=th.dataset.k; sortDir = (sortKey===k)? -sortDir : 1; sortKey=k; draw();
+    const k=th.dataset.k; sortDir = (sortKey===k)? -sortDir : (k==='name'||k==='dept'||k==='cat'||k==='cur'||k==='kind') ? 1 : -1; sortKey=k; draw();
   });
   draw();
 }
 function draw(){
   const all=window.MODEL||[];
-  const t=$('#fType').value, d=$('#fDept').value, m=$('#fMonth').value, q=$('#fSearch').value.toLowerCase();
-  let rows=all.filter(r=>(!t||r.kind===t)&&(!d||r.dept===d)&&(!m||r.month===m)&&
+  const t=$('#fType').value, d=$('#fDept').value, q=$('#fSearch').value.toLowerCase();
+  let rows=all.filter(r=>(!t||r.kind===t)&&(!d||r.dept===d)&&
     (!q||(r.name+r.notes+r.cat).toLowerCase().includes(q)));
-  rows.sort((a,b)=>{let x=a[sortKey],y=b[sortKey]; if(typeof x==='number')return (x-y)*sortDir; return String(x).localeCompare(String(y))*sortDir;});
-  $('#tbl tbody').innerHTML = rows.map(r=>`<tr>
-    <td>${r.month||'—'}</td><td><span class="chip">${r.kind}</span></td><td>${r.name}</td>
-    <td>${r.dept}</td><td>${r.cat}</td><td>${r.cur}</td>
-    <td class="num">${fmtUSD(r.usd)}</td><td>${r.notes||''}</td></tr>`).join('')
-    || '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>';
-  const sum=rows.reduce((s,r)=>s+r.usd,0);
-  $('#rowCount').textContent = `${rows.length} rows · ${fmtUSD(sum)}`;
+
+  // pivot: one row per app name, spend broken out by month
+  const groups = {};
+  rows.forEach(r=>{
+    if (!groups[r.name]) groups[r.name] = {name:r.name, kind:r.kind, dept:r.dept, cat:r.cat, cur:r.cur, notes:r.notes, total:0};
+    const g = groups[r.name];
+    if (r.month) g[r.month] = (g[r.month]||0) + r.usd;
+    g.total += r.usd;
+    if (r.month >= (g._latestMonth||'')) { g._latestMonth = r.month; g.kind=r.kind; g.dept=r.dept; g.cat=r.cat; g.cur=r.cur; g.notes=r.notes; }
+  });
+  let pivoted = Object.values(groups);
+  pivoted.sort((a,b)=>{
+    let x=a[sortKey], y=b[sortKey];
+    if (typeof x==='number' || typeof y==='number') return ((x||0)-(y||0))*sortDir;
+    return String(x||'').localeCompare(String(y||''))*sortDir;
+  });
+
+  $('#tbl tbody').innerHTML = pivoted.map(g=>`<tr>
+    <td><span class="chip">${g.kind}</span></td><td class="stickycol">${g.name}</td>
+    <td>${g.dept}</td><td>${g.cat}</td><td>${g.cur}</td>
+    ${ALL_MONTHS.map(m=>`<td class="num">${g[m]?Math.round(g[m]).toLocaleString('en-US'):''}</td>`).join('')}
+    <td class="num total">${fmtUSD(g.total)}</td></tr>`).join('')
+    || `<tr><td colspan="${5+ALL_MONTHS.length+1}" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>`;
+
+  const sum = pivoted.reduce((s,g)=>s+g.total,0);
+  $('#rowCount').textContent = `${pivoted.length} apps · ${fmtUSD(sum)}`;
 }
 </script>
 </body>
