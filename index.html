@@ -276,7 +276,7 @@ function parseRenewal(text){
 }
 let renewalsTab = 'yearly';
 function renderRenewals(all){
-  const apps = latestRowsPerApp(all.filter(r=>r.kind==='Apps'));
+  const apps = latestActualRowsPerApp(all.filter(r=>r.kind==='Apps'));
   const today = new Date(); today.setHours(0,0,0,0);
   const items = apps.map(a=>{
     const p = parseRenewal(a.renewalDate);
@@ -395,8 +395,15 @@ function latestRowsPerApp(apps){
   apps.forEach(a => { if (!byApp[a.name] || a.month > byApp[a.name].month) byApp[a.name]=a; });
   return Object.values(byApp);
 }
+// Same as latestRowsPerApp, but ignores months after today — the sheet has budgeted
+// figures pre-filled for future months, and those aren't real "latest charges" to
+// annualize a run-rate from (e.g. a one-off high August estimate shouldn't dominate).
+function latestActualRowsPerApp(apps){
+  const todayKey = realMonthKey(0);
+  return latestRowsPerApp(apps.filter(a => a.month <= todayKey));
+}
 function monthlyRunRate(apps){
-  return latestRowsPerApp(apps).reduce((s,a)=>{ const cm=cycleMonths(a.cycle); return s+(cm>0?a.amt/cm:0); },0);
+  return latestActualRowsPerApp(apps).reduce((s,a)=>{ const cm=cycleMonths(a.cycle); return s+(cm>0?a.amt/cm:0); },0);
 }
 
 function renderKPIs(all){
@@ -411,7 +418,7 @@ function renderKPIs(all){
   const mom = lastMonth ? ((thisMonth-lastMonth)/lastMonth*100) : 0;
   const rr = monthlyRunRate(apps);
   const annual = rr*12;
-  const activeApps = latestRowsPerApp(apps).length;
+  const activeApps = latestActualRowsPerApp(apps).length;
   const lapTotal = laps.reduce((s,r)=>s+r.usd,0);
 
   const cards = [
@@ -525,7 +532,7 @@ function renderTop(apps){
 }
 function renderRunRate(apps){
   destroy('runrate');
-  const latest = latestRowsPerApp(apps).map(a=>({name:a.name, m: cycleMonths(a.cycle)>0 ? a.amt/cycleMonths(a.cycle) : 0}))
+  const latest = latestActualRowsPerApp(apps).map(a=>({name:a.name, m: cycleMonths(a.cycle)>0 ? a.amt/cycleMonths(a.cycle) : 0}))
                   .filter(x=>x.m>0).sort((a,b)=>b.m-a.m);
   const top = latest.slice(0,12);
   const rr = latest.reduce((s,x)=>s+x.m,0);
