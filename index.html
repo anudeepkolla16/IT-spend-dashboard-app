@@ -66,7 +66,7 @@
   </div>
   <div class="grow"></div>
   <div class="toolbar">
-    <div class="fx">USD → INR <input id="fx" type="number" step="0.5" value="88" /></div>
+    <div class="fx" title="Only used to convert manually-added INR laptop entries into USD">INR → USD rate <input id="fx" type="number" step="0.5" value="88" /></div>
     <button class="btn ghost" id="refreshBtn">↻ Refresh now</button>
     <button class="btn ghost" id="lapTmplBtn">⬇ Laptop Template</button>
     <button class="btn ghost" id="lapUploadBtn">📂 Add Laptop Spend</button>
@@ -84,7 +84,7 @@
     <div class="grid3">
       <div class="card">
         <h3>Monthly Spend Trend &amp; Forecast</h3>
-        <div class="cap">Actual monthly spend with a 6-month trend forecast (dashed)</div>
+        <div class="cap">Actual + planned monthly spend (the sheet includes budgeted future months) with a 6-month trend forecast (dashed) appended after the last data point</div>
         <div class="chartwrap"><canvas id="trendChart"></canvas></div>
       </div>
       <div class="card">
@@ -109,7 +109,7 @@
 
     <div class="card">
       <h3>Top Apps by Spend</h3>
-      <div class="cap">Highest total spend per application (all-time, in ₹)</div>
+      <div class="cap">Highest total spend per application (all-time, in $)</div>
       <div class="chartwrap"><canvas id="topChart"></canvas></div>
     </div>
 
@@ -137,35 +137,44 @@
   </div>
 
   <div class="foot">
-    Apps data auto-synced from SharePoint every 5 minutes · normalized to ₹ (INR) · Laptop spend added manually until a live source is wired up
+    Apps data auto-synced from SharePoint every 5 minutes · amounts shown in $ (USD), the sheet's native currency · Laptop spend added manually until a live source is wired up
   </div>
 </main>
 
 <script>
 const $ = s => document.querySelector(s);
-const fmtINR = n => '₹' + Math.round(n||0).toLocaleString('en-IN');
+const fmtUSD = n => '$' + Math.round(n||0).toLocaleString('en-US');
 const fmtShort = n => {
   n = n||0;
-  if (Math.abs(n) >= 1e7) return '₹' + (n/1e7).toFixed(2) + ' Cr';
-  if (Math.abs(n) >= 1e5) return '₹' + (n/1e5).toFixed(2) + ' L';
-  if (Math.abs(n) >= 1e3) return '₹' + (n/1e3).toFixed(1) + 'K';
-  return '₹' + Math.round(n);
+  const sign = n < 0 ? '-' : '';
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return sign + '$' + (abs/1e9).toFixed(2) + 'B';
+  if (abs >= 1e6) return sign + '$' + (abs/1e6).toFixed(2) + 'M';
+  if (abs >= 1e3) return sign + '$' + (abs/1e3).toFixed(1) + 'K';
+  return sign + '$' + Math.round(abs);
 };
 const COLORS = ['#6c8cff','#3ddc97','#ffb020','#ff6b6b','#b07cff','#37c2e0','#ff9f68','#8bd450','#e06c9f','#5ad1c2'];
 let charts = {};
-let appRows = [];      // from live API
-let laptopRows = [];   // from manual upload
+let appRows = [];      // from live API (always USD)
+let laptopRows = [];   // from manual upload (may be INR or USD)
 let lastSyncedAt = null;
 
 function fx(){ return parseFloat($('#fx').value) || 88; }
-function toINR(amount, cur){
+// Base display currency is USD (the sheet's native currency). Only manually
+// entered INR rows (e.g. laptop purchases) get converted using the rate above.
+function toUSD(amount, cur){
   amount = Number(amount)||0;
-  return (String(cur||'INR').toUpperCase().trim()==='USD') ? amount*fx() : amount;
+  return (String(cur||'USD').toUpperCase().trim()==='INR') ? amount/fx() : amount;
 }
 function monthLabel(ym){
   const p = String(ym).split('-'); if (p.length<2) return ym;
   const names=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return `${names[+p[1]]||p[1]} ${p[0]}`;
+}
+function realMonthKey(offset){
+  const d = new Date();
+  d.setMonth(d.getMonth() + (offset||0));
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
 function cycleMonths(c){
   c = String(c||'Monthly').toLowerCase();
@@ -188,7 +197,7 @@ async function syncFromApi(manual){
     if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
     appRows = (json.rows||[]).map(r => ({
       kind:'Apps', month:r.month, name:r.name, dept:r.dept||'Unassigned',
-      cat:r.cycle||'Monthly', cycle:r.cycle||'Monthly', cur:r.cur||'INR', amt:Number(r.amt)||0,
+      cat:r.cycle||'Monthly', cycle:r.cycle||'Monthly', cur:r.cur||'USD', amt:Number(r.amt)||0,
       status:'Active', notes:r.poc?`POC: ${r.poc}`:''
     }));
     lastSyncedAt = json.syncedAt ? new Date(json.syncedAt) : new Date();
@@ -255,7 +264,7 @@ $('#lapFile').onchange = e => {
 
 /* ---------------- build model + render ---------------- */
 function build(){
-  const all = appRows.concat(laptopRows).map(x => ({...x, inr: toINR(x.amt, x.cur)}));
+  const all = appRows.concat(laptopRows).map(x => ({...x, usd: toUSD(x.amt, x.cur)}));
   window.MODEL = all;
   renderKPIs(all);
   renderTrend(all);
@@ -268,7 +277,7 @@ function build(){
 }
 
 function monthTotals(rows){
-  const m = {}; rows.forEach(r => { if(!r.month) return; m[r.month]=(m[r.month]||0)+r.inr; }); return m;
+  const m = {}; rows.forEach(r => { if(!r.month) return; m[r.month]=(m[r.month]||0)+r.usd; }); return m;
 }
 function latestRowsPerApp(apps){
   const byApp = {};
@@ -276,27 +285,30 @@ function latestRowsPerApp(apps){
   return Object.values(byApp);
 }
 function monthlyRunRate(apps){
-  return latestRowsPerApp(apps).reduce((s,a)=>{ const cm=cycleMonths(a.cycle); return s+(cm>0?toINR(a.amt,a.cur)/cm:0); },0);
+  return latestRowsPerApp(apps).reduce((s,a)=>{ const cm=cycleMonths(a.cycle); return s+(cm>0?toUSD(a.amt,a.cur)/cm:0); },0);
 }
 
 function renderKPIs(all){
   const apps = all.filter(r=>r.kind==='Apps'), laps = all.filter(r=>r.kind==='Laptops');
   const totals = monthTotals(all);
   const months = Object.keys(totals).sort();
-  const last = months[months.length-1], prev = months[months.length-2];
-  const totalAll = all.reduce((s,r)=>s+r.inr,0);
-  const thisMonth = last ? totals[last] : 0;
-  const lastMonth = prev ? totals[prev] : 0;
+  const thisKey = realMonthKey(0), prevKey = realMonthKey(-1);
+  const hasThisMonth = Object.prototype.hasOwnProperty.call(totals, thisKey);
+  const totalAll = all.reduce((s,r)=>s+r.usd,0);
+  const thisMonth = totals[thisKey] || 0;
+  const lastMonth = totals[prevKey] || 0;
   const mom = lastMonth ? ((thisMonth-lastMonth)/lastMonth*100) : 0;
   const rr = monthlyRunRate(apps);
   const annual = rr*12;
   const activeApps = latestRowsPerApp(apps).length;
-  const lapTotal = laps.reduce((s,r)=>s+r.inr,0);
+  const lapTotal = laps.reduce((s,r)=>s+r.usd,0);
 
   const cards = [
     {lab:'Total Spend (all-time)', val:fmtShort(totalAll), hint:`${months.length} month(s) of data`, c:'#6c8cff'},
-    {lab:`Spend · ${last?monthLabel(last):'—'}`, val:fmtShort(thisMonth),
-       hint: prev? `<span class="pill ${mom>=0?'up':'down'}">${mom>=0?'▲':'▼'} ${Math.abs(mom).toFixed(0)}% vs prev</span>`:'latest month', c:'#ffb020'},
+    {lab:`Spend · ${monthLabel(thisKey)}`, val:fmtShort(thisMonth),
+       hint: hasThisMonth
+         ? (lastMonth ? `<span class="pill ${mom>=0?'up':'down'}">${mom>=0?'▲':'▼'} ${Math.abs(mom).toFixed(0)}% vs prev</span>` : 'this month')
+         : `not entered in sheet yet`, c:'#ffb020'},
     {lab:'Monthly Run-Rate', val:fmtShort(rr), hint:`${activeApps} active subscriptions`, c:'#3ddc97'},
     {lab:'Projected Annual Run-Rate', val:fmtShort(annual), hint:'recurring apps × 12', c:'#b07cff'},
     {lab:'Laptop / Hardware Spend', val:fmtShort(lapTotal), hint:`${laps.length} manual record(s)`, c:'#ff6b6b'},
@@ -348,25 +360,25 @@ function renderTrend(all){
     ]},
     options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
       plugins:{legend:{position:'bottom',labels:{boxWidth:12,padding:14}},
-        tooltip:{callbacks:{label:c=>c.dataset.label+': '+(c.parsed.y==null?'—':fmtINR(c.parsed.y))}}},
+        tooltip:{callbacks:{label:c=>c.dataset.label+': '+(c.parsed.y==null?'—':fmtUSD(c.parsed.y))}}},
       scales:{y:{ticks:{callback:v=>fmtShort(v)},grid:{color:'rgba(255,255,255,.04)'}},x:{grid:{display:false}}}}
   });
 }
 
 function renderSplit(all){
   destroy('split');
-  const a = all.filter(r=>r.kind==='Apps').reduce((s,r)=>s+r.inr,0);
-  const l = all.filter(r=>r.kind==='Laptops').reduce((s,r)=>s+r.inr,0);
+  const a = all.filter(r=>r.kind==='Apps').reduce((s,r)=>s+r.usd,0);
+  const l = all.filter(r=>r.kind==='Laptops').reduce((s,r)=>s+r.usd,0);
   charts.split = new Chart($('#splitChart'),{
     type:'doughnut',
     data:{labels:['Apps / Software','Laptops / Hardware'],datasets:[{data:[a,l],backgroundColor:['#6c8cff','#3ddc97'],borderWidth:0}]},
     options:{maintainAspectRatio:false,cutout:'62%',
-      plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:c=>c.label+': '+fmtINR(c.parsed)+' ('+(c.parsed/(a+l||1)*100).toFixed(0)+'%)'}}}}
+      plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:c=>c.label+': '+fmtUSD(c.parsed)+' ('+(c.parsed/(a+l||1)*100).toFixed(0)+'%)'}}}}
   });
 }
 
 function groupSum(rows, key){
-  const g={}; rows.forEach(r=>{const k=r[key]||'—'; g[k]=(g[k]||0)+r.inr;});
+  const g={}; rows.forEach(r=>{const k=r[key]||'—'; g[k]=(g[k]||0)+r.usd;});
   return Object.entries(g).sort((a,b)=>b[1]-a[1]);
 }
 function renderDept(all){
@@ -375,7 +387,7 @@ function renderDept(all){
   charts.dept = new Chart($('#deptChart'),{
     type:'bar',
     data:{labels:g.map(x=>x[0]),datasets:[{data:g.map(x=>x[1]),backgroundColor:g.map((_,i)=>COLORS[i%COLORS.length]),borderRadius:6}]},
-    options:{maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtINR(c.parsed.x)}}},
+    options:{maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtUSD(c.parsed.x)}}},
       scales:{x:{ticks:{callback:v=>fmtShort(v)},grid:{color:'rgba(255,255,255,.04)'}},y:{grid:{display:false}}}}
   });
 }
@@ -386,35 +398,35 @@ function renderCat(all){
     type:'doughnut',
     data:{labels:g.map(x=>x[0]),datasets:[{data:g.map(x=>x[1]),backgroundColor:g.map((_,i)=>COLORS[i%COLORS.length]),borderWidth:0}]},
     options:{maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'right',labels:{boxWidth:12,padding:8,font:{size:11}}},
-      tooltip:{callbacks:{label:c=>c.label+': '+fmtINR(c.parsed)}}}}
+      tooltip:{callbacks:{label:c=>c.label+': '+fmtUSD(c.parsed)}}}}
   });
 }
 function renderTop(apps){
   destroy('top');
-  const g={}; apps.forEach(r=>{g[r.name]=(g[r.name]||0)+r.inr;});
+  const g={}; apps.forEach(r=>{g[r.name]=(g[r.name]||0)+r.usd;});
   const top = Object.entries(g).sort((a,b)=>b[1]-a[1]).slice(0,12);
   charts.top = new Chart($('#topChart'),{
     type:'bar',
     data:{labels:top.map(x=>x[0]),datasets:[{data:top.map(x=>x[1]),backgroundColor:'#6c8cff',borderRadius:6}]},
-    options:{maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtINR(c.parsed.x)}}},
+    options:{maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtUSD(c.parsed.x)}}},
       scales:{x:{ticks:{callback:v=>fmtShort(v)},grid:{color:'rgba(255,255,255,.04)'}},y:{grid:{display:false}}}}
   });
 }
 function renderRunRate(apps){
   destroy('runrate');
-  const latest = latestRowsPerApp(apps).map(a=>({name:a.name, m: cycleMonths(a.cycle)>0 ? toINR(a.amt,a.cur)/cycleMonths(a.cycle) : 0}))
+  const latest = latestRowsPerApp(apps).map(a=>({name:a.name, m: cycleMonths(a.cycle)>0 ? toUSD(a.amt,a.cur)/cycleMonths(a.cycle) : 0}))
                   .filter(x=>x.m>0).sort((a,b)=>b.m-a.m);
   const top = latest.slice(0,12);
   const rr = latest.reduce((s,x)=>s+x.m,0);
   charts.runrate = new Chart($('#runrateChart'),{
     type:'bar',
     data:{labels:top.map(x=>x.name),datasets:[{label:'Annual cost',data:top.map(x=>x.m*12),backgroundColor:'#b07cff',borderRadius:6}]},
-    options:{maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtINR(c.parsed.y)+' /yr'}}},
+    options:{maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtUSD(c.parsed.y)+' /yr'}}},
       scales:{y:{ticks:{callback:v=>fmtShort(v)},grid:{color:'rgba(255,255,255,.04)'}},x:{grid:{display:false},ticks:{maxRotation:60,minRotation:40}}}}
   });
   $('#runrateNote').innerHTML =
-    `Current recurring run-rate: <b style="color:var(--txt)">${fmtINR(rr)}/mo</b> → <b style="color:var(--txt)">${fmtINR(rr*12)}/yr</b> across ${latest.length} active subscriptions. ` +
-    `One-time purchases are excluded. Adjust the USD→INR rate above to re-price instantly.`;
+    `Current recurring run-rate: <b style="color:var(--txt)">${fmtUSD(rr)}/mo</b> → <b style="color:var(--txt)">${fmtUSD(rr*12)}/yr</b> across ${latest.length} active subscriptions. ` +
+    `One-time purchases are excluded. Figures are in $ (USD), the sheet's native currency.`;
 }
 
 let sortKey='month', sortDir=-1;
@@ -425,8 +437,8 @@ function setupTable(all){
   $('#fMonth').innerHTML = '<option value="">All months</option>'+months.map(m=>`<option value="${m}">${monthLabel(m)}</option>`).join('');
   ['#fType','#fDept','#fMonth'].forEach(s=>$(s).onchange=draw);
   $('#fSearch').oninput = draw;
-  const cols=[['month','Month'],['kind','Type'],['name','Name'],['dept','Department'],['cat','Cycle'],['cur','Cur'],['amt','Amount'],['inr','₹ (INR)'],['notes','Notes']];
-  $('#tbl thead').innerHTML = '<tr>'+cols.map(c=>`<th class="${['amt','inr'].includes(c[0])?'num':''}" data-k="${c[0]}">${c[1]}</th>`).join('')+'</tr>';
+  const cols=[['month','Month'],['kind','Type'],['name','Name'],['dept','Department'],['cat','Cycle'],['cur','Cur'],['amt','Amount'],['usd','$ (USD)'],['notes','Notes']];
+  $('#tbl thead').innerHTML = '<tr>'+cols.map(c=>`<th class="${['amt','usd'].includes(c[0])?'num':''}" data-k="${c[0]}">${c[1]}</th>`).join('')+'</tr>';
   $('#tbl thead').querySelectorAll('th').forEach(th=>th.onclick=()=>{
     const k=th.dataset.k; sortDir = (sortKey===k)? -sortDir : 1; sortKey=k; draw();
   });
@@ -441,10 +453,10 @@ function draw(){
   $('#tbl tbody').innerHTML = rows.map(r=>`<tr>
     <td>${r.month||'—'}</td><td><span class="chip">${r.kind}</span></td><td>${r.name}</td>
     <td>${r.dept}</td><td>${r.cat}</td><td>${r.cur}</td>
-    <td class="num">${(r.amt||0).toLocaleString('en-IN')}</td><td class="num">${fmtINR(r.inr)}</td><td>${r.notes||''}</td></tr>`).join('')
+    <td class="num">${(r.amt||0).toLocaleString('en-US')}</td><td class="num">${fmtUSD(r.usd)}</td><td>${r.notes||''}</td></tr>`).join('')
     || '<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>';
-  const sum=rows.reduce((s,r)=>s+r.inr,0);
-  $('#rowCount').textContent = `${rows.length} rows · ${fmtINR(sum)}`;
+  const sum=rows.reduce((s,r)=>s+r.usd,0);
+  $('#rowCount').textContent = `${rows.length} rows · ${fmtUSD(sum)}`;
 }
 </script>
 </body>
