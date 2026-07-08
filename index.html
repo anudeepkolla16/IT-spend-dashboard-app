@@ -125,6 +125,7 @@
   <div class="grow"></div>
   <div class="toolbar">
     <span class="cap" id="whoami"></span>
+    <button class="btn ghost" id="importBtn">📥 Import Invoices</button>
     <button class="btn ghost" id="refreshBtn">↻ Refresh now</button>
   </div>
 </header>
@@ -375,6 +376,34 @@ async function syncFromApi(manual){
 $('#refreshBtn').onclick = () => syncFromApi(true);
 syncFromApi(false);
 setInterval(() => syncFromApi(false), 5*60*1000);
+
+/* ---------------- one-time bulk import of existing invoices ---------------- */
+$('#importBtn').onclick = async () => {
+  const url = prompt('Paste the SharePoint/OneDrive link to the parent folder that has one subfolder per app/vendor:');
+  if (!url) return;
+  const btn = $('#importBtn');
+  const origText = btn.textContent;
+  btn.textContent = 'Importing…'; btn.disabled = true;
+  try{
+    const res = await fetch('/api/invoices/import', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ sourceUrl: url })
+    });
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    const lines = [
+      `Found ${json.appsFound} folder(s).`,
+      `Copied ${json.copied.length} invoice(s).`,
+      json.skippedTooLarge.length ? `Skipped ${json.skippedTooLarge.length} file(s) over 4 MB:\n  ${json.skippedTooLarge.join('\n  ')}` : '',
+      json.errors.length ? `Errors (${json.errors.length}):\n  ${json.errors.join('\n  ')}` : '',
+    ].filter(Boolean).join('\n\n');
+    alert(lines || 'Nothing to import.');
+  }catch(err){
+    alert('Import failed: ' + err.message);
+  }finally{
+    btn.textContent = origText; btn.disabled = false;
+  }
+};
 
 /* ---------------- export currently-shown table ---------------- */
 $('#exportBtn').onclick = () => {
