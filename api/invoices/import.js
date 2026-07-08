@@ -109,10 +109,14 @@ module.exports = async (req, res) => {
       return;
     }
 
+    if (mode !== 'commit') {
+      res.status(400).json({ error: `Unknown mode "${mode}" — expected "preview" or "commit". If you're not sure why you're seeing this, hard-refresh the dashboard page and try again (this can happen if your browser is running an older cached version of the page).` });
+      return;
+    }
     // commit mode: mapping is { [folderId]: targetAppName } — only folders present
     // in the mapping (and with a non-empty target) get copied.
-    if (!mapping || typeof mapping !== 'object') {
-      res.status(400).json({ error: 'Missing mapping for commit mode' });
+    if (!mapping || typeof mapping !== 'object' || !Object.keys(mapping).length) {
+      res.status(400).json({ error: 'Missing or empty mapping for commit mode' });
       return;
     }
     const targetDriveId = await resolveDriveId(token, upn);
