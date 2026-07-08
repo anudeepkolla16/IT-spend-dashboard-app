@@ -24,6 +24,37 @@ function sanitizeFileName(name) {
   return sanitizeSegment(base) + ext;
 }
 
+function normalize(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function tokens(s) {
+  return String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+// Best-effort fuzzy match, used only to pre-select a suggestion in the review UI —
+// the user confirms or overrides every mapping before anything is copied.
+function bestMatch(sourceFolderName, appNames) {
+  const na = normalize(sourceFolderName);
+  const ta = new Set(tokens(sourceFolderName));
+  let best = null, bestScore = 0;
+  for (const app of appNames) {
+    const nb = normalize(app);
+    if (!na || !nb) continue;
+    let score = 0;
+    if (na === nb) score = 1;
+    else if (na.includes(nb) || nb.includes(na)) score = 0.8;
+    else {
+      const tb = new Set(tokens(app));
+      const inter = [...ta].filter(x => tb.has(x)).length;
+      const union = new Set([...ta, ...tb]).size;
+      score = union ? inter / union : 0;
+      for (const t of tb) if (t.length >= 4 && na.includes(t)) score = Math.max(score, 0.6);
+      for (const t of ta) if (t.length >= 4 && nb.includes(t)) score = Math.max(score, 0.6);
+    }
+    if (score > bestScore) { bestScore = score; best = app; }
+  }
+  return { app: bestScore >= 0.4 ? best : null, score: bestScore };
+}
+
 const MAX_IMPORT_BYTES = 4 * 1024 * 1024; // Graph simple-upload cap
 
 module.exports = async (req, res) => {
@@ -32,7 +63,7 @@ module.exports = async (req, res) => {
       res.status(405).json({ error: 'Method not allowed' });
       return;
     }
-    const { sourceUrl } = req.body || {};
+    const { sourceUrl, mode, mapping, appNames } = req.body || {};
     if (!sourceUrl) {
       res.status(400).json({ error: 'Missing sourceUrl' });
       return;
@@ -42,7 +73,6 @@ module.exports = async (req, res) => {
     if (!upn) throw new Error('Missing TARGET_USER_UPN env var');
 
     const token = await getGraphToken();
-    const targetDriveId = await resolveDriveId(token, upn);
 
     const shareToken = encodeShareUrl(sourceUrl);
     const rootItem = await graphGet(
@@ -57,14 +87,42 @@ module.exports = async (req, res) => {
 
     const subfoldersRes = await graphGet(
       token,
-      `https://graph.microsoft.com/v1.0/drives/${sourceDriveId}/items/${rootItem.id}/children?$select=id,name,folder&$top=200`
+      `https://graph.microsoft.com/v1.0/drives/${sourceDriveId}/items/${rootItem.id}/children?$select=id,name,folder,folder&$top=200`
     );
     const appFolders = (subfoldersRes.value || []).filter(f => f.folder);
 
-    const summary = { appsFound: appFolders.length, copied: [], skippedTooLarge: [], errors: [] };
+    if (mode === 'preview') {
+      const proposals = [];
+      for (const folder of appFolders) {
+        let fileCount = 0;
+        try {
+          const filesRes = await graphGet(
+            token,
+            `https://graph.microsoft.com/v1.0/drives/${sourceDriveId}/items/${folder.id}/children?$select=id,file&$top=200`
+          );
+          fileCount = (filesRes.value || []).filter(f => f.file).length;
+        } catch { /* leave at 0, still list the folder */ }
+        const { app, score } = bestMatch(folder.name, appNames || []);
+        proposals.push({ folderId: folder.id, folderName: folder.name, fileCount, suggestedApp: app, score });
+      }
+      res.status(200).json({ sourceDriveId, folders: proposals });
+      return;
+    }
+
+    // commit mode: mapping is { [folderId]: targetAppName } — only folders present
+    // in the mapping (and with a non-empty target) get copied.
+    if (!mapping || typeof mapping !== 'object') {
+      res.status(400).json({ error: 'Missing mapping for commit mode' });
+      return;
+    }
+    const targetDriveId = await resolveDriveId(token, upn);
+    const summary = { copied: [], skippedTooLarge: [], errors: [] };
 
     for (const folder of appFolders) {
-      const targetApp = sanitizeSegment(folder.name);
+      const targetAppRaw = mapping[folder.id];
+      if (!targetAppRaw) continue; // user chose to skip this folder
+      const targetApp = sanitizeSegment(targetAppRaw);
+
       let filesRes;
       try {
         filesRes = await graphGet(
@@ -100,7 +158,7 @@ module.exports = async (req, res) => {
             const text = await putRes.text();
             throw new Error(`upload failed (${putRes.status}): ${text.slice(0, 150)}`);
           }
-          summary.copied.push(`${folder.name}/${file.name}`);
+          summary.copied.push(`${folder.name} → ${targetAppRaw} / ${file.name}`);
         } catch (e) {
           summary.errors.push(`${folder.name}/${file.name}: ${e.message}`);
         }
