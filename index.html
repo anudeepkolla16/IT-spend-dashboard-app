@@ -91,6 +91,15 @@
   .modal-meta{color:var(--muted);font-size:12.5px;margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px}
   .modal-meta b{color:var(--txt)}
   .modal-chartwrap{height:220px;position:relative;margin-bottom:12px}
+  .modal-invoices{border-top:1px solid var(--line);padding-top:14px;margin-top:4px}
+  .modal-invoices-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .modal-invoices-head h4{margin:0;font-size:13.5px;flex:1}
+  .invoice-list{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto}
+  .invoice-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 4px;border-bottom:1px solid var(--line);font-size:12px}
+  .invoice-row:last-child{border-bottom:none}
+  .invoice-row a{color:var(--accent);text-decoration:none;font-weight:600}
+  .invoice-row a:hover{text-decoration:underline}
+  .invoice-meta{color:var(--muted);font-size:11px}
 
   /* Mobile card list (shown instead of the wide table below the breakpoint) */
   .cardlist{display:none}
@@ -202,6 +211,16 @@
       </div>
       <div class="modal-meta" id="modalMeta"></div>
       <div class="modal-chartwrap"><canvas id="modalChart"></canvas></div>
+
+      <div class="modal-invoices">
+        <div class="modal-invoices-head">
+          <h4>📎 Invoices</h4>
+          <button class="btn ghost" id="modalUploadBtn">⬆ Upload PDF</button>
+          <input type="file" id="modalUploadFile" accept="application/pdf" class="hidden" />
+        </div>
+        <div id="modalInvoiceStatus" class="cap"></div>
+        <div id="modalInvoiceList" class="invoice-list"></div>
+      </div>
     </div>
   </div>
 
@@ -655,9 +674,11 @@ function draw(){
 }
 
 /* ---------------- per-app drill-down modal ---------------- */
+let modalAppName = null;
 function openModal(name){
   const g = (window.PIVOTED||[]).find(x=>x.name===name);
   if (!g) return;
+  modalAppName = name;
   $('#modalTitle').textContent = g.name;
   const renewal = parseRenewal(g.renewalDate);
   const renewalText = renewal
@@ -687,14 +708,64 @@ function openModal(name){
   });
 
   $('#modalOverlay').classList.add('show');
+  loadInvoices(name);
 }
 function closeModal(){
   $('#modalOverlay').classList.remove('show');
   destroy('modal');
+  modalAppName = null;
 }
 $('#modalClose').onclick = closeModal;
 $('#modalOverlay').addEventListener('click', e=>{ if (e.target.id==='modalOverlay') closeModal(); });
 document.addEventListener('keydown', e=>{ if (e.key==='Escape') closeModal(); });
+
+/* ---------------- per-app invoices (stored in SharePoint) ---------------- */
+async function loadInvoices(appName){
+  const listEl = $('#modalInvoiceList');
+  listEl.innerHTML = '<div class="cap">Loading…</div>';
+  try{
+    const res = await fetch(`/api/invoices?app=${encodeURIComponent(appName)}`, {cache:'no-store'});
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    if (!json.files.length){ listEl.innerHTML = '<div class="cap">No invoices uploaded yet.</div>'; return; }
+    listEl.innerHTML = json.files.map(f => `
+      <div class="invoice-row">
+        <a href="${f.webUrl}" target="_blank" rel="noopener">${f.name.replace(/^\d{4}-\d{2}-\d{2}T[\d-]+Z_/,'')}</a>
+        <span class="invoice-meta">${new Date(f.uploadedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})} · ${(f.size/1024).toFixed(0)} KB</span>
+      </div>`).join('');
+  }catch(err){
+    listEl.innerHTML = `<div class="cap" style="color:var(--danger)">Couldn't load invoices: ${err.message}</div>`;
+  }
+}
+$('#modalUploadBtn').onclick = () => $('#modalUploadFile').click();
+$('#modalUploadFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file || !modalAppName) return;
+  const statusEl = $('#modalInvoiceStatus');
+  if (file.type !== 'application/pdf'){ statusEl.textContent = 'Only PDF files are supported.'; return; }
+  if (file.size > 3*1024*1024){ statusEl.textContent = 'File too large (max 3 MB).'; return; }
+
+  statusEl.textContent = `Uploading ${file.name}…`;
+  try{
+    const contentBase64 = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result.split(',')[1]);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+    const res = await fetch('/api/invoices/upload', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ app: modalAppName, filename: file.name, contentBase64 })
+    });
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    statusEl.textContent = `Uploaded ${file.name}.`;
+    loadInvoices(modalAppName);
+  }catch(err){
+    statusEl.textContent = `Upload failed: ${err.message}`;
+  }
+};
 </script>
 </body>
 </html>
