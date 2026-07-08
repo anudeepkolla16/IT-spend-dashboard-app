@@ -831,7 +831,7 @@ async function loadInvoices(appName){
     if (!json.files.length){ listEl.innerHTML = '<div class="cap">No invoices uploaded yet.</div>'; return; }
     listEl.innerHTML = json.files.map(f => `
       <div class="invoice-row">
-        <a href="${f.webUrl}" target="_blank" rel="noopener">${f.name.replace(/^\d{4}-\d{2}-\d{2}T[\d-]+Z_/,'')}</a>
+        <a href="${f.webUrl}" target="_blank" rel="noopener">${f.subfolder?`[${f.subfolder}] `:''}${f.name.replace(/^\d{4}-\d{2}-\d{2}T[\d-]+Z_/,'')}</a>
         <span class="invoice-meta">${new Date(f.uploadedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})} · ${(f.size/1024).toFixed(0)} KB</span>
       </div>`).join('');
   }catch(err){

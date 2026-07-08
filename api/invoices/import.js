@@ -1,4 +1,4 @@
-const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment } = require('../../lib/graph');
+const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive } = require('../../lib/graph');
 
 // Graph's "resolve a sharing URL" trick: base64url-encode the URL, prefix with "u!".
 // https://learn.microsoft.com/en-us/graph/api/shares-get
@@ -22,6 +22,9 @@ function sanitizeFileName(name) {
   const base = dot > 0 ? name.slice(0, dot) : name;
   const ext = dot > 0 ? name.slice(dot).replace(/[<>:"/\\|?*\x00-\x1F]/g, '') : '';
   return sanitizeSegment(base) + ext;
+}
+function sanitizeRelPath(relPath) {
+  return (relPath || '').split('/').filter(Boolean).map(sanitizeSegment).join('/');
 }
 
 function normalize(s) {
@@ -96,11 +99,8 @@ module.exports = async (req, res) => {
       for (const folder of appFolders) {
         let fileCount = 0;
         try {
-          const filesRes = await graphGet(
-            token,
-            `https://graph.microsoft.com/v1.0/drives/${sourceDriveId}/items/${folder.id}/children?$select=id,file&$top=200`
-          );
-          fileCount = (filesRes.value || []).filter(f => f.file).length;
+          const files = await listFilesRecursive(token, sourceDriveId, folder.id);
+          fileCount = files.length;
         } catch { /* leave at 0, still list the folder */ }
         const { app, score } = bestMatch(folder.name, appNames || []);
         proposals.push({ folderId: folder.id, folderName: folder.name, fileCount, suggestedApp: app, score });
@@ -127,21 +127,19 @@ module.exports = async (req, res) => {
       if (!targetAppRaw) continue; // user chose to skip this folder
       const targetApp = sanitizeSegment(targetAppRaw);
 
-      let filesRes;
+      let files;
       try {
-        filesRes = await graphGet(
-          token,
-          `https://graph.microsoft.com/v1.0/drives/${sourceDriveId}/items/${folder.id}/children?$select=id,name,file,size&$top=200`
-        );
+        files = await listFilesRecursive(token, sourceDriveId, folder.id);
       } catch (e) {
         summary.errors.push(`${folder.name}: couldn't list files (${e.message})`);
         continue;
       }
 
-      for (const file of (filesRes.value || []).filter(f => f.file)) {
+      for (const file of files) {
+        const label = file.relPath ? `${folder.name}/${file.relPath}/${file.name}` : `${folder.name}/${file.name}`;
         try {
           if (file.size > MAX_IMPORT_BYTES) {
-            summary.skippedTooLarge.push(`${folder.name}/${file.name}`);
+            summary.skippedTooLarge.push(label);
             continue;
           }
           const contentRes = await fetch(
@@ -151,7 +149,8 @@ module.exports = async (req, res) => {
           if (!contentRes.ok) throw new Error(`download failed (${contentRes.status})`);
           const buf = Buffer.from(await contentRes.arrayBuffer());
 
-          const destPath = `Invoices/${targetApp}/${sanitizeFileName(file.name)}`;
+          const relFolder = sanitizeRelPath(file.relPath);
+          const destPath = `Invoices/${targetApp}${relFolder ? '/' + relFolder : ''}/${sanitizeFileName(file.name)}`;
           const putUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(targetDriveId)}/root:/${encodeGraphPath(destPath)}:/content`;
           const putRes = await fetch(putUrl, {
             method: 'PUT',
@@ -162,9 +161,9 @@ module.exports = async (req, res) => {
             const text = await putRes.text();
             throw new Error(`upload failed (${putRes.status}): ${text.slice(0, 150)}`);
           }
-          summary.copied.push(`${folder.name} → ${targetAppRaw} / ${file.name}`);
+          summary.copied.push(`${label} → ${targetAppRaw}${relFolder ? '/' + relFolder : ''}`);
         } catch (e) {
-          summary.errors.push(`${folder.name}/${file.name}: ${e.message}`);
+          summary.errors.push(`${label}: ${e.message}`);
         }
       }
     }
