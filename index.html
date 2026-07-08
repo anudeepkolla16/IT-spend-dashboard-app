@@ -724,7 +724,7 @@ async function loadInvoices(appName){
   const listEl = $('#modalInvoiceList');
   listEl.innerHTML = '<div class="cap">Loading…</div>';
   try{
-    const res = await fetch(`/api/invoices?app=${encodeURIComponent(appName)}`, {cache:'no-store'});
+    const res = await fetch(`/api/invoices/list?app=${encodeURIComponent(appName)}`, {cache:'no-store'});
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
     if (!json.files.length){ listEl.innerHTML = '<div class="cap">No invoices uploaded yet.</div>'; return; }
