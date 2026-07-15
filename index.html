@@ -445,35 +445,50 @@ $('#importModalCancel').onclick = closeImportReview;
 $('#importModalOverlay').addEventListener('click', e=>{ if (e.target.id==='importModalOverlay') closeImportReview(); });
 
 $('#importModalConfirm').onclick = async () => {
-  const mapping = {};
+  const jobs = [];
   document.querySelectorAll('#importTblBody tr[data-folder-id]').forEach(tr=>{
     const folderId = decodeURIComponent(tr.dataset.folderId);
     const sel = tr.querySelector('select').value;
-    if (sel) mapping[folderId] = decodeURIComponent(sel);
+    if (sel) jobs.push({ folderId, targetApp: decodeURIComponent(sel), label: tr.firstElementChild.textContent });
   });
-  if (!Object.keys(mapping).length){ $('#importModalStatus').textContent = 'Nothing selected to import.'; return; }
+  if (!jobs.length){ $('#importModalStatus').textContent = 'Nothing selected to import.'; return; }
 
-  const btn = $('#importModalConfirm');
-  btn.disabled = true; $('#importModalStatus').textContent = 'Importing…';
+  const btn = $('#importModalConfirm'), cancelBtn = $('#importModalCancel');
+  btn.disabled = true; cancelBtn.disabled = true;
+  let totalCopied = 0, totalSkipped = 0;
+  const allErrors = [];
   try{
-    const res = await fetch('/api/invoices/import', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ sourceUrl: importSourceUrl, mode:'commit', mapping })
-    });
-    const json = await res.json();
-    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    for (let i=0; i<jobs.length; i++){
+      const job = jobs[i];
+      let offset = 0, folderTotal = null;
+      do{
+        const res = await fetch('/api/invoices/import', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ sourceUrl: importSourceUrl, mode:'commit', folderId: job.folderId, targetApp: job.targetApp, offset })
+        });
+        const json = await res.json();
+        if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+        folderTotal = json.total;
+        totalCopied += json.copied.length;
+        totalSkipped += json.skippedTooLarge.length;
+        allErrors.push(...json.errors);
+        offset = json.nextOffset;
+        $('#importModalStatus').textContent =
+          `Importing ${job.label} → ${job.targetApp}  (${json.done}/${json.total})  ·  folder ${i+1}/${jobs.length}  ·  ${totalCopied} copied`;
+      } while (offset != null);
+    }
     const lines = [
-      `Copied ${json.copied.length} invoice(s).`,
-      json.skippedTooLarge.length ? `Skipped ${json.skippedTooLarge.length} file(s) over 4 MB.` : '',
-      json.errors.length ? `Errors (${json.errors.length}):\n  ${json.errors.join('\n  ')}` : '',
+      `Copied ${totalCopied} invoice(s) across ${jobs.length} folder(s).`,
+      totalSkipped ? `Skipped ${totalSkipped} file(s) over 4 MB.` : '',
+      allErrors.length ? `Errors (${allErrors.length}):\n  ${allErrors.slice(0,20).join('\n  ')}${allErrors.length>20?'\n  …':''}` : '',
     ].filter(Boolean).join('\n');
     closeImportReview();
     alert(lines || 'Nothing was imported.');
     if (modalAppName) loadInvoices(modalAppName);
   }catch(err){
-    $('#importModalStatus').textContent = 'Import failed: ' + err.message;
+    $('#importModalStatus').textContent = `Import stopped: ${err.message}  (${totalCopied} copied so far — you can re-run to continue; already-copied files are simply overwritten.)`;
   }finally{
-    btn.disabled = false;
+    btn.disabled = false; cancelBtn.disabled = false;
   }
 };
 

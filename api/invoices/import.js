@@ -59,6 +59,7 @@ function bestMatch(sourceFolderName, appNames) {
 }
 
 const MAX_IMPORT_BYTES = 4 * 1024 * 1024; // Graph simple-upload cap
+const COMMIT_BATCH = 12; // files copied per commit request, to stay under the function timeout
 
 module.exports = async (req, res) => {
   try {
@@ -66,7 +67,7 @@ module.exports = async (req, res) => {
       res.status(405).json({ error: 'Method not allowed' });
       return;
     }
-    const { sourceUrl, mode, mapping, appNames } = req.body || {};
+    const { sourceUrl, mode, mapping, appNames, folderId, targetApp: commitApp, offset } = req.body || {};
     if (!sourceUrl) {
       res.status(400).json({ error: 'Missing sourceUrl' });
       return;
@@ -113,61 +114,69 @@ module.exports = async (req, res) => {
       res.status(400).json({ error: `Unknown mode "${mode}" — expected "preview" or "commit". If you're not sure why you're seeing this, hard-refresh the dashboard page and try again (this can happen if your browser is running an older cached version of the page).` });
       return;
     }
-    // commit mode: mapping is { [folderId]: targetAppName } — only folders present
-    // in the mapping (and with a non-empty target) get copied.
-    if (!mapping || typeof mapping !== 'object' || !Object.keys(mapping).length) {
-      res.status(400).json({ error: 'Missing or empty mapping for commit mode' });
+    // commit mode processes ONE source folder per request, in a bounded batch of
+    // files starting at `offset`. The client loops (advancing offset, then moving
+    // to the next folder) so no single request runs long enough to time out.
+    if (!folderId || !commitApp) {
+      res.status(400).json({ error: 'commit mode needs folderId and targetApp' });
       return;
     }
+    const folder = appFolders.find(f => f.id === folderId);
+    if (!folder) {
+      res.status(400).json({ error: 'Source folder not found (it may have moved). Re-scan and try again.' });
+      return;
+    }
+
     const targetDriveId = await resolveDriveId(token, upn);
-    const summary = { copied: [], skippedTooLarge: [], errors: [] };
+    const targetApp = sanitizeSegment(commitApp);
+    const startOffset = Number(offset) || 0;
 
-    for (const folder of appFolders) {
-      const targetAppRaw = mapping[folder.id];
-      if (!targetAppRaw) continue; // user chose to skip this folder
-      const targetApp = sanitizeSegment(targetAppRaw);
+    let files;
+    try {
+      files = await listFilesRecursive(token, sourceDriveId, folder.id);
+    } catch (e) {
+      res.status(200).json({ folderName: folder.name, total: 0, done: 0, nextOffset: null, copied: [], skippedTooLarge: [], errors: [`${folder.name}: couldn't list files (${e.message})`] });
+      return;
+    }
 
-      let files;
+    const batch = files.slice(startOffset, startOffset + COMMIT_BATCH);
+    const summary = { folderName: folder.name, total: files.length, copied: [], skippedTooLarge: [], errors: [] };
+
+    for (const file of batch) {
+      const label = file.relPath ? `${folder.name}/${file.relPath}/${file.name}` : `${folder.name}/${file.name}`;
       try {
-        files = await listFilesRecursive(token, sourceDriveId, folder.id);
-      } catch (e) {
-        summary.errors.push(`${folder.name}: couldn't list files (${e.message})`);
-        continue;
-      }
-
-      for (const file of files) {
-        const label = file.relPath ? `${folder.name}/${file.relPath}/${file.name}` : `${folder.name}/${file.name}`;
-        try {
-          if (file.size > MAX_IMPORT_BYTES) {
-            summary.skippedTooLarge.push(label);
-            continue;
-          }
-          const contentRes = await fetch(
-            `https://graph.microsoft.com/v1.0/drives/${sourceDriveId}/items/${file.id}/content`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (!contentRes.ok) throw new Error(`download failed (${contentRes.status})`);
-          const buf = Buffer.from(await contentRes.arrayBuffer());
-
-          const relFolder = sanitizeRelPath(file.relPath);
-          const destPath = `Invoices/${targetApp}${relFolder ? '/' + relFolder : ''}/${sanitizeFileName(file.name)}`;
-          const putUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(targetDriveId)}/root:/${encodeGraphPath(destPath)}:/content`;
-          const putRes = await fetch(putUrl, {
-            method: 'PUT',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
-            body: buf,
-          });
-          if (!putRes.ok) {
-            const text = await putRes.text();
-            throw new Error(`upload failed (${putRes.status}): ${text.slice(0, 150)}`);
-          }
-          summary.copied.push(`${label} → ${targetAppRaw}${relFolder ? '/' + relFolder : ''}`);
-        } catch (e) {
-          summary.errors.push(`${label}: ${e.message}`);
+        if (file.size > MAX_IMPORT_BYTES) {
+          summary.skippedTooLarge.push(label);
+          continue;
         }
+        const contentRes = await fetch(
+          `https://graph.microsoft.com/v1.0/drives/${sourceDriveId}/items/${file.id}/content`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!contentRes.ok) throw new Error(`download failed (${contentRes.status})`);
+        const buf = Buffer.from(await contentRes.arrayBuffer());
+
+        const relFolder = sanitizeRelPath(file.relPath);
+        const destPath = `Invoices/${targetApp}${relFolder ? '/' + relFolder : ''}/${sanitizeFileName(file.name)}`;
+        const putUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(targetDriveId)}/root:/${encodeGraphPath(destPath)}:/content`;
+        const putRes = await fetch(putUrl, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
+          body: buf,
+        });
+        if (!putRes.ok) {
+          const text = await putRes.text();
+          throw new Error(`upload failed (${putRes.status}): ${text.slice(0, 150)}`);
+        }
+        summary.copied.push(label);
+      } catch (e) {
+        summary.errors.push(`${label}: ${e.message}`);
       }
     }
 
+    const done = startOffset + batch.length;
+    summary.done = done;
+    summary.nextOffset = done < files.length ? done : null;
     res.status(200).json(summary);
   } catch (err) {
     res.status(502).json({ error: err.message || String(err) });
