@@ -135,16 +135,29 @@ module.exports = async (req, res) => {
     try {
       files = await listFilesRecursive(token, sourceDriveId, folder.id);
     } catch (e) {
-      res.status(200).json({ folderName: folder.name, total: 0, done: 0, nextOffset: null, copied: [], skippedTooLarge: [], errors: [`${folder.name}: couldn't list files (${e.message})`] });
+      res.status(200).json({ folderName: folder.name, total: 0, done: 0, nextOffset: null, copied: [], alreadyPresent: 0, skippedTooLarge: [], errors: [`${folder.name}: couldn't list files (${e.message})`] });
       return;
     }
 
+    // Build the set of files already at the destination so we skip re-copying them —
+    // makes re-runs near-instant and far less prone to transient network failures.
+    let existing = new Set();
+    try {
+      const destId = await lookupFolderId(token, targetDriveId, `Invoices/${targetApp}`);
+      if (destId) {
+        const destFiles = await listFilesRecursive(token, targetDriveId, destId);
+        existing = new Set(destFiles.map(f => `${sanitizeRelPath(f.relPath)}/${sanitizeFileName(f.name)}`));
+      }
+    } catch { /* if dest scan fails, fall back to copying (safe) */ }
+
     const batch = files.slice(startOffset, startOffset + COMMIT_BATCH);
-    const summary = { folderName: folder.name, total: files.length, copied: [], skippedTooLarge: [], errors: [] };
+    const summary = { folderName: folder.name, total: files.length, copied: [], alreadyPresent: 0, skippedTooLarge: [], errors: [] };
 
     for (const file of batch) {
       const label = file.relPath ? `${folder.name}/${file.relPath}/${file.name}` : `${folder.name}/${file.name}`;
       try {
+        const destKey = `${sanitizeRelPath(file.relPath)}/${sanitizeFileName(file.name)}`;
+        if (existing.has(destKey)) { summary.alreadyPresent++; continue; }
         if (file.size > MAX_IMPORT_BYTES) {
           summary.skippedTooLarge.push(label);
           continue;
@@ -182,3 +195,14 @@ module.exports = async (req, res) => {
     res.status(502).json({ error: err.message || String(err) });
   }
 };
+
+// Resolve a folder path to its item id (null if it doesn't exist yet).
+async function lookupFolderId(token, driveId, path) {
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root:/${encodeGraphPath(path)}?$select=id`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`lookup ${res.status}`);
+  return (await res.json()).id;
+}
