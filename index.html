@@ -401,6 +401,11 @@ setInterval(() => syncFromApi(false), 5*60*1000);
 /* ---------------- one-time bulk import of existing invoices (preview -> review -> commit) ---------------- */
 let importSourceUrl = null;
 $('#importBtn').onclick = async () => {
+  const appNames = [...new Set((window.MODEL||[]).map(r=>r.name))];
+  if (!appNames.length){
+    alert("The dashboard's app list hasn't loaded yet, so I can't suggest which app each folder maps to. Wait for the spend data to finish loading (the red banner should be gone), then try Import again.");
+    return;
+  }
   const url = prompt('Paste the SharePoint/OneDrive link to the parent folder that has one subfolder per app/vendor:');
   if (!url) return;
   importSourceUrl = url;
@@ -408,7 +413,6 @@ $('#importBtn').onclick = async () => {
   const origText = btn.textContent;
   btn.textContent = 'Scanning…'; btn.disabled = true;
   try{
-    const appNames = [...new Set((window.MODEL||[]).map(r=>r.name))];
     const res = await fetch('/api/invoices/import', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ sourceUrl: url, mode:'preview', appNames })
@@ -451,7 +455,7 @@ $('#importModalConfirm').onclick = async () => {
     const sel = tr.querySelector('select').value;
     if (sel) jobs.push({ folderId, targetApp: decodeURIComponent(sel), label: tr.firstElementChild.textContent });
   });
-  if (!jobs.length){ $('#importModalStatus').textContent = 'Nothing selected to import.'; return; }
+  if (!jobs.length){ $('#importModalStatus').textContent = 'Every folder is set to "— Skip —". Pick an app in the "Import into app" column for the folders you want to import, then confirm.'; return; }
 
   const btn = $('#importModalConfirm'), cancelBtn = $('#importModalCancel');
   btn.disabled = true; cancelBtn.disabled = true;
