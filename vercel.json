@@ -1,7 +1,11 @@
 {
   "functions": {
-    "api/invoices/import.js": { "maxDuration": 60 }
+    "api/invoices/import.js": { "maxDuration": 60 },
+    "api/invoices/sync-cron.js": { "maxDuration": 60 }
   },
+  "crons": [
+    { "path": "/api/invoices/sync-cron", "schedule": "0 2 * * *" }
+  ],
   "headers": [
     {
       "source": "/",

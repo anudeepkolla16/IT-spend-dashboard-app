@@ -477,11 +477,26 @@ $('#importModalConfirm').onclick = async () => {
           `Importing ${job.label} → ${job.targetApp}  (${json.done}/${json.total})  ·  folder ${i+1}/${jobs.length}  ·  ${totalCopied} copied`;
       } while (offset != null);
     }
+    // Save the confirmed folder->app mapping so the daily auto-sync can reuse it.
+    let autoSyncNote = '';
+    try{
+      const mapping = {};
+      jobs.forEach(j => { mapping[j.label] = j.targetApp; });
+      const cfgRes = await fetch('/api/invoices/save-sync-config', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ sourceUrl: importSourceUrl, mapping })
+      });
+      const cfgJson = await cfgRes.json();
+      autoSyncNote = (cfgRes.ok && cfgJson.ok)
+        ? `\nAuto-sync is now ON: new invoices dropped into these ${Object.keys(mapping).length} source folders will be mirrored automatically each day.`
+        : `\n(Couldn't save the auto-sync mapping: ${cfgJson.error || cfgRes.status} — invoices still imported, but daily auto-sync isn't configured.)`;
+    }catch(e){ autoSyncNote = `\n(Couldn't save auto-sync mapping: ${e.message})`; }
+
     const lines = [
       `Copied ${totalCopied} invoice(s) across ${jobs.length} folder(s).`,
       totalSkipped ? `Skipped ${totalSkipped} file(s) over 4 MB.` : '',
       allErrors.length ? `Errors (${allErrors.length}):\n  ${allErrors.slice(0,20).join('\n  ')}${allErrors.length>20?'\n  …':''}` : '',
-    ].filter(Boolean).join('\n');
+    ].filter(Boolean).join('\n') + autoSyncNote;
     closeImportReview();
     alert(lines || 'Nothing was imported.');
     if (modalAppName) loadInvoices(modalAppName);
