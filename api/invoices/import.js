@@ -1,4 +1,4 @@
-const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive } = require('../../lib/graph');
+const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, uploadFileContent } = require('../../lib/graph');
 
 // Graph's "resolve a sharing URL" trick: base64url-encode the URL, prefix with "u!".
 // https://learn.microsoft.com/en-us/graph/api/shares-get
@@ -58,7 +58,6 @@ function bestMatch(sourceFolderName, appNames) {
   return { app: bestScore >= 0.4 ? best : null, score: bestScore };
 }
 
-const MAX_IMPORT_BYTES = 4 * 1024 * 1024; // Graph simple-upload cap
 const COMMIT_BATCH = 12; // files copied per commit request, to stay under the function timeout
 
 module.exports = async (req, res) => {
@@ -158,10 +157,6 @@ module.exports = async (req, res) => {
       try {
         const destKey = `${sanitizeRelPath(file.relPath)}/${sanitizeFileName(file.name)}`;
         if (existing.has(destKey)) { summary.alreadyPresent++; continue; }
-        if (file.size > MAX_IMPORT_BYTES) {
-          summary.skippedTooLarge.push(label);
-          continue;
-        }
         const contentRes = await fetch(
           `https://graph.microsoft.com/v1.0/drives/${sourceDriveId}/items/${file.id}/content`,
           { headers: { Authorization: `Bearer ${token}` } }
@@ -171,16 +166,7 @@ module.exports = async (req, res) => {
 
         const relFolder = sanitizeRelPath(file.relPath);
         const destPath = `Invoices/${targetApp}${relFolder ? '/' + relFolder : ''}/${sanitizeFileName(file.name)}`;
-        const putUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(targetDriveId)}/root:/${encodeGraphPath(destPath)}:/content`;
-        const putRes = await fetch(putUrl, {
-          method: 'PUT',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
-          body: buf,
-        });
-        if (!putRes.ok) {
-          const text = await putRes.text();
-          throw new Error(`upload failed (${putRes.status}): ${text.slice(0, 150)}`);
-        }
+        await uploadFileContent(token, targetDriveId, destPath, buf); // handles >4MB via upload session
         summary.copied.push(label);
       } catch (e) {
         summary.errors.push(`${label}: ${e.message}`);

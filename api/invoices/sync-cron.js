@@ -1,9 +1,7 @@
 const {
   getGraphToken, resolveDriveId, resolveShare, listFilesRecursive,
-  encodeGraphPath, sanitizeSegment, readJsonFile,
+  encodeGraphPath, sanitizeSegment, readJsonFile, uploadFileContent,
 } = require('../../lib/graph');
-
-const MAX_IMPORT_BYTES = 4 * 1024 * 1024;
 
 function sanitizeFileName(name) {
   const dot = name.lastIndexOf('.');
@@ -50,7 +48,7 @@ module.exports = async (req, res) => {
     if (!subRes.ok) throw new Error(`Source listing failed (${subRes.status})`);
     const subfolders = ((await subRes.json()).value || []).filter(f => f.folder);
 
-    const summary = { copiedNew: 0, alreadyPresent: 0, skippedTooLarge: 0, errors: [], perApp: {} };
+    const summary = { copiedNew: 0, alreadyPresent: 0, errors: [], perApp: {} };
 
     for (const folder of subfolders) {
       const targetAppRaw = config.mapping[folder.name];
@@ -80,7 +78,6 @@ module.exports = async (req, res) => {
       for (const file of srcFiles) {
         const k = keyOf(file.relPath, file.name);
         if (existing.has(k)) { summary.alreadyPresent++; continue; }
-        if (file.size > MAX_IMPORT_BYTES) { summary.skippedTooLarge++; continue; }
         try {
           const contentRes = await fetch(
             `https://graph.microsoft.com/v1.0/drives/${share.driveId}/items/${file.id}/content`,
@@ -91,11 +88,7 @@ module.exports = async (req, res) => {
 
           const relFolder = sanitizeRelPath(file.relPath);
           const destPath = `Invoices/${targetApp}${relFolder ? '/' + relFolder : ''}/${sanitizeFileName(file.name)}`;
-          const putRes = await fetch(
-            `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(targetDriveId)}/root:/${encodeGraphPath(destPath)}:/content`,
-            { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' }, body: buf }
-          );
-          if (!putRes.ok) throw new Error(`upload ${putRes.status}`);
+          await uploadFileContent(token, targetDriveId, destPath, buf); // handles >4MB via upload session
           summary.copiedNew++;
           summary.perApp[targetAppRaw] = (summary.perApp[targetAppRaw] || 0) + 1;
         } catch (e) {
