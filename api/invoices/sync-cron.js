@@ -48,14 +48,21 @@ module.exports = async (req, res) => {
     if (!subRes.ok) throw new Error(`Source listing failed (${subRes.status})`);
     const subfolders = ((await subRes.json()).value || []).filter(f => f.folder);
 
-    const summary = { copiedNew: 0, alreadyPresent: 0, errors: [], perApp: {} };
+    const summary = { copiedNew: 0, alreadyPresent: 0, errors: [], perApp: {}, timedOut: false };
 
-    for (const folder of subfolders) {
+    // Time-box the run so we always return before the function's hard limit. Because
+    // only NEW files are copied (existing ones skipped), a run that stops early is
+    // simply finished by the next daily run — the mirror self-converges.
+    const DEADLINE = Date.now() + 45 * 1000;
+
+    const mapped = subfolders.filter(f => config.mapping[f.name]);
+
+    // Process one source folder: scan destination + source, copy anything new.
+    async function processFolder(folder) {
+      if (Date.now() > DEADLINE) { summary.timedOut = true; return; }
       const targetAppRaw = config.mapping[folder.name];
-      if (!targetAppRaw) continue; // folder not mapped — skip
       const targetApp = sanitizeSegment(targetAppRaw);
 
-      // Build the set of files already at the destination, so we only copy new ones.
       let existing = new Set();
       try {
         const destFolder = await readDestFolderId(token, targetDriveId, `Invoices/${targetApp}`);
@@ -72,12 +79,13 @@ module.exports = async (req, res) => {
         srcFiles = await listFilesRecursive(token, share.driveId, folder.id);
       } catch (e) {
         summary.errors.push(`${folder.name}: source scan failed (${e.message})`);
-        continue;
+        return;
       }
 
       for (const file of srcFiles) {
         const k = keyOf(file.relPath, file.name);
         if (existing.has(k)) { summary.alreadyPresent++; continue; }
+        if (Date.now() > DEADLINE) { summary.timedOut = true; break; }
         try {
           const contentRes = await fetch(
             `https://graph.microsoft.com/v1.0/drives/${share.driveId}/items/${file.id}/content`,
@@ -96,6 +104,16 @@ module.exports = async (req, res) => {
         }
       }
     }
+
+    // Run folders through a small concurrency pool so the many Graph listings happen
+    // in parallel (cuts wall-clock ~4x) without hammering Graph's rate limits.
+    let cursor = 0;
+    const POOL = 4;
+    await Promise.all(Array.from({ length: Math.min(POOL, mapped.length) }, async () => {
+      while (cursor < mapped.length && Date.now() <= DEADLINE) {
+        await processFolder(mapped[cursor++]);
+      }
+    }));
 
     res.status(200).json({ ok: true, ranAt: new Date().toISOString(), ...summary });
   } catch (err) {
