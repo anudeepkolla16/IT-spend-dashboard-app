@@ -33,9 +33,17 @@ graph.writeJsonFile = async (_t, _d, path, obj) => {
 
 // The live sheet's shape: a title row, a header row, app rows, then a Total row
 // carrying =SUM() formulas that must never be touched.
+//
+// The month headers are REAL DATES in the live workbook, not text. The Graph
+// Excel API returns a date cell's `values` entry as an Excel serial number and
+// only its `text` entry as the "Jan-26" the user sees — which is why the stub
+// below carries both. Getting this wrong is what broke the first live run.
+const MONTH_SERIALS = [46023, 46054, 46082, 46113, 46143, 46174]; // Jan-26 … Jun-26
+const MONTH_LABELS = ['Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'];
+
 const SHEET_VALUES = [
   ['Spendings', '', '', '', '', '', '', '', '', '', '', '', ''],
-  ['APPLICATION / SW / LICENSE', 'Department', 'POC', 'Renewal data', 'Recurring/Onetime', 'FREQUENCY', 'Payment Method', 'Jan-26', 'Feb-26', 'Mar-26', 'Apr-26', 'May-26', 'Jun-26'],
+  ['APPLICATION / SW / LICENSE', 'Department', 'POC', 'Renewal data', 'Recurring/Onetime', 'FREQUENCY', 'Payment Method', ...MONTH_SERIALS],
   ['Adobe', 'Marketing', 'Bhavana', '', 'Recurring', 'Monthly', 'US Debit Card', 37.16, 37.16, 37.16, 37.16, 37.16, ''],
   ['AWS', 'Engineering', 'Ajay', '', 'Recurring', 'Monthly', 'US Debit Card', 4552.64, 2673.27, 2116.53, 2397.77, 2525.33, ''],
   ['Bubble Starter', 'Product', 'Ganesh', '', 'Recurring', 'Monthly', 'US Debit Card', 320, 1073.71, 765.11, 732.67, 570.91, ''],
@@ -48,10 +56,17 @@ const SHEET_VALUES = [
 const excel = require('../lib/excel');
 excel.resolveItemId = async () => 'item-1';
 excel.listWorksheets = async () => [{ id: '1', name: 'Spendings' }, { id: '2', name: 'Invoices tracker' }];
+// Mirror how Graph reports the sheet: raw values plus a parallel display-text
+// grid, with the date headers rendered by their number format.
+const SHEET_TEXT = SHEET_VALUES.map((row, i) => row.map((cell, j) => {
+  if (i === 1 && j >= 7) return MONTH_LABELS[j - 7];
+  return cell == null ? '' : String(cell);
+}));
+
 excel.readUsedRange = async () => ({
   values: SHEET_VALUES,
   formulas: [],
-  text: [],
+  text: SHEET_TEXT,
   start: { col: 0, row: 0 }, // usedRange starts at A1
   address: 'Spendings!A1:M9',
 });

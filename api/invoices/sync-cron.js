@@ -34,8 +34,7 @@ async function readDestFolderId(token, driveId, path) {
 }
 
 // Mirror new files from the mapped source folders into Invoices/{App}/.
-async function mirrorSourceFolders(token, targetDriveId, deadline) {
-  const config = await readJsonFile(token, targetDriveId, 'Invoices/_sync-config.json');
+async function mirrorSourceFolders(token, targetDriveId, deadline, config) {
   if (!config || !config.sourceUrl || !config.mapping) {
     return { note: 'No sync config saved yet — run an import from the dashboard once to set it up.' };
   }
@@ -138,6 +137,10 @@ module.exports = async (req, res) => {
     const token = await getGraphToken();
     const targetDriveId = await resolveDriveId(token, upn);
 
+    // Loaded once and shared: the mailbox pass needs the folder->app mapping to
+    // file each invoice under the vendor folder it has always lived in.
+    const config = await readJsonFile(token, targetDriveId, 'Invoices/_sync-config.json');
+
     // Time-box the run so we always return before the function's hard limit.
     // Because only NEW files are copied (existing ones skipped), a run that
     // stops early is simply finished by the next one — the mirror self-converges.
@@ -146,23 +149,29 @@ module.exports = async (req, res) => {
     const HARD_DEADLINE = started + 45 * 1000;
     const out = { ok: true, ranAt: new Date().toISOString(), mode };
 
-    if (mode !== 'mail') {
-      // Leave at least a third of the budget for the mailbox pass.
-      const folderDeadline = mode === 'folders' ? HARD_DEADLINE : started + 28 * 1000;
-      try {
-        out.folders = await mirrorSourceFolders(token, targetDriveId, folderDeadline);
-      } catch (e) {
-        out.folders = { error: e.message };
-      }
-    }
-
+    // Mailbox first, then the mirror. The mailbox pass files invoices into the
+    // procurement folders, and the mirror copies new files from there into
+    // Invoices/{App}/ for the dashboard — so running it second means an invoice
+    // that arrives by mail reaches the dashboard in the same run rather than
+    // waiting a day.
     if (mode !== 'folders') {
       // A mailbox failure (most likely a missing Mail.Read grant) must not take
       // the folder mirror down with it.
       try {
-        out.mail = await runMailSync(token, targetDriveId, { deadline: HARD_DEADLINE });
+        out.mail = await runMailSync(token, targetDriveId, {
+          deadline: mode === 'mail' ? HARD_DEADLINE : started + 25 * 1000,
+          mapping: config && config.mapping,
+        });
       } catch (e) {
         out.mail = { error: e.message };
+      }
+    }
+
+    if (mode !== 'mail') {
+      try {
+        out.folders = await mirrorSourceFolders(token, targetDriveId, HARD_DEADLINE, config);
+      } catch (e) {
+        out.folders = { error: e.message };
       }
     }
 

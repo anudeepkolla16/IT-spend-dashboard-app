@@ -171,3 +171,52 @@ test('handles month headers stored as real dates', () => {
   assert.strictEqual(normMonthHeader('not a month'), null);
   assert.strictEqual(colLetter(26), 'AA');
 });
+
+// The live workbook stores month headers as real dates formatted "mmm-yy". The
+// Graph Excel API reports such a cell as a bare serial number in `values` and
+// only as "Jan-26" in `text`. Reading `values` alone found no header row and the
+// first live run failed with "Could not find the header row".
+test('reads a month header that arrives as an Excel date serial', () => {
+  assert.strictEqual(normMonthHeader(46023), '2026-01'); // 2026-01-01
+  assert.strictEqual(normMonthHeader(46174), '2026-06'); // 2026-06-01
+  assert.strictEqual(normMonthHeader('46023'), '2026-01'); // same, as a string
+  assert.strictEqual(normMonthHeader('2026-03-01T00:00:00Z'), '2026-03');
+  // Numbers that cannot be a month header must not be coerced into one.
+  assert.strictEqual(normMonthHeader(0), null);
+  assert.strictEqual(normMonthHeader(37.16), null);
+  assert.strictEqual(normMonthHeader(2525.33), null);
+});
+
+test('locates the grid when the header row is dates, using the display text', () => {
+  const values = [
+    ['Spendings'],
+    ['APPLICATION / SW / LICENSE', 'Department', 46023, 46054, 46082],
+    ['Adobe', 'Marketing', 37.16, 37.16, 37.16],
+    ['AWS', 'Engineering', 4552.64, 2673.27, 2116.53],
+    ['Total', '', 4589.8, 2710.43, 2153.69],
+  ];
+  const text = [
+    ['Spendings'],
+    ['APPLICATION / SW / LICENSE', 'Department', 'Jan-26', 'Feb-26', 'Mar-26'],
+    ['Adobe', 'Marketing', '37.16', '37.16', '37.16'],
+    ['AWS', 'Engineering', '4552.64', '2673.27', '2116.53'],
+    ['Total', '', '4589.80', '2710.43', '2153.69'],
+  ];
+  const grid = locateGrid(values, text);
+  assert.strictEqual(grid.headerRowIdx, 1);
+  assert.strictEqual(grid.apps.length, 2);
+  assert.strictEqual(grid.monthCols['2026-02'], 3);
+  assert.strictEqual(cellAddress({ col: 0, row: 0 }, grid.apps[1].rowIdx, grid.monthCols['2026-02']), 'D4');
+});
+
+test('still locates the grid when no display text is available', () => {
+  // Serial-only, no `text` grid — the fallback path must still work.
+  const values = [
+    ['APPLICATION / SW / LICENSE', 'Department', 46023, 46054],
+    ['Adobe', 'Marketing', 37.16, 37.16],
+  ];
+  const grid = locateGrid(values);
+  assert.strictEqual(grid.headerRowIdx, 0);
+  assert.strictEqual(grid.monthCols['2026-01'], 2);
+  assert.strictEqual(grid.apps[0].name, 'Adobe');
+});
