@@ -220,3 +220,63 @@ test('still locates the grid when no display text is available', () => {
   assert.strictEqual(grid.monthCols['2026-01'], 2);
   assert.strictEqual(grid.apps[0].name, 'Adobe');
 });
+
+// --- Repairing the Total row --------------------------------------------
+//
+// The Total row's SUM ranges were written once and have gone stale as apps were
+// added, so the month columns do not all sum the same range and some months
+// quietly leave rows out. The repair derives the range from the live sheet each
+// time rather than hardcoding rows, since every insert shifts them.
+
+const { plan: planTotals } = require('../lib/amounts/fix-totals');
+
+// Header on row 1, three apps on rows 2-4, a blank row, then Total on row 6.
+const TOTALS_VALUES = [
+  ['APPLICATION / SW / LICENSE', 'Department', 'Jan-26', 'Feb-26'],
+  ['1 Click payroll', 'Finance', '', 570],
+  ['Adobe', 'Marketing', 37.16, 37.16],
+  ['ZOOM', 'Growth', 18.85, 18.85],
+  ['', '', '', ''],
+  ['Total', '', 56.01, 626.01],
+];
+const TOTALS_FORMULAS = [
+  ['', '', '', ''],
+  ['', '', '', ''],
+  ['', '', '', ''],
+  ['', '', '', ''],
+  ['', '', '', ''],
+  ['', '', '=SUM(C3:C4)', '=SUM(D2:D4)'], // Jan misses row 2; Feb is already right
+];
+const TOTALS_USED = { values: TOTALS_VALUES, formulas: TOTALS_FORMULAS, start: { col: 0, row: 0 } };
+
+test('spans every app row, from the first to the last', () => {
+  const grid = locateGrid(TOTALS_VALUES, null);
+  const { firstRow, lastRow, totalRow, changes } = planTotals(grid, TOTALS_USED);
+  assert.strictEqual(firstRow, 2, 'the first app is on row 2');
+  assert.strictEqual(lastRow, 4, 'the last app is on row 4');
+  assert.strictEqual(totalRow, 6);
+  const jan = changes.find(c => c.month === '2026-01');
+  assert.strictEqual(jan.to, '=SUM(C2:C4)');
+  assert.strictEqual(jan.address, 'C6');
+});
+
+test('flags only the columns that are actually wrong', () => {
+  const grid = locateGrid(TOTALS_VALUES, null);
+  const { changes } = planTotals(grid, TOTALS_USED);
+  const jan = changes.find(c => c.month === '2026-01');
+  const feb = changes.find(c => c.month === '2026-02');
+  assert.strictEqual(jan.needsFix, true, 'Jan sums C3:C4 and misses the first app');
+  assert.strictEqual(feb.needsFix, false, 'Feb already spans every app row');
+});
+
+test('reports the formula being replaced, so the change is reviewable', () => {
+  const grid = locateGrid(TOTALS_VALUES, null);
+  const { changes } = planTotals(grid, TOTALS_USED);
+  assert.strictEqual(changes.find(c => c.month === '2026-01').from, '=SUM(C3:C4)');
+});
+
+test('refuses a sheet with no Total row rather than guessing one', () => {
+  const values = TOTALS_VALUES.slice(0, 4);
+  const grid = locateGrid(values, null);
+  assert.throws(() => planTotals(grid, { values, formulas: [], start: { col: 0, row: 0 } }), /Total row/);
+});
