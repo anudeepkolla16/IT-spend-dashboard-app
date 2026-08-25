@@ -5,5 +5,8 @@
   "dependencies": {
     "xlsx": "^0.18.5",
     "@vercel/functions": "^1.5.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
   }
 }

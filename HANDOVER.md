@@ -15,12 +15,69 @@ deployed automatically from GitHub.
 
 | Data | How it updates |
 |---|---|
-| **Spend amounts** | The page re-fetches the Excel sheet from SharePoint every 5 minutes while open, and on "Refresh now". Edit the sheet → dashboard follows. |
+| **Spend amounts** | Click **💰 Update Amounts**, hand it the statement workbook Finance sends, review, apply. It writes the month column for you. Editing the sheet by hand still works — the page re-fetches every 5 minutes and on "Refresh now". |
 | **Invoices** | A daily Vercel Cron job (2 AM UTC) mirrors *new* invoice PDFs from the source SharePoint folders into `Invoices/{App}/…`. Only files not already present are copied. |
 | **Access** | Microsoft sign-in; only emails in `ALLOWED_EMAILS` are let in. |
 
-**Manual tasks going forward:** update the Excel sheet when amounts change; drop new
-invoice PDFs into the source `Procurement bills/{vendor}/…` folders. Everything else is automatic.
+**Manual tasks going forward:** ask Finance for the monthly statement workbook and run
+**Update Amounts** with it; drop new invoice PDFs into the source `Procurement bills/{vendor}/…`
+folders. Everything else is automatic.
+
+---
+
+## Updating amounts from a statement
+
+Amounts used to be copied into the sheet by hand each month. **💰 Update Amounts** in the
+dashboard header does that job: you give it the statement workbook Finance sends, it works
+out what each app's month cell should say, applies the unambiguous ones, and asks about the rest.
+
+**How to run it**
+
+1. Click **💰 Update Amounts** and pick the statement file (`.xlsx`/`.csv`, up to 3 MB).
+2. Check the **Month** it detected — taken from the data, not the filename, since statement
+   files are named inconsistently (`apps Apr.xlsx`, `Saras appas & subscription June 2026.xlsx`).
+3. Work through the review sections, then **Apply to sheet**.
+
+**What lands in each section**
+
+| Section | What it means |
+|---|---|
+| **Ready to apply** | Vendor matched exactly one app row and the month cell is empty. Ticked by default. |
+| **Need a look** | Cell already holds a different figure, the total is wildly off this app's trailing 3-month average, refunds outweigh charges, or the sheet has no column for that month. Unticked — tick what you want written. |
+| **Unrecognised vendors** | The vendor label matched no app row. Pick the row it belongs to; the mapping is saved and resolves itself next month. |
+| **Already correct** | The sheet already holds the figure the statement gives. Nothing is written. |
+
+Every row has a transaction drill-down showing the individual charges behind the figure, so a
+number can be checked before it is written.
+
+**How a charge is assigned to a month.** Default is *the statement's month*. The other option,
+*the month it was purchased*, reads the date inside the bank descriptor (`ANTHROPIC 05/31 PURCHASE`),
+which can fall in the previous month. Both rules exist because the sheet's own history follows
+both: Bubble Starter's May-dated purchases were filed under June, but Chargebee's `05/31` charge
+went to May. Switch the rule if a month looks off, and the figures regroup.
+
+**Vendor labels.** Matching is on the statement's `Comments` column, normalised — so
+`bubble Starter` and `Bubble Starter` are one app, and known typos like `Likedin` are seeded in.
+The statement sheet with no `Comments` column is matched on the bank descriptor instead
+(`ANTHROPIC* CLAUDE SUB` is the seat subscription, a different row from the API console).
+
+**Refunds** net against charges rather than adding to them, and any app whose month includes a
+refund is sent to review rather than applied silently.
+
+**Safety.** Writes go through the Graph Excel API one cell at a time, so the `=SUM()` totals,
+number formats and the other two sheets are untouched — nothing is rewritten except the exact
+cells you approve. App rows and month columns are re-read from the live file at write time, so a
+row inserted between preview and apply can't misdirect a write. Every write is recorded in
+`Invoices/_amount-log.json` with who approved it and what the cell held before.
+
+**Files it keeps**
+
+- `Invoices/_amount-map.json` — vendor label → app mappings you've confirmed
+- `Invoices/_amount-log.json` — audit trail of the last 200 writes (`GET /api/amounts/log`)
+
+**Tests:** `npm install && npm test`. The suite checks the parser reproduces figures already in
+the live sheet (Bubble Starter `751.96`, DBT Cloud `531.25`, Google cloud `38686.27`,
+Claude seats `118`) and that writes land on the right cell and never on the Total row.
 
 ---
 
@@ -96,8 +153,16 @@ vercel.json                    Function timeouts, the daily cron schedule, no-ca
 lib/
   session.js                   Signs/verifies the session cookie
   graph.js                     Shared Microsoft Graph helpers (token, drive, list, upload, share resolve)
+  excel.js                     Graph Excel API helpers — in-place cell writes, sheet/grid location
+  statement.js                 Parses Finance's statement workbook into transactions
+  vendor-map.js                Vendor label → app row matching (seeded aliases + descriptor rules)
+  spend-sheet.js               Opens the spend workbook, alias map and audit log
 api/
   spend-data.js                Reads + parses the Excel sheet → JSON the dashboard renders (60s cache)
+  amounts/
+    preview.js                 Reads a statement, proposes per-app month figures, flags exceptions
+    apply.js                   Writes approved figures into the sheet + appends the audit log
+    log.js                     Recent amount writes
   auth/{login,callback,logout,me}.js   Microsoft OAuth sign-in flow
   invoices/
     list.js                    Lists an app's invoices (recurses into month subfolders)
