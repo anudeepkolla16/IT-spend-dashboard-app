@@ -239,9 +239,14 @@ api/
 - **Invoice uploads handle any size** — files over 4 MB go via a Graph resumable upload session.
 - **Browsers won't cache the HTML** (no-cache headers), so deployed changes show up on a normal refresh.
 - **Cron is once-daily** on the current Vercel plan. If more frequent mirroring is ever needed, that's a plan/scheduler change.
-- **The Hobby plan allows 12 Serverless Functions per deployment, and every file under `api/` is one.**
-  The deployment currently uses 11, so there is room for exactly one more file before builds start
-  failing with `exceeded_serverless_functions_per_deployment`. That is why the three amount handlers
-  share `api/amounts.js` (dispatching on `action`) and the mailbox sync runs inside
-  `api/invoices/sync-cron.js` rather than each having its own route. Add new endpoints the same way —
-  logic in `lib/`, dispatched from an existing route — unless the plan changes.
+- **The Hobby plan allows 12 Serverless Functions per deployment, and the project is at exactly 12.**
+  That is the 11 files under `api/` **plus `middleware.js`**, which also compiles to a function —
+  easy to forget when counting. Vercel reports the total as `lambdaRuntimeStats` on a deployment
+  (`{"nodejs":12}`). There is **no headroom**: adding one more file under `api/` fails the build with
+  `exceeded_serverless_functions_per_deployment`, which is what happened when the amount and mailbox
+  endpoints were first added as four separate routes.
+
+  That is why the three amount handlers share `api/amounts.js` (dispatching on `action`) and the
+  mailbox sync runs inside `api/invoices/sync-cron.js` (`?mode=mail`). **Add any new endpoint the
+  same way** — logic in `lib/`, dispatched from an existing route — or move the project to a Pro
+  team, which raises the limit.
