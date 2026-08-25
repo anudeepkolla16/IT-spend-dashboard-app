@@ -115,10 +115,17 @@ same `Invoices/_amount-map.json`.
 
 ### Invoice totals and the Spendings sheet
 
-The sync reads the payable total out of each invoice PDF and **fills the app's month cell in
-Spendings when that cell is empty**. It never overwrites a figure that is already there — an
-existing value may be the bank-statement figure or a hand correction, and an invoice total is not
-authoritative over either. Anything it declines to write is listed in the run summary.
+The sync totals **every invoice in the app's month folder** — not just the ones that arrived by
+email. Invoices reach the archive by several routes (hand-filed, mirrored from the source folders,
+filed by this sync), and an email-only total undercounts badly: Bubble's August mail carried 2 of
+its 9 charges, so an email-only total read `64.00` against an actual `524.27`.
+
+It then **fills the app's month cell in Spendings when that cell is empty**, and may **top up a
+cell it wrote itself** as later invoices arrive — Bubble's ninth August invoice lands on the 28th,
+so a figure written mid-month would otherwise stay short for ever while looking final. A cell only
+counts as the sync's own if it still holds exactly what the sync last wrote (tracked in
+`Invoices/_invoice-index.json` under `written`). **The moment anyone edits it, it is off limits** —
+a bank-statement figure or a hand correction is never overwritten, only reported.
 
 **Only unambiguously USD invoices are used.** This matters more than it sounds. The sheet is
 entirely in USD, but Indian vendors bill in INR — Tata Tele's June invoice reads

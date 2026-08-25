@@ -229,3 +229,64 @@ test('parsed totals are cached by path so a PDF is read once', () => {
   assert.match(src, /amounts: existing\.concat\(budget\.fresh\)/,
     'fresh results must persist to the index for the next run');
 });
+
+
+// --- Topping up as later invoices arrive --------------------------------
+//
+// Invoices for a month arrive across it — Bubble's ninth August invoice lands on
+// the 28th. Writing once and never revisiting would leave the cell permanently
+// short while looking final. A cell this sync wrote, and which still holds
+// exactly what it wrote, may be topped up; anything else must not be.
+
+test('tops up a cell this sync wrote when later invoices arrive', () => {
+  // We wrote 492.27 earlier; the ninth invoice takes the folder to 524.27.
+  const prior = { 'Bubble Starter||2026-06': 492.27 };
+  const values = VALUES.map(r => r.slice());
+  values[3][8] = 492.27; // Bubble Starter, Jun-26 column
+  const { write, updated, skippedFilled } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 524.27 } },
+    locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, prior
+  );
+  assert.strictEqual(write.length, 0);
+  assert.strictEqual(skippedFilled.length, 0);
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].previous, 492.27);
+  assert.strictEqual(updated[0].value, 524.27);
+});
+
+test('never touches a figure a human or the statement put there', () => {
+  // The cell holds 524.27 but we never wrote it — it is not ours to change.
+  const values = VALUES.map(r => r.slice());
+  values[3][8] = 524.27;
+  const { write, updated, skippedFilled } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 492.27 } },
+    locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, {}
+  );
+  assert.strictEqual(write.length, 0);
+  assert.strictEqual(updated.length, 0);
+  assert.strictEqual(skippedFilled.length, 1, 'must be reported, not written');
+});
+
+test('stops touching a cell once someone has corrected it', () => {
+  // We wrote 492.27, a human changed it to 500 — it is no longer ours.
+  const prior = { 'Bubble Starter||2026-06': 492.27 };
+  const values = VALUES.map(r => r.slice());
+  values[3][8] = 500;
+  const { write, updated, skippedFilled } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 524.27 } },
+    locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, prior
+  );
+  assert.strictEqual(write.length + updated.length, 0, 'a corrected cell is off limits');
+  assert.strictEqual(skippedFilled.length, 1);
+});
+
+test('does not rewrite a cell that already holds the right total', () => {
+  const prior = { 'Bubble Starter||2026-06': 524.27 };
+  const values = VALUES.map(r => r.slice());
+  values[3][8] = 524.27;
+  const { write, updated, skippedFilled } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 524.27 } },
+    locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, prior
+  );
+  assert.strictEqual(write.length + updated.length + skippedFilled.length, 0, 'nothing to do');
+});
