@@ -1216,11 +1216,13 @@ $('#amtApply').onclick = async () => {
 
 /* Pull invoices from the shared invoices mailbox on demand. The same job also
    runs on the daily cron, so this is for when you don't want to wait. */
-$('#mailSyncBtn').onclick = async () => {
+$('#mailSyncBtn').onclick = () => runMailSync(false);
+
+async function runMailSync(rescan){
   const btn = $('#mailSyncBtn'), orig = btn.textContent;
-  btn.textContent = 'Checking mailbox…'; btn.disabled = true;
+  btn.textContent = rescan ? 'Re-reading mailbox…' : 'Checking mailbox…'; btn.disabled = true;
   try{
-    const res = await fetch('/api/invoices/sync-cron?mode=mail', { method:'POST' });
+    const res = await fetch('/api/invoices/sync-cron?mode=mail' + (rescan ? '&rescan=1' : ''), { method:'POST' });
     // A crashed function replies with plain text ("A server error has occurred"),
     // so parsing as JSON unconditionally hides the real failure behind a
     // JSON-syntax error. Read the body once and only then decide.
@@ -1260,14 +1262,26 @@ $('#mailSyncBtn').onclick = async () => {
     if (json.skippedNotInvoice) lines.push(`\nSkipped ${json.skippedNotInvoice} message${json.skippedNotInvoice===1?'':'s'} that didn't look like an invoice.`);
     if (json.timedOut) lines.push('\nRan out of time part-way — run it again to pick up the rest.');
     if ((json.errors||[]).length) lines.push(`\nErrors:\n  ${json.errors.slice(0,5).join('\n  ')}`);
+    // Nothing new is the normal case between runs — the sync only looks at mail
+    // that arrived since the last one. Offer the wider re-read rather than
+    // leaving "Scanned 0" looking like a failure.
+    if (!rescan && !json.scanned){
+      const when = json.since ? new Date(json.since).toLocaleString() : 'the last run';
+      btn.textContent = orig; btn.disabled = false;
+      if (confirm(`No invoice mail has arrived since ${when}.\n\nRe-read the last 60 days instead? This re-checks invoices already filed and can fill in amounts that were missed.`)){
+        return runMailSync(true);
+      }
+      return;
+    }
+
     alert(lines.join('\n'));
-    if (json.filed) syncFromApi(true);
+    if (json.filed || (json.amountsWritten||[]).length) syncFromApi(true);
   }catch(err){
     alert('Mailbox fetch failed: ' + err.message);
   }finally{
     btn.textContent = orig; btn.disabled = false;
   }
-};
+}
 </script>
 </body>
 </html>

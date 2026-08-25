@@ -280,3 +280,42 @@ test('routes a reseller-billed charge to the real vendor, not the reseller', () 
   assert.strictEqual(r('', 'GOOGLE *ADS710 06/01 PURCHASE Mountain View CA').app, 'GOOGLE ADS');
   assert.strictEqual(r('', 'GOOGLE *CLOUD 9Q4THP 6502530000 CA').app, 'Google cloud');
 });
+
+// --- The rescan window ---------------------------------------------------
+//
+// A live run reported "Scanned 0 messages": the sync only asks Graph for mail
+// newer than its last successful run, and all four mailbox messages predated it.
+// rescan skipped the seen-list but left that window alone, so it returned zero
+// too — the flag did nothing. The window has to widen as well.
+
+function sinceFor(state, opts, lookbackDays) {
+  // Mirrors the expression in runMailSync.
+  const lookback = new Date(Date.now() - lookbackDays * 86400000).toISOString();
+  return opts.rescan ? lookback : (state.lastRunAt || lookback);
+}
+
+test('a normal run only looks at mail since the last successful run', () => {
+  const since = sinceFor({ lastRunAt: '2026-08-25T11:07:00Z' }, {}, 60);
+  assert.strictEqual(since, '2026-08-25T11:07:00Z');
+});
+
+test('a rescan widens the window instead of honouring the watermark', () => {
+  const state = { lastRunAt: '2026-08-25T11:07:00Z' };
+  const since = sinceFor(state, { rescan: true }, 60);
+  assert.notStrictEqual(since, state.lastRunAt, 'rescan must not reuse the watermark');
+  assert.ok(Date.parse(since) < Date.parse(state.lastRunAt), 'rescan must reach further back');
+  // Messages that arrived before the last run are what a rescan exists to find.
+  assert.ok(Date.parse('2026-08-25T08:46:00Z') >= Date.parse(since));
+});
+
+test('the first ever run falls back to the lookback window', () => {
+  const since = sinceFor({}, {}, 60);
+  assert.ok(Date.parse(since) < Date.now());
+});
+
+test('the source really does branch on rescan, not just the helper above', () => {
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'lib', 'mail-sync.js'), 'utf8');
+  assert.match(src, /const since = opts\.rescan \?/,
+    'runMailSync must pick the window based on opts.rescan');
+});
