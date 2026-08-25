@@ -198,3 +198,70 @@ test('escapes the mailbox address into the path', () => {
   const url = mail.messagesUrl('inv oices+x@b.com', null, 10, true);
   assert.ok(url.includes(encodeURIComponent('inv oices+x@b.com')));
 });
+
+// --- Ticking the invoice tracker ----------------------------------------
+//
+// The first live run reported "Ticked 2 cells" when only one cell existed to
+// tick: two Bubble invoices arrived in the same month and each queued its own
+// mark, so the same cell was written twice. The sheet was correct, the count
+// was not.
+
+const { planTrackerCells } = require('../lib/mail-sync');
+const { locateGrid } = require('../lib/excel');
+
+// A tracker shaped like the live one: TRUE/FALSE cells, date-serial headers.
+const TRACKER_VALUES = [
+  ['APPLICATION / SW / LICENSE', 'Department', 'POC', 'Renewal data', 'Recurring/Onetime', 'FREQUENCY', 46023, 46174, 46235],
+  ['Adobe', 'Marketing', 'Bhavana', '', 'Recurring', 'Monthly', true, true, false],
+  ['Bubble Starter', 'Product', 'Ganesh', '', 'Recurring', 'Monthly', false, false, false],
+  ['Github', 'DE', 'Anudeep', '', 'Recurring', 'Monthly', true, true, false],
+];
+// Graph renders a boolean cell as "TRUE"/"FALSE" and a date header by its number
+// format; every other cell's text matches its value.
+const TRACKER_TEXT = TRACKER_VALUES.map((row, i) => row.map((c, j) => {
+  if (i === 0 && j >= 6) return ['Jan-26', 'Jun-26', 'Aug-26'][j - 6];
+  if (typeof c === 'boolean') return c ? 'TRUE' : 'FALSE';
+  return c == null ? '' : String(c);
+}));
+const TRACKER_USED = { values: TRACKER_VALUES, text: TRACKER_TEXT, start: { col: 0, row: 0 } };
+const trackerGrid = () => locateGrid(TRACKER_VALUES, TRACKER_TEXT);
+
+test('ticks one cell however many invoices arrive for that app-month', () => {
+  // Two Bubble invoices in August — one cell, written once.
+  const cells = planTrackerCells(
+    [{ app: 'Bubble Starter', month: '2026-08' }, { app: 'Bubble Starter', month: '2026-08' }],
+    trackerGrid(), TRACKER_USED
+  );
+  assert.strictEqual(cells.length, 1);
+  assert.strictEqual(cells[0].address, 'I3'); // Bubble Starter row 3, Aug-26 column I
+  assert.strictEqual(cells[0].value, true);
+});
+
+test('still ticks separate cells for different apps or months', () => {
+  const cells = planTrackerCells(
+    [
+      { app: 'Bubble Starter', month: '2026-08' },
+      { app: 'Github', month: '2026-08' },
+      { app: 'Bubble Starter', month: '2026-08' }, // duplicate of the first
+    ],
+    trackerGrid(), TRACKER_USED
+  );
+  assert.strictEqual(cells.length, 2);
+  assert.deepStrictEqual(cells.map(c => c.address).sort(), ['I3', 'I4']);
+});
+
+test('leaves a cell alone when it is already ticked', () => {
+  const cells = planTrackerCells([{ app: 'Adobe', month: '2026-01' }], trackerGrid(), TRACKER_USED);
+  assert.strictEqual(cells.length, 0, 'Adobe Jan-26 is already TRUE');
+});
+
+test('skips a mark that has no row or no column in the tracker', () => {
+  const cells = planTrackerCells(
+    [
+      { app: 'Not In The Tracker', month: '2026-08' },
+      { app: 'Bubble Starter', month: '2027-03' }, // no such column
+    ],
+    trackerGrid(), TRACKER_USED
+  );
+  assert.strictEqual(cells.length, 0);
+});
