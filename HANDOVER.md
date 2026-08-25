@@ -70,6 +70,17 @@ cells you approve. App rows and month columns are re-read from the live file at 
 row inserted between preview and apply can't misdirect a write. Every write is recorded in
 `Invoices/_amount-log.json` with who approved it and what the cell held before.
 
+### Checking the Total row
+
+**🧮 Check Totals** verifies that the Total row's `=SUM()` ranges span every app row, and offers to
+repair the ones that don't. The ranges were written once and go stale every time an app is added —
+the month columns had drifted apart, so some months were leaving rows out of the total.
+
+It always shows the current formula against the proposed one and asks before changing anything,
+since this edits formulas rather than values. The range is derived from the live sheet each run
+rather than hardcoded, so it stays correct as rows are inserted and is safe to re-run whenever the
+sheet grows. Repairs are recorded in `Invoices/_amount-log.json` with `source: "fix-totals"`.
+
 **Files it keeps**
 
 - `Invoices/_amount-map.json` — vendor label → app mappings you've confirmed

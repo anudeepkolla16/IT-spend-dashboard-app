@@ -153,6 +153,7 @@
   <div class="grow"></div>
   <div class="toolbar">
     <span class="cap" id="whoami"></span>
+    <button class="btn ghost" id="fixTotalsBtn">🧮 Check Totals</button>
     <button class="btn ghost" id="mailSyncBtn">📧 Fetch Invoices</button>
     <button class="btn ghost" id="amountsBtn">💰 Update Amounts</button>
     <input type="file" id="amountsFile" accept=".xlsx,.xlsm,.xls,.csv" class="hidden" />
@@ -1304,6 +1305,55 @@ async function runMailSync(rescan){
     btn.textContent = orig; btn.disabled = false;
   }
 }
+
+/* The Total row's SUM ranges go stale as apps are added to the sheet, so some
+   months quietly leave rows out. This shows what is wrong before changing
+   anything — it edits formulas, so it always asks first. */
+$('#fixTotalsBtn').onclick = async () => {
+  const btn = $('#fixTotalsBtn'), orig = btn.textContent;
+  btn.textContent = 'Checking…'; btn.disabled = true;
+  const post = async (body) => {
+    const res = await fetch('/api/amounts', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'fix-totals', ...body })
+    });
+    const raw = await res.text();
+    let json;
+    try { json = JSON.parse(raw); }
+    catch { throw new Error(`HTTP ${res.status}: ${raw.slice(0,300) || 'empty response'}`); }
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    return json;
+  };
+  try{
+    const dry = await post({});
+    const bad = (dry.changes||[]).filter(c => c.needsFix);
+    if (!bad.length){
+      alert(`The Total row is correct.\n\nEvery month sums rows ${dry.firstRow}–${dry.lastRow}, which is every app in the sheet.`);
+      return;
+    }
+    const lines = [
+      `${bad.length} month${bad.length===1?'':'s'} in the Total row (row ${dry.totalRow}) do not sum every app.`,
+      `App rows are ${dry.firstRow}–${dry.lastRow}.`,
+      '',
+      ...bad.slice(0,14).map(c => `  ${c.address}   ${c.from}  →  ${c.to}`),
+      '',
+      'Fix them? This edits formulas in the Spendings sheet.',
+    ];
+    if (!confirm(lines.join('\n'))) return;
+
+    btn.textContent = 'Fixing…';
+    const done = await post({ apply: true });
+    const out = [`Fixed ${done.fixed.length} formula${done.fixed.length===1?'':'s'} in the Total row.`];
+    done.fixed.slice(0,14).forEach(f => out.push(`  ${f.address}: ${f.to}`));
+    if ((done.failed||[]).length) out.push(`\n${done.failed.length} failed: ${done.failed.map(f=>f.month+' ('+f.error+')').join('; ')}`);
+    alert(out.join('\n'));
+    syncFromApi(true);
+  }catch(err){
+    alert('Total check failed: ' + err.message);
+  }finally{
+    btn.textContent = orig; btn.disabled = false;
+  }
+};
 </script>
 </body>
 </html>
