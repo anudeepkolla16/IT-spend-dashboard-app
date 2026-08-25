@@ -93,11 +93,23 @@ second half of the daily invoice cron (2 AM UTC), and from **📧 Fetch Invoices
 2. Works out the app from the subject, the attachment filename and the sender's domain —
    taking the *original* sender out of a forwarded message, so `FW: [Bubble] Invoice`
    forwarded by a colleague is filed under Bubble Starter, not against the colleague.
-3. Saves the PDF to `Invoices/{App}/{YYYY-MM}/`, skipping anything already there.
+3. Saves the PDF into the procurement archive at
+   `Desktop/Anudeep files/Procurment bills/{vendor}/{month}/`, skipping anything already there.
+   The vendor folder is the one that app is already mapped to in `_sync-config.json`
+   (`Bubble Starter` → `Bubble`, `Cursor pro` → `Cursor`), and the month subfolder **reuses
+   whatever is already there** — `Bubble/Aug`, `Cursor/July` — rather than adding a second
+   folder beside it. Only when no month folder exists is one created, named `Aug-26`.
 4. Ticks that app's month in the **Invoices tracker** sheet (the TRUE/FALSE grid).
 
-**Anything it can't place** goes to `Invoices/_Unmatched/{YYYY-MM}/` and is listed in the run
-summary with its subject and sender, so nothing is silently dropped. Add the vendor once via
+Invoices are filed where they have always been filed by hand, so there is **one archive, not
+two**. The folder mirror then copies them on to `Invoices/{App}/` for the dashboard — and
+because the mailbox pass runs *first* in the cron, an invoice that arrives by mail reaches the
+dashboard in the same run instead of waiting a day.
+
+**Anything it can't place** goes to `Procurment bills/_Unmatched/{month}/` and is listed in the run
+summary with its subject and sender, so nothing is silently dropped. If an app has no procurement
+folder mapped at all, a folder named after the app is created and reported under `newFolders` —
+map it via **Import Invoices** so the mirror starts picking it up. Add the vendor once via
 **Update Amounts → Unrecognised vendors** and the mapping applies to mail too — both use the
 same `Invoices/_amount-map.json`.
 
@@ -110,6 +122,8 @@ remains the source of the figures.
 **Files it keeps**
 
 - `Invoices/_mail-sync.json` — last run time and recently seen message IDs (so nothing is filed twice)
+- `Invoices/_sync-config.json` — the folder→app mapping, read in **both** directions: the mirror
+  uses folder→app, the mailbox sync uses app→folder
 - `Invoices/_invoice-index.json` — what was filed, from whom, for which app and month
 
 **Manual run** (`mode=mail` for the mailbox only, `mode=folders` for the folder mirror, omit for both):
@@ -142,6 +156,7 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 | `PUBLIC_APP_URL` | `https://it-spend-dashboard-app.vercel.app` (used to build the OAuth redirect) |
 | `CRON_SECRET` | Authorizes the daily invoice-sync crons. Vercel auto-sends it as a Bearer token on scheduled runs. |
 | `INVOICE_MAILBOX` | Shared mailbox the invoice sync reads. Defaults to `invoices@sarasanalytics.com` (note the plural) if unset. |
+| `INVOICE_SOURCE_PATH` | Where invoices are archived. Defaults to `Desktop/Anudeep files/Procurment bills` — note the folder really is spelled *Procurment*. Set this if the archive ever moves. |
 | `SPEND_SHEET_NAME` | Worksheet holding the amounts. Defaults to `Spendings`; only set it if that tab is renamed. |
 
 > Env-var changes take effect only on the **next deployment**. To apply: push any commit
@@ -172,11 +187,12 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 
 - **Spend sheet:** the file at `TARGET_FILE_PATH`. Amounts are all in USD; month columns are headers like `Jan-26`.
 - **Dashboard invoice store:** `Invoices/{App Name}/…` — one folder per app (exact dashboard app name). Written by the app.
-- **Invoice source:** `Desktop/Anudeep files/Procurement bills/{vendor}/…` — where you drop new invoices. Folder names don't match app names, which is why there's a saved mapping.
+- **Invoice source:** `Desktop/Anudeep files/Procurment bills/{vendor}/…` — where you drop new invoices. Folder names don't match app names, which is why there's a saved mapping.
 - **Auto-sync config:** `Invoices/_sync-config.json` — holds the source folder link and the
   folder→app mapping the cron uses. Created/updated whenever you run **Import Invoices** and confirm.
-- **Mailbox invoices:** `Invoices/{App}/{YYYY-MM}/…` — written by the mailbox sync.
-- **Unmatched invoices:** `Invoices/_Unmatched/{YYYY-MM}/…` — invoices whose vendor didn't match an app row.
+- **Mailbox invoices:** written into the procurement archive above, under
+  `Procurment bills/{vendor}/{month}/` — the same folders used for hand-filed invoices.
+- **Unmatched invoices:** `Procurment bills/_Unmatched/{month}/…` — invoices whose vendor didn't match an app row.
 
 ---
 
@@ -187,7 +203,7 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 **Point at a different / renamed sheet:** update `TARGET_FILE_PATH` to the new relative path, then redeploy.
 
 **Re-map invoice folders (e.g. new vendor folder):** click **Import Invoices**, paste the source
-`Procurement bills` folder link, review the folder→app dropdowns, **Confirm & Import**. This also
+`Procurment bills` folder link, review the folder→app dropdowns, **Confirm & Import**. This also
 re-saves `_sync-config.json`, so the daily cron picks up the new mapping.
 
 **Manually trigger the invoice sync (test):**

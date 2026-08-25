@@ -99,3 +99,66 @@ test('defaults to the shared invoices mailbox', () => {
   assert.strictEqual(mail.mailboxAddress(), 'other@example.com');
   delete process.env.INVOICE_MAILBOX;
 });
+
+// --- Where invoices get filed -------------------------------------------
+//
+// Invoices belong in the procurement archive they have always been filed in —
+// Desktop/Anudeep files/Procurment bills/{vendor}/{month}/ — not in a separate
+// store. The vendor folder comes from the folder->app mapping the invoice
+// import already saved, and the month subfolder reuses whatever is there.
+
+const { appToSourceFolder, monthFolderName, sourceBase } = require('../lib/mail-sync');
+
+// The real mapping saved in Invoices/_sync-config.json.
+const SAVED_MAPPING = {
+  Adobe: 'Adobe',
+  Bubble: 'Bubble Starter',
+  Cursor: 'Cursor pro',
+  'Claude Api': 'Anthropic(Api Console)',
+  'click up invoices': 'Mango technology(Clickup)',
+  'Laptop procurment': 'Laptops Procurement',
+  Webflow: 'WEBFLOW',
+};
+
+test('routes an app back to the vendor folder it is archived under', () => {
+  const byApp = appToSourceFolder(SAVED_MAPPING);
+  assert.strictEqual(byApp['Bubble Starter'], 'Bubble');
+  assert.strictEqual(byApp['Cursor pro'], 'Cursor');
+  assert.strictEqual(byApp['Anthropic(Api Console)'], 'Claude Api');
+  assert.strictEqual(byApp['Mango technology(Clickup)'], 'click up invoices');
+  assert.strictEqual(byApp['WEBFLOW'], 'Webflow');
+  // An app with no procurement folder has no mapping to fall back on.
+  assert.strictEqual(byApp['Sentry.io'], undefined);
+});
+
+test('defaults to the procurement path, spelled as it really is on disk', () => {
+  delete process.env.INVOICE_SOURCE_PATH;
+  assert.strictEqual(sourceBase(), 'Desktop/Anudeep files/Procurment bills');
+  process.env.INVOICE_SOURCE_PATH = 'Some/Other/Path/';
+  assert.strictEqual(sourceBase(), 'Some/Other/Path');
+  delete process.env.INVOICE_SOURCE_PATH;
+});
+
+test('reuses an existing month subfolder rather than adding one beside it', () => {
+  // Bubble already has "Aug"; Cursor already has "July". Neither should gain a
+  // second folder for the same month.
+  assert.strictEqual(monthFolderName(['Aug', 'July'], '2026-08'), 'Aug');
+  assert.strictEqual(monthFolderName(['June', 'July'], '2026-07'), 'July');
+  assert.strictEqual(monthFolderName(['Aug-26'], '2026-08'), 'Aug-26');
+  assert.strictEqual(monthFolderName(['2026-08'], '2026-08'), '2026-08');
+  assert.strictEqual(monthFolderName(['August 2026'], '2026-08'), 'August 2026');
+  // Case and stray whitespace in the existing name must still match.
+  assert.strictEqual(monthFolderName([' aug '], '2026-08'), ' aug ');
+});
+
+test('creates a dated month folder only when none exists', () => {
+  assert.strictEqual(monthFolderName([], '2026-08'), 'Aug-26');
+  assert.strictEqual(monthFolderName(['Quotations'], '2026-01'), 'Jan-26');
+  // A folder for a different month must not be reused.
+  assert.strictEqual(monthFolderName(['July'], '2026-08'), 'Aug-26');
+});
+
+test('returns nothing for a month it cannot parse', () => {
+  assert.strictEqual(monthFolderName([], ''), null);
+  assert.strictEqual(monthFolderName([], 'not-a-month'), null);
+});
