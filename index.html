@@ -81,6 +81,34 @@
   tbody tr{cursor:pointer}
   tbody tr:hover td{background:rgba(255,255,255,.03)}
 
+  /* Amount import review */
+  .amt-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  .amt-pill{border-radius:14px;padding:4px 11px;font-size:12px;font-weight:600;border:1px solid transparent}
+  .amt-pill.auto{background:rgba(61,220,151,.13);border-color:rgba(61,220,151,.4);color:#8ff0c4}
+  .amt-pill.review{background:rgba(255,176,32,.13);border-color:rgba(255,176,32,.4);color:#ffd489}
+  .amt-pill.unmapped{background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.4);color:#ffb3b3}
+  .amt-pill.muted{background:var(--chip);color:var(--muted);border-color:var(--line)}
+  .amt-section{margin-top:16px}
+  .amt-section h4{margin:0 0 4px;font-size:13.5px}
+  .amt-section .cap{margin-bottom:8px}
+  .amt-row{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--panel2)}
+  .amt-row.flag{border-color:rgba(255,176,32,.45)}
+  .amt-main{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .amt-app{font-weight:600;font-size:13.5px;flex:1;min-width:150px}
+  .amt-fig{font-variant-numeric:tabular-nums;font-size:13.5px;white-space:nowrap}
+  .amt-fig .was{color:var(--muted);text-decoration:line-through;margin-right:6px}
+  .amt-note{color:var(--warn);font-size:11.5px;flex-basis:100%;margin-top:3px}
+  .amt-toggle{background:none;border:0;color:var(--accent);font-size:11.5px;cursor:pointer;padding:2px 0}
+  .amt-txns{display:none;margin-top:8px;border-top:1px solid var(--line);padding-top:8px;max-height:190px;overflow:auto}
+  .amt-txns.show{display:block}
+  .amt-txns table{width:100%;border-collapse:collapse;font-size:11.5px}
+  .amt-txns td{padding:3px 6px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--muted)}
+  .amt-txns td.num{text-align:right;font-variant-numeric:tabular-nums;color:var(--txt);white-space:nowrap}
+  .amt-txns td.refund{color:var(--accent2)}
+  .amt-row select{background:var(--panel);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:5px 7px;font-size:12.5px;min-width:190px}
+  .amt-empty{color:var(--muted);font-size:12.5px;padding:10px 2px}
+  .amt-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  .amt-controls select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:12.5px}
   /* Drill-down modal */
   .modal-overlay{position:fixed;inset:0;background:rgba(5,7,15,.7);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
   .modal-overlay.show{display:flex}
@@ -125,6 +153,9 @@
   <div class="grow"></div>
   <div class="toolbar">
     <span class="cap" id="whoami"></span>
+    <button class="btn ghost" id="mailSyncBtn">📧 Fetch Invoices</button>
+    <button class="btn ghost" id="amountsBtn">💰 Update Amounts</button>
+    <input type="file" id="amountsFile" accept=".xlsx,.xlsm,.xls,.csv" class="hidden" />
     <button class="btn ghost" id="importBtn">📥 Import Invoices</button>
     <button class="btn ghost" id="refreshBtn">↻ Refresh now</button>
   </div>
@@ -242,6 +273,36 @@
         <div id="importModalStatus" class="cap" style="flex:1;align-self:center"></div>
         <button class="btn ghost" id="importModalCancel">Cancel</button>
         <button class="btn" id="importModalConfirm">Confirm &amp; Import</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="amtModalOverlay">
+    <div class="modal" style="max-width:860px">
+      <div class="modal-head">
+        <h3 id="amtTitle">Update amounts from statement</h3>
+        <button class="modal-close" id="amtClose">✕</button>
+      </div>
+      <div class="cap" id="amtSource" style="margin-bottom:10px"></div>
+
+      <div class="amt-controls">
+        <label class="cap" for="amtMonth">Month</label>
+        <select id="amtMonth"></select>
+        <label class="cap" for="amtRule">Count a charge in</label>
+        <select id="amtRule">
+          <option value="statement">the statement's month</option>
+          <option value="transaction">the month it was purchased</option>
+        </select>
+        <span class="cap" id="amtRuleNote"></span>
+      </div>
+
+      <div class="amt-summary" id="amtSummary"></div>
+      <div id="amtBody"></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
+        <div id="amtStatus" class="cap" style="flex:1;align-self:center"></div>
+        <button class="btn ghost" id="amtCancel">Cancel</button>
+        <button class="btn" id="amtApply">Apply to sheet</button>
       </div>
     </div>
   </div>
@@ -912,6 +973,275 @@ $('#modalUploadFile').onchange = async (e) => {
     loadInvoices(modalAppName);
   }catch(err){
     statusEl.textContent = `Upload failed: ${err.message}`;
+  }
+};
+
+/* ------------------------------------------------------------------ *
+ * Update amounts from a statement
+ *
+ * Finance hands over a statement workbook; this reads it, works out what
+ * each app's month cell should say, applies the unambiguous ones and asks
+ * about the rest. Nothing reaches the sheet until "Apply" is pressed.
+ * ------------------------------------------------------------------ */
+
+let amtState = { file:null, base64:null, preview:null, attribution:'statement', month:null, overrides:{} };
+
+const amtFmt = n => (n==null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const amtEsc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+$('#amountsBtn').onclick = () => $('#amountsFile').click();
+
+$('#amountsFile').onchange = async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const btn = $('#amountsBtn'), orig = btn.textContent;
+  btn.textContent = 'Reading…'; btn.disabled = true;
+  try{
+    const base64 = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result.split(',')[1]);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+    amtState = { file:file.name, base64, preview:null, attribution:'statement', month:null, overrides:{} };
+    await amtRunPreview();
+    $('#amtModalOverlay').classList.add('show');
+  }catch(err){
+    alert('Could not read that statement: ' + err.message);
+  }finally{
+    btn.textContent = orig; btn.disabled = false;
+  }
+};
+
+async function amtRunPreview(){
+  $('#amtStatus').textContent = 'Reading statement…';
+  const res = await fetch('/api/amounts', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      action: 'preview',
+      contentBase64: amtState.base64,
+      filename: amtState.file,
+      attribution: amtState.attribution,
+      aliasOverrides: amtState.overrides,
+    })
+  });
+  const json = await res.json();
+  if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+  amtState.preview = json;
+  const months = json.monthsCovered || [];
+  if (!amtState.month || !months.some(m => m.month === amtState.month)) {
+    amtState.month = months.length ? months[0].month : null;
+  }
+  $('#amtStatus').textContent = '';
+  amtRender();
+}
+
+function amtMonthLabel(ym){
+  if (!ym) return '—';
+  const [y,m] = ym.split('-');
+  return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m)-1] + '-' + String(y).slice(2);
+}
+
+function amtTxnTable(txns){
+  if (!txns || !txns.length) return '';
+  return `<div class="amt-txns"><table>${txns.map(t=>`
+    <tr>
+      <td style="white-space:nowrap">${amtEsc(t.date||'')}</td>
+      <td>${amtEsc(t.description||'').slice(0,72)}</td>
+      <td class="num ${t.amount<0?'refund':''}">${t.amount<0?'−':''}${amtFmt(Math.abs(t.amount))}</td>
+    </tr>`).join('')}</table></div>`;
+}
+
+function amtRender(){
+  const pv = amtState.preview;
+  if (!pv) return;
+  const month = amtState.month;
+
+  $('#amtSource').innerHTML = `<b>${amtEsc(amtState.file)}</b> · ${pv.summary.transactions} transactions · writing to the <b>${amtEsc(pv.sheetName)}</b> sheet`;
+
+  const months = pv.monthsCovered || [];
+  $('#amtMonth').innerHTML = months.map(m =>
+    `<option value="${m.month}" ${m.month===month?'selected':''}>${amtMonthLabel(m.month)} (${m.transactions})</option>`).join('')
+    || '<option value="">—</option>';
+  $('#amtRule').value = amtState.attribution;
+  $('#amtRuleNote').textContent = amtState.attribution === 'statement'
+    ? 'Charges count in the month of the statement they appear on.'
+    : 'Charges count in the month the purchase date says, which can be the month before.';
+
+  const inMonth = (pv.proposals||[]).filter(p => p.month === month);
+  const unmapped = (pv.unmapped||[]).filter(u => (u.months||[]).includes(month));
+  const auto = inMonth.filter(p => p.status === 'auto');
+  const review = inMonth.filter(p => p.status === 'review');
+  const unchanged = inMonth.filter(p => p.status === 'unchanged');
+
+  $('#amtSummary').innerHTML = [
+    auto.length ? `<span class="amt-pill auto">${auto.length} ready to apply</span>` : '',
+    review.length ? `<span class="amt-pill review">${review.length} need a look</span>` : '',
+    unmapped.length ? `<span class="amt-pill unmapped">${unmapped.length} unrecognised vendor${unmapped.length>1?'s':''}</span>` : '',
+    unchanged.length ? `<span class="amt-pill muted">${unchanged.length} already correct</span>` : '',
+  ].filter(Boolean).join('') || '<span class="amt-pill muted">Nothing to change for this month</span>';
+
+  const rowHtml = (p, checked) => `
+    <div class="amt-row ${p.status==='review'?'flag':''}" data-app="${amtEsc(p.app)}" data-month="${amtEsc(p.month)}" data-amount="${p.amount}">
+      <div class="amt-main">
+        <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:150px;cursor:pointer">
+          <input type="checkbox" class="amt-inc" ${checked?'checked':''} ${p.reason==='no-column'?'disabled':''} />
+          <span class="amt-app">${amtEsc(p.app)}</span>
+        </label>
+        <span class="amt-fig">
+          ${p.current!=null && p.current!==0 ? `<span class="was">${amtFmt(p.current)}</span>` : ''}
+          <b>${amtFmt(p.amount)}</b>
+        </span>
+        ${p.txns && p.txns.length ? `<button class="amt-toggle">${p.txns.length} txn${p.txns.length>1?'s':''}</button>` : ''}
+      </div>
+      ${p.note ? `<div class="amt-note">${amtEsc(p.note)}</div>` : ''}
+      ${amtTxnTable(p.txns)}
+    </div>`;
+
+  const sortedApps = [...(pv.appNames||[])].sort((a,b)=>a.localeCompare(b));
+  const unmappedHtml = u => `
+    <div class="amt-row flag" data-unmapped-key="${amtEsc(u.key)}">
+      <div class="amt-main">
+        <span class="amt-app">${amtEsc(u.label)}</span>
+        <span class="amt-fig"><b>${amtFmt(u.amount)}</b></span>
+        <select class="amt-map">
+          <option value="">— Skip —</option>
+          ${sortedApps.map(a=>`<option value="${amtEsc(a)}" ${a===u.suggestion?'selected':''}>${amtEsc(a)}</option>`).join('')}
+        </select>
+        ${u.txns && u.txns.length ? `<button class="amt-toggle">${u.txns.length} txn${u.txns.length>1?'s':''}</button>` : ''}
+      </div>
+      <div class="amt-note">Not in the sheet's app list yet — pick the row it belongs to and I'll remember it next time.</div>
+      ${amtTxnTable(u.txns)}
+    </div>`;
+
+  let html = '';
+  if (unmapped.length){
+    html += `<div class="amt-section"><h4>Unrecognised vendors</h4>
+      <div class="cap">These didn't match any app row. Map one and it's remembered for future statements.</div>
+      ${unmapped.map(unmappedHtml).join('')}</div>`;
+  }
+  if (review.length){
+    html += `<div class="amt-section"><h4>Need a look before writing</h4>
+      <div class="cap">Left unticked on purpose — tick the ones you want written.</div>
+      ${review.map(p=>rowHtml(p,false)).join('')}</div>`;
+  }
+  if (auto.length){
+    html += `<div class="amt-section"><h4>Ready to apply</h4>
+      <div class="cap">Vendor matched a single app row and the month cell is empty.</div>
+      ${auto.map(p=>rowHtml(p,true)).join('')}</div>`;
+  }
+  if (unchanged.length){
+    html += `<div class="amt-section"><h4>Already correct</h4>
+      <div class="cap">${unchanged.length} app${unchanged.length>1?'s':''} already hold the figure the statement gives: ${unchanged.map(p=>amtEsc(p.app)).join(', ')}.</div></div>`;
+  }
+  if (!html) html = '<div class="amt-empty">Nothing to change for this month.</div>';
+  $('#amtBody').innerHTML = html;
+
+  $('#amtBody').querySelectorAll('.amt-toggle').forEach(btn => {
+    btn.onclick = () => {
+      const box = btn.closest('.amt-row').querySelector('.amt-txns');
+      if (box) box.classList.toggle('show');
+    };
+  });
+  // Mapping an unrecognised vendor re-runs the preview so it lands in the right
+  // group, with the pending mapping folded in but not yet saved.
+  $('#amtBody').querySelectorAll('.amt-map').forEach(sel => {
+    sel.onchange = async () => {
+      const key = sel.closest('.amt-row').dataset.unmappedKey;
+      if (!sel.value) { delete amtState.overrides[key]; }
+      else { amtState.overrides[key] = sel.value; }
+      try { await amtRunPreview(); }
+      catch(err){ $('#amtStatus').textContent = 'Re-check failed: ' + err.message; }
+    };
+  });
+}
+
+$('#amtMonth').onchange = () => { amtState.month = $('#amtMonth').value; amtRender(); };
+$('#amtRule').onchange = async () => {
+  amtState.attribution = $('#amtRule').value;
+  try { await amtRunPreview(); }
+  catch(err){ $('#amtStatus').textContent = 'Re-check failed: ' + err.message; }
+};
+
+function amtCloseModal(){ $('#amtModalOverlay').classList.remove('show'); }
+$('#amtClose').onclick = amtCloseModal;
+$('#amtCancel').onclick = amtCloseModal;
+$('#amtModalOverlay').addEventListener('click', e => { if (e.target.id === 'amtModalOverlay') amtCloseModal(); });
+
+$('#amtApply').onclick = async () => {
+  const cells = [];
+  $('#amtBody').querySelectorAll('.amt-row[data-app]').forEach(row => {
+    const inc = row.querySelector('.amt-inc');
+    if (!inc || !inc.checked || inc.disabled) return;
+    cells.push({ app: row.dataset.app, month: row.dataset.month, amount: Number(row.dataset.amount) });
+  });
+  if (!cells.length){
+    $('#amtStatus').textContent = 'Nothing is ticked — tick at least one row to write.';
+    return;
+  }
+
+  const applyBtn = $('#amtApply'), cancelBtn = $('#amtCancel');
+  applyBtn.disabled = true; cancelBtn.disabled = true;
+  $('#amtStatus').textContent = `Writing ${cells.length} cell${cells.length>1?'s':''} to the sheet…`;
+  try{
+    const res = await fetch('/api/amounts', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        action: 'apply',
+        cells,
+        aliasUpdates: amtState.overrides,
+        statementName: amtState.file,
+        attribution: amtState.attribution,
+      })
+    });
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+
+    const bits = [`Wrote ${json.written} cell${json.written===1?'':'s'} to the sheet.`];
+    if (json.aliasesSaved) bits.push(`Remembered ${json.aliasesSaved} vendor mapping${json.aliasesSaved===1?'':'s'}.`);
+    if (json.failed) bits.push(`${json.failed} failed: ${(json.errors||[]).map(e=>e.app+' ('+e.error+')').join('; ')}`);
+    $('#amtStatus').textContent = bits.join(' ');
+
+    // Pull the sheet again so the dashboard shows the numbers just written.
+    await syncFromApi(true);
+    amtState.overrides = {};
+    setTimeout(() => { if (!json.failed) amtCloseModal(); }, 1400);
+  }catch(err){
+    $('#amtStatus').textContent = 'Write failed: ' + err.message;
+  }finally{
+    applyBtn.disabled = false; cancelBtn.disabled = false;
+  }
+};
+
+/* Pull invoices from the shared invoices mailbox on demand. The same job also
+   runs on the daily cron, so this is for when you don't want to wait. */
+$('#mailSyncBtn').onclick = async () => {
+  const btn = $('#mailSyncBtn'), orig = btn.textContent;
+  btn.textContent = 'Checking mailbox…'; btn.disabled = true;
+  try{
+    const res = await fetch('/api/invoices/sync-cron?mode=mail', { method:'POST' });
+    const outer = await res.json();
+    if (!res.ok || outer.error) throw new Error(outer.error || ('HTTP '+res.status));
+    const json = outer.mail || {};
+    if (json.error) throw new Error(json.error);
+
+    const lines = [`Scanned ${json.scanned} message${json.scanned===1?'':'s'} in ${json.mailbox}.`];
+    lines.push(`Filed ${json.filed} invoice PDF${json.filed===1?'':'s'}${json.alreadyPresent?`, ${json.alreadyPresent} already there`:''}.`);
+    if (json.tracker && json.tracker.marked) lines.push(`Ticked ${json.tracker.marked} cell${json.tracker.marked===1?'':'s'} in the "${json.tracker.sheet}" sheet.`);
+    if (json.unmatched){
+      lines.push(`\n${json.unmatched} invoice${json.unmatched===1?" couldn't":"s couldn't"} be matched to an app and went to Invoices/_Unmatched/:`);
+      (json.unmatchedItems||[]).slice(0,8).forEach(u => lines.push(`  · ${u.subject} — ${u.from||'unknown sender'}`));
+    }
+    if (json.skippedNotInvoice) lines.push(`\nSkipped ${json.skippedNotInvoice} message${json.skippedNotInvoice===1?'':'s'} that didn't look like an invoice.`);
+    if (json.timedOut) lines.push('\nRan out of time part-way — run it again to pick up the rest.');
+    if ((json.errors||[]).length) lines.push(`\nErrors:\n  ${json.errors.slice(0,5).join('\n  ')}`);
+    alert(lines.join('\n'));
+    if (json.filed) syncFromApi(true);
+  }catch(err){
+    alert('Mailbox fetch failed: ' + err.message);
+  }finally{
+    btn.textContent = orig; btn.disabled = false;
   }
 };
 </script>
