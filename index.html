@@ -1249,6 +1249,11 @@ async function runMailSync(rescan){
       folderTotals.slice(0,10).forEach(f => lines.push(
         `  · ${f.app} ${f.month}: ${Number(f.total).toLocaleString('en-US',{minimumFractionDigits:2})} from ${f.invoicesCounted}/${f.pdfsInFolder} invoice${f.pdfsInFolder===1?'':'s'}`));
     }
+    const upd = json.amountsUpdated || [];
+    if (upd.length){
+      lines.push(`\nTopped up ${upd.length} amount${upd.length===1?'':'s'} as later invoices arrived:`);
+      upd.slice(0,10).forEach(u => lines.push(`  · ${u.app} ${u.month}: ${Number(u.previous).toLocaleString('en-US',{minimumFractionDigits:2})} → ${Number(u.amount).toLocaleString('en-US',{minimumFractionDigits:2})}`));
+    }
     const filled = json.amountsSkippedFilled || [];
     if (filled.length){
       lines.push(`\n${filled.length} cell${filled.length===1?'':'s'} already had a figure and were left alone:`);
@@ -1281,7 +1286,7 @@ async function runMailSync(rescan){
     }
 
     alert(lines.join('\n'));
-    if (json.filed || (json.amountsWritten||[]).length) syncFromApi(true);
+    if (json.filed || (json.amountsWritten||[]).length || (json.amountsUpdated||[]).length) syncFromApi(true);
   }catch(err){
     alert('Mailbox fetch failed: ' + err.message);
   }finally{
