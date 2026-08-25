@@ -162,3 +162,39 @@ test('returns nothing for a month it cannot parse', () => {
   assert.strictEqual(monthFolderName([], ''), null);
   assert.strictEqual(monthFolderName([], 'not-a-month'), null);
 });
+
+// --- The Graph query -----------------------------------------------------
+//
+// The first live run returned 400 InefficientFilter: "The restriction or sort
+// order is too complex for this operation." Exchange rejects a filter on a
+// non-indexed property (hasAttachments) combined with a sort. receivedDateTime
+// is indexed and sorts fine, so only the date is filtered server-side.
+
+test('does not filter on hasAttachments, which Exchange rejects alongside a sort', () => {
+  const url = mail.messagesUrl('invoices@sarasanalytics.com', '2026-06-25T00:00:00Z', 50, true);
+  assert.ok(!/hasAttachments\s*eq/i.test(decodeURIComponent(url)), 'must not filter on hasAttachments');
+  assert.match(decodeURIComponent(url), /\$filter=receivedDateTime ge 2026-06-25T00:00:00Z/);
+  assert.match(url, /\$orderby=receivedDateTime desc/);
+});
+
+test('still selects hasAttachments so the screening can happen in code', () => {
+  const url = mail.messagesUrl('invoices@sarasanalytics.com', '2026-06-25T00:00:00Z', 50, true);
+  assert.match(url, /\$select=[^&]*hasAttachments/);
+});
+
+test('drops the filter entirely for the fallback query', () => {
+  const url = mail.messagesUrl('invoices@sarasanalytics.com', '2026-06-25T00:00:00Z', 50, false);
+  assert.ok(!/\$filter/.test(url), 'fallback must send no filter at all');
+  assert.match(url, /\$orderby=receivedDateTime desc/);
+});
+
+test('caps the page size Graph will accept', () => {
+  assert.match(mail.messagesUrl('a@b.com', null, 500, true), /\$top=100/);
+  assert.match(mail.messagesUrl('a@b.com', null, 50, true), /\$top=50/);
+  assert.match(mail.messagesUrl('a@b.com', null, undefined, true), /\$top=50/);
+});
+
+test('escapes the mailbox address into the path', () => {
+  const url = mail.messagesUrl('inv oices+x@b.com', null, 10, true);
+  assert.ok(url.includes(encodeURIComponent('inv oices+x@b.com')));
+});
