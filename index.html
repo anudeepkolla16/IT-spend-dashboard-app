@@ -1221,7 +1221,13 @@ $('#mailSyncBtn').onclick = async () => {
   btn.textContent = 'Checking mailbox…'; btn.disabled = true;
   try{
     const res = await fetch('/api/invoices/sync-cron?mode=mail', { method:'POST' });
-    const outer = await res.json();
+    // A crashed function replies with plain text ("A server error has occurred"),
+    // so parsing as JSON unconditionally hides the real failure behind a
+    // JSON-syntax error. Read the body once and only then decide.
+    const raw = await res.text();
+    let outer;
+    try { outer = JSON.parse(raw); }
+    catch { throw new Error(`HTTP ${res.status}: ${raw.slice(0, 300) || 'empty response'}`); }
     if (!res.ok || outer.error) throw new Error(outer.error || ('HTTP '+res.status));
     const json = outer.mail || {};
     if (json.error) throw new Error(json.error);
