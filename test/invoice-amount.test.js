@@ -121,14 +121,28 @@ test('fills an empty month cell from the invoice total', () => {
   assert.strictEqual(skippedFilled.length, 0);
 });
 
-test('never overwrites a cell that already holds a figure', () => {
-  const { write, skippedFilled } = planAmountCells(
-    { 'Bubble Starter': { '2026-06': 999 } }, grid(), USED, cellValue
+test('updates a filled cell when the invoice total has grown', () => {
+  // Jun-26 holds 751.96; a new invoice takes the folder total to 999.
+  const { write, updated } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 999 } }, grid(), USED, cellValue, {}
   );
-  assert.strictEqual(write.length, 0, 'Jun-26 already holds 751.96 and must be left alone');
+  assert.strictEqual(write.length, 0);
+  assert.strictEqual(updated.length, 1, 'a grown total must reach the sheet');
+  assert.strictEqual(updated[0].previous, 751.96);
+  assert.strictEqual(updated[0].value, 999);
+});
+
+test('leaves a filled cell alone when the invoice total is lower', () => {
+  // A new invoice can only add, so a shortfall means invoices are missing from
+  // the folder — not that less was spent. Overwriting here would replace a
+  // correct figure with a wrong one.
+  const { write, updated, skippedFilled } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 500 } }, grid(), USED, cellValue, {}
+  );
+  assert.strictEqual(write.length + updated.length, 0);
   assert.strictEqual(skippedFilled.length, 1);
   assert.strictEqual(skippedFilled[0].current, 751.96);
-  assert.strictEqual(skippedFilled[0].invoiceTotal, 999);
+  assert.strictEqual(skippedFilled[0].reason, 'invoice-total-lower');
 });
 
 test('never writes to the Total row or an unknown app', () => {
@@ -267,16 +281,32 @@ test('never touches a figure a human or the statement put there', () => {
   assert.strictEqual(skippedFilled.length, 1, 'must be reported, not written');
 });
 
-test('stops touching a cell once someone has corrected it', () => {
-  // We wrote 492.27, a human changed it to 500 — it is no longer ours.
+test('a hand correction is still superseded by a higher invoice total', () => {
+  // We wrote 492.27; someone corrected it to 500; the ninth invoice takes the
+  // folder to 524.27. The author asked for amounts to keep up with invoices, so
+  // the grown total wins — but `wasOurs` marks it as a figure we did not write,
+  // so the summary and the audit log can show whose number was replaced.
   const prior = { 'Bubble Starter||2026-06': 492.27 };
   const values = VALUES.map(r => r.slice());
   values[3][8] = 500;
+  const { updated } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 524.27 } },
+    locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, prior
+  );
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].previous, 500);
+  assert.strictEqual(updated[0].wasOurs, false, 'must be flagged as not our own figure');
+});
+
+test('a hand correction survives an invoice total that is lower', () => {
+  const prior = { 'Bubble Starter||2026-06': 492.27 };
+  const values = VALUES.map(r => r.slice());
+  values[3][8] = 600; // corrected upward by a human
   const { write, updated, skippedFilled } = planAmountCells(
     { 'Bubble Starter': { '2026-06': 524.27 } },
     locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, prior
   );
-  assert.strictEqual(write.length + updated.length, 0, 'a corrected cell is off limits');
+  assert.strictEqual(write.length + updated.length, 0, 'must not drag a correction back down');
   assert.strictEqual(skippedFilled.length, 1);
 });
 

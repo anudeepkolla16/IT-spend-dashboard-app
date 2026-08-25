@@ -1251,8 +1251,10 @@ async function runMailSync(rescan){
     }
     const upd = json.amountsUpdated || [];
     if (upd.length){
-      lines.push(`\nTopped up ${upd.length} amount${upd.length===1?'':'s'} as later invoices arrived:`);
-      upd.slice(0,10).forEach(u => lines.push(`  · ${u.app} ${u.month}: ${Number(u.previous).toLocaleString('en-US',{minimumFractionDigits:2})} → ${Number(u.amount).toLocaleString('en-US',{minimumFractionDigits:2})}`));
+      lines.push(`\nUpdated ${upd.length} amount${upd.length===1?'':'s'} as later invoices arrived:`);
+      const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2});
+      upd.slice(0,10).forEach(u => lines.push(
+        `  · ${u.app} ${u.month}: ${fmt(u.previous)} → ${fmt(u.amount)}${u.wasOurs ? '' : '   (replaced a figure this sync did not write)'}`));
     }
     const filled = json.amountsSkippedFilled || [];
     if (filled.length){
