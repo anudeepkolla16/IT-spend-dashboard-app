@@ -6,13 +6,7 @@
     "api/invoices/sync-cron.js": {
       "maxDuration": 60
     },
-    "api/amounts/preview.js": {
-      "maxDuration": 60
-    },
-    "api/amounts/apply.js": {
-      "maxDuration": 60
-    },
-    "api/invoices/mail-sync.js": {
+    "api/amounts.js": {
       "maxDuration": 60
     }
   },
@@ -20,10 +14,6 @@
     {
       "path": "/api/invoices/sync-cron",
       "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/invoices/mail-sync",
-      "schedule": "0 3 * * *"
     }
   ],
   "headers": [

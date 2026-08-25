@@ -66,8 +66,8 @@ excel.writeCells = async (_t, _d, _i, sheetName, cells) => {
   return cells.map(c => ({ ...c, ok: true }));
 };
 
-const previewHandler = require('../api/amounts/preview');
-const applyHandler = require('../api/amounts/apply');
+const previewHandler = require('../lib/amounts/preview');
+const applyHandler = require('../lib/amounts/apply');
 
 function statementBuffer(rows) {
   const aoa = [['BOA ', 'Date', 'Month', 'Description', 'Amount', 'Comments']];
@@ -216,6 +216,39 @@ test('only saves a vendor mapping that points at a real app row', async () => {
   });
   assert.strictEqual(aliasStore.paddlenet, 'Adobe');
   assert.strictEqual(aliasStore.bogus, undefined);
+});
+
+// The three amount handlers share one api/ route to stay inside the Hobby
+// plan's 12-function limit, so the dispatcher is what the browser actually hits.
+const amountsRoute = require('../api/amounts');
+
+test('dispatches an action to the right handler', async () => {
+  const { status, body } = await invoke(amountsRoute, {
+    action: 'preview',
+    contentBase64: statementBuffer(STATEMENT).toString('base64'),
+    filename: 'june.xlsx',
+  });
+  assert.strictEqual(status, 200);
+  assert.ok(Array.isArray(body.proposals), 'should return the preview payload');
+});
+
+test('rejects an unknown or missing action instead of guessing one', async () => {
+  for (const action of ['', 'delete-everything']) {
+    const { status, body } = await invoke(amountsRoute, { action });
+    assert.strictEqual(status, 400);
+    assert.match(body.error, /Unknown action/);
+  }
+  assert.strictEqual(written.length, 0, 'a bad action must not write anything');
+});
+
+test('an apply routed through the dispatcher still writes the right cell', async () => {
+  const { status } = await invoke(amountsRoute, {
+    action: 'apply',
+    cells: [{ app: 'AWS', month: '2026-06', amount: 2525.33 }],
+  });
+  assert.strictEqual(status, 200);
+  assert.strictEqual(written.length, 1);
+  assert.strictEqual(written[0].address, 'M4');
 });
 
 test.after(() => { excel.writeCells = realWriteCells; });

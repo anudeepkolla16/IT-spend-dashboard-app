@@ -16,8 +16,7 @@ deployed automatically from GitHub.
 | Data | How it updates |
 |---|---|
 | **Spend amounts** | Click **💰 Update Amounts**, hand it the statement workbook Finance sends, review, apply. It writes the month column for you. Editing the sheet by hand still works — the page re-fetches every 5 minutes and on "Refresh now". |
-| **Invoices (mailbox)** | A daily Cron job (3 AM UTC) reads `invoices@sarasanalytics.com`, files each invoice PDF into `Invoices/{App}/{YYYY-MM}/` and ticks that app's month in the **Invoices tracker** sheet. **📧 Fetch Invoices** runs it on demand. |
-| **Invoices (folders)** | A daily Cron job (2 AM UTC) mirrors *new* invoice PDFs from the source SharePoint folders into `Invoices/{App}/…`. Only files not already present are copied. |
+| **Invoices** | One daily Cron job (2 AM UTC) does both halves: mirrors *new* PDFs from the source SharePoint folders, then files invoices out of `invoices@sarasanalytics.com` into `Invoices/{App}/{YYYY-MM}/` and ticks that app's month in the **Invoices tracker** sheet. **📧 Fetch Invoices** runs the mailbox half on demand. |
 | **Access** | Microsoft sign-in; only emails in `ALLOWED_EMAILS` are let in. |
 
 **Manual tasks going forward:** ask Finance for the monthly statement workbook and run
@@ -74,7 +73,7 @@ row inserted between preview and apply can't misdirect a write. Every write is r
 **Files it keeps**
 
 - `Invoices/_amount-map.json` — vendor label → app mappings you've confirmed
-- `Invoices/_amount-log.json` — audit trail of the last 200 writes (`GET /api/amounts/log`)
+- `Invoices/_amount-log.json` — audit trail of the last 200 writes (`GET /api/amounts?action=log`)
 
 **Tests:** `npm install && npm test`. The suite checks the parser reproduces figures already in
 the live sheet (Bubble Starter `751.96`, DBT Cloud `531.25`, Google cloud `38686.27`,
@@ -84,8 +83,8 @@ Claude seats `118`) and that writes land on the right cell and never on the Tota
 
 ## Invoices from the shared mailbox
 
-Invoices sent or forwarded to **`invoices@sarasanalytics.com`** are filed automatically. The job
-runs on the daily cron (3 AM UTC) and from **📧 Fetch Invoices** in the header.
+Invoices sent or forwarded to **`invoices@sarasanalytics.com`** are filed automatically, as the
+second half of the daily invoice cron (2 AM UTC), and from **📧 Fetch Invoices** in the header.
 
 **What it does per message**
 
@@ -113,10 +112,13 @@ remains the source of the figures.
 - `Invoices/_mail-sync.json` — last run time and recently seen message IDs (so nothing is filed twice)
 - `Invoices/_invoice-index.json` — what was filed, from whom, for which app and month
 
-**Manual run:**
+**Manual run** (`mode=mail` for the mailbox only, `mode=folders` for the folder mirror, omit for both):
 ```
-curl -s -X POST -H "Authorization: Bearer <CRON_SECRET>" https://it-spend-dashboard-app.vercel.app/api/invoices/mail-sync
+curl -s -X POST -H "Authorization: Bearer <CRON_SECRET>" \
+  "https://it-spend-dashboard-app.vercel.app/api/invoices/sync-cron?mode=mail"
 ```
+The response nests each half under `folders` and `mail`. A mailbox failure (most likely a missing
+`Mail.Read` grant) is reported under `mail.error` and does not stop the folder mirror.
 
 > **Setup required before this works:** the app registration needs the **`Mail.Read`**
 > *application* permission with admin consent (see Azure section below). Until that is granted
@@ -192,7 +194,8 @@ re-saves `_sync-config.json`, so the daily cron picks up the new mapping.
 ```
 curl -s -H "Authorization: Bearer <CRON_SECRET>" https://it-spend-dashboard-app.vercel.app/api/invoices/sync-cron
 ```
-Returns `copiedNew` / `alreadyPresent` counts, or a note if no config is saved yet.
+Returns `folders` (`copiedNew` / `alreadyPresent`, or a note if no config is saved yet) and
+`mail` (what the mailbox pass filed).
 
 **"Numbers look stale/wrong":** first check for the red *"Sync failed"* banner at the top. If present,
 it's a sync problem (usually `TARGET_FILE_PATH` set to a URL instead of a path, or an expired client secret),
@@ -214,20 +217,18 @@ lib/
   vendor-map.js                Vendor label → app row matching (seeded aliases + descriptor rules)
   spend-sheet.js               Opens the spend workbook, alias map and audit log
   mail.js                      Graph mail helpers — invoice detection, forwarded-sender parsing
+  mail-sync.js                 Files invoice PDFs from the shared mailbox, ticks the tracker
+  amounts/{preview,apply,log}.js  The amount-import handlers, behind api/amounts.js
 api/
   spend-data.js                Reads + parses the Excel sheet → JSON the dashboard renders (60s cache)
-  amounts/
-    preview.js                 Reads a statement, proposes per-app month figures, flags exceptions
-    apply.js                   Writes approved figures into the sheet + appends the audit log
-    log.js                     Recent amount writes
+  amounts.js                   One route for the amount import; dispatches on `action`
   auth/{login,callback,logout,me}.js   Microsoft OAuth sign-in flow
   invoices/
     list.js                    Lists an app's invoices (recurses into month subfolders)
     upload.js                  Manual single-PDF upload from a drill-down modal
     import.js                  Bulk import: preview (suggest matches) + batched commit (skips existing)
     save-sync-config.js        Persists the folder→app mapping to _sync-config.json
-    sync-cron.js               Daily job: mirrors new source invoices using the saved mapping
-    mail-sync.js               Daily job: files invoice PDFs from the shared mailbox, ticks the tracker
+    sync-cron.js               Daily job: source-folder mirror + mailbox invoice filing
 ```
 
 ## Notes / gotchas
@@ -238,3 +239,9 @@ api/
 - **Invoice uploads handle any size** — files over 4 MB go via a Graph resumable upload session.
 - **Browsers won't cache the HTML** (no-cache headers), so deployed changes show up on a normal refresh.
 - **Cron is once-daily** on the current Vercel plan. If more frequent mirroring is ever needed, that's a plan/scheduler change.
+- **The Hobby plan allows 12 Serverless Functions per deployment, and every file under `api/` is one.**
+  The deployment currently uses 11, so there is room for exactly one more file before builds start
+  failing with `exceeded_serverless_functions_per_deployment`. That is why the three amount handlers
+  share `api/amounts.js` (dispatching on `action`) and the mailbox sync runs inside
+  `api/invoices/sync-cron.js` rather than each having its own route. Add new endpoints the same way —
+  logic in `lib/`, dispatched from an existing route — unless the plan changes.

@@ -1016,9 +1016,10 @@ $('#amountsFile').onchange = async (e) => {
 
 async function amtRunPreview(){
   $('#amtStatus').textContent = 'Reading statement…';
-  const res = await fetch('/api/amounts/preview', {
+  const res = await fetch('/api/amounts', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
+      action: 'preview',
       contentBase64: amtState.base64,
       filename: amtState.file,
       attribution: amtState.attribution,
@@ -1184,9 +1185,10 @@ $('#amtApply').onclick = async () => {
   applyBtn.disabled = true; cancelBtn.disabled = true;
   $('#amtStatus').textContent = `Writing ${cells.length} cell${cells.length>1?'s':''} to the sheet…`;
   try{
-    const res = await fetch('/api/amounts/apply', {
+    const res = await fetch('/api/amounts', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
+        action: 'apply',
         cells,
         aliasUpdates: amtState.overrides,
         statementName: amtState.file,
@@ -1218,9 +1220,11 @@ $('#mailSyncBtn').onclick = async () => {
   const btn = $('#mailSyncBtn'), orig = btn.textContent;
   btn.textContent = 'Checking mailbox…'; btn.disabled = true;
   try{
-    const res = await fetch('/api/invoices/mail-sync', { method:'POST' });
-    const json = await res.json();
-    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    const res = await fetch('/api/invoices/sync-cron?mode=mail', { method:'POST' });
+    const outer = await res.json();
+    if (!res.ok || outer.error) throw new Error(outer.error || ('HTTP '+res.status));
+    const json = outer.mail || {};
+    if (json.error) throw new Error(json.error);
 
     const lines = [`Scanned ${json.scanned} message${json.scanned===1?'':'s'} in ${json.mailbox}.`];
     lines.push(`Filed ${json.filed} invoice PDF${json.filed===1?'':'s'}${json.alreadyPresent?`, ${json.alreadyPresent} already there`:''}.`);
