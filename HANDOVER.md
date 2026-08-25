@@ -150,6 +150,23 @@ Writing the face value would have been a ~95x error. So an invoice whose currenc
 USD is reported with its amount and currency and left for a human; it is never totalled into the
 sheet.
 
+**One vendor, several rows.** Anthropic bills the API console and the Claude seat subscriptions
+from the same address, with near-identical subjects and filenames — only the invoice body tells
+them apart, so the PDF is read *before* the file is placed:
+
+- line items reading `Claude <model> Usage …` → **Anthropic(Api Console)**
+- line items naming a plan or seats (`Enterprise plan`, `Team plan`, `3 accounts`) → **Claude Ai**
+- neither → falls back to the amount, above 10k being the API console
+
+Verified against both July 2026 invoices: the API console one totals `13,479.42` and the seats one
+`0.00 paid`, which is exactly what the sheet holds for `Jul-26` in each row. Note the threshold is
+the *last* resort, not the first — it does not hold historically (Claude Ai was `14,160` in Feb-26,
+the API console `371.88` in Jan-26).
+
+**An invoice settled from a prepaid balance counts as nothing charged.** The July Claude receipt
+prints `Total $4,037.39` but `$0.00 paid` against an `Applied balance`; the sheet holds `0.00`.
+Where a document shows a balance was applied, what was actually paid wins over what was billed.
+
 Totals are matched most-specific first, because invoices state several. Adobe prints
 `NET AMOUNT (USD) 34.97` (pre-tax) *before* `GRAND TOTAL (USD) 37.16`; the payable total wins, and
 37.16 is what the sheet holds.
