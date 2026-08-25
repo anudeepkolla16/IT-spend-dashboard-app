@@ -320,3 +320,71 @@ test('does not rewrite a cell that already holds the right total', () => {
   );
   assert.strictEqual(write.length + updated.length + skippedFilled.length, 0, 'nothing to do');
 });
+
+// --- Anthropic: one sender, two rows in the sheet ------------------------
+//
+// Verbatim text from the two July 2026 Anthropic invoices in the archive. Both
+// arrive from Anthropic, PBC with near-identical subjects and filenames, so only
+// the body distinguishes the API console from the Claude seat subscriptions.
+
+const ANTHROPIC_API_JULY = `Page 1 of 2  Invoice  Invoice number   Q8MUNTUC   0203  Date of issue   August 1, 2026
+Anthropic, PBC   (@anthropic)  548 Market Street San Francisco, California 94104  support@anthropic.com
+Bill to  Saras analytics  $13,479.42 USD due August 31, 2026
+Description   Qty   Unit price   Tax   Amount
+Claude Haiku 4.5 Usage Jul 2   Jul 31, 2026 1   $425.4220351   6.25%   $425.42
+Claude Opus 4.8 Usage Jul 2   Jul 31, 2026 1   $1,362.52184825   6.25%   $1,362.52
+Claude Sonnet 5 Usage Jul 2   Jul 31, 2026 1   $5,863.7163777   6.25%   $5,863.72
+Subtotal   $12,686.51 Total excluding tax   $12,686.51 Tax - Massachusetts 6.25% $792.91 Total   $13,479.42
+Amount due   $13,479.42 USD`;
+
+const ANTHROPIC_SEATS_JULY = `Page 1 of 2  Receipt  Invoice number   2FSKIDHO   0088  Receipt number   2699 1972 3418
+Date paid   August 1, 2026  Anthropic, PBC   (@anthropic)  support@anthropic.com
+Bill to  Saras Analytics  $0.00 paid on August 1, 2026
+Description   Qty   Unit price   Tax   Amount
+Extra usage units, Enterprise plan Jul 1   Jul 31, 2026 1   $4,007.391289   6.25%   $4,007.39
+Chat Team Billing Adjustment Credit applied Jul 1   Jul 31, 2026 1   $0.75   6.25%   $0.75
+Auto recharge extra usage, Team plan applied Jul 1   Jul 31, 2026 1   $113.727874   6.25%   $113.73
+Subtotal   $3,799.90 Total excluding tax   $3,799.90 Tax - Massachusetts 6.25% $237.49 Total   $4,037.39
+Applied balance     $4,037.39`;
+
+test('reads the API console invoice total, matching the sheet', () => {
+  const r = extractInvoiceTotal(ANTHROPIC_API_JULY);
+  assert.strictEqual(r.amount, 13479.42, 'the sheet holds 13,479.42 for Jul-26');
+  assert.strictEqual(r.usable, true);
+});
+
+test('reads nothing charged when an applied balance settled the invoice', () => {
+  // The receipt prints Total $4,037.39 but $0.00 paid — the sheet holds 0.00.
+  // Taking the Total here would be wrong by the entire amount.
+  const r = extractInvoiceTotal(ANTHROPIC_SEATS_JULY);
+  assert.strictEqual(r.amount, 0, `took ${r.amount}; the 4,037.39 total was settled from balance`);
+  assert.match(r.via, /balance applied/);
+});
+
+test('an ordinary receipt is not read as zero on a stray "paid"', () => {
+  // No applied balance, so the total stands.
+  const r = extractInvoiceTotal('Bubble Group  TOTAL PAID   $32  Amounts are in usd  paid on 8/12/26');
+  assert.strictEqual(r.amount, 32);
+});
+
+const { refineAnthropic } = require('../lib/vendor-map');
+const ANTHROPIC_ROWS = ['Anthropic(Api Console)', 'Claude Ai', 'Claude Ai Max 6 Accounts', 'Adobe'];
+
+test('routes a usage invoice to the API console row', () => {
+  assert.strictEqual(refineAnthropic(ANTHROPIC_API_JULY, ANTHROPIC_ROWS), 'Anthropic(Api Console)');
+});
+
+test('routes a plan or seat invoice to the Claude row', () => {
+  assert.strictEqual(refineAnthropic(ANTHROPIC_SEATS_JULY, ANTHROPIC_ROWS), 'Claude Ai');
+});
+
+test('falls back to the amount threshold only when the wording says nothing', () => {
+  const vague = 'Anthropic, PBC   Invoice   Amount due   $12,000.00 USD';
+  assert.strictEqual(refineAnthropic(vague, ANTHROPIC_ROWS), 'Anthropic(Api Console)');
+  const small = 'Anthropic, PBC   Invoice   Amount due   $250.00 USD';
+  assert.strictEqual(refineAnthropic(small, ANTHROPIC_ROWS), 'Claude Ai');
+});
+
+test('leaves non-Anthropic invoices alone', () => {
+  assert.strictEqual(refineAnthropic(BUBBLE, ANTHROPIC_ROWS), null);
+});
