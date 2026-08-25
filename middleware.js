@@ -36,9 +36,10 @@ export default function middleware(request) {
   // Let the sign-in flow itself through unauthenticated (that's the point of it).
   if (url.pathname.startsWith('/api/auth/')) return next();
 
-  // The scheduled invoice-mirror endpoint has no browser session; it authenticates
-  // itself with CRON_SECRET inside the handler, so let it past the session gate.
+  // The scheduled endpoints have no browser session; they authenticate
+  // themselves with CRON_SECRET inside the handler, so let them past the gate.
   if (url.pathname === '/api/invoices/sync-cron') return next();
+  if (url.pathname === '/api/invoices/mail-sync') return next();
 
   const secret = process.env.SESSION_SECRET;
   const session = verifySession(request.headers.get('cookie'), secret);

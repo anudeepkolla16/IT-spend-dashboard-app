@@ -153,6 +153,7 @@
   <div class="grow"></div>
   <div class="toolbar">
     <span class="cap" id="whoami"></span>
+    <button class="btn ghost" id="mailSyncBtn">📧 Fetch Invoices</button>
     <button class="btn ghost" id="amountsBtn">💰 Update Amounts</button>
     <input type="file" id="amountsFile" accept=".xlsx,.xlsm,.xls,.csv" class="hidden" />
     <button class="btn ghost" id="importBtn">📥 Import Invoices</button>
@@ -1208,6 +1209,35 @@ $('#amtApply').onclick = async () => {
     $('#amtStatus').textContent = 'Write failed: ' + err.message;
   }finally{
     applyBtn.disabled = false; cancelBtn.disabled = false;
+  }
+};
+
+/* Pull invoices from the shared invoices mailbox on demand. The same job also
+   runs on the daily cron, so this is for when you don't want to wait. */
+$('#mailSyncBtn').onclick = async () => {
+  const btn = $('#mailSyncBtn'), orig = btn.textContent;
+  btn.textContent = 'Checking mailbox…'; btn.disabled = true;
+  try{
+    const res = await fetch('/api/invoices/mail-sync', { method:'POST' });
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+
+    const lines = [`Scanned ${json.scanned} message${json.scanned===1?'':'s'} in ${json.mailbox}.`];
+    lines.push(`Filed ${json.filed} invoice PDF${json.filed===1?'':'s'}${json.alreadyPresent?`, ${json.alreadyPresent} already there`:''}.`);
+    if (json.tracker && json.tracker.marked) lines.push(`Ticked ${json.tracker.marked} cell${json.tracker.marked===1?'':'s'} in the "${json.tracker.sheet}" sheet.`);
+    if (json.unmatched){
+      lines.push(`\n${json.unmatched} invoice${json.unmatched===1?" couldn't":"s couldn't"} be matched to an app and went to Invoices/_Unmatched/:`);
+      (json.unmatchedItems||[]).slice(0,8).forEach(u => lines.push(`  · ${u.subject} — ${u.from||'unknown sender'}`));
+    }
+    if (json.skippedNotInvoice) lines.push(`\nSkipped ${json.skippedNotInvoice} message${json.skippedNotInvoice===1?'':'s'} that didn't look like an invoice.`);
+    if (json.timedOut) lines.push('\nRan out of time part-way — run it again to pick up the rest.');
+    if ((json.errors||[]).length) lines.push(`\nErrors:\n  ${json.errors.slice(0,5).join('\n  ')}`);
+    alert(lines.join('\n'));
+    if (json.filed) syncFromApi(true);
+  }catch(err){
+    alert('Mailbox fetch failed: ' + err.message);
+  }finally{
+    btn.textContent = orig; btn.disabled = false;
   }
 };
 </script>

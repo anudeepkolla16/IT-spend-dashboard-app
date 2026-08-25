@@ -11,12 +11,19 @@
     },
     "api/amounts/apply.js": {
       "maxDuration": 60
+    },
+    "api/invoices/mail-sync.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
     {
       "path": "/api/invoices/sync-cron",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/invoices/mail-sync",
+      "schedule": "0 3 * * *"
     }
   ],
   "headers": [

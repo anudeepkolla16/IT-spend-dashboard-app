@@ -16,12 +16,13 @@ deployed automatically from GitHub.
 | Data | How it updates |
 |---|---|
 | **Spend amounts** | Click **💰 Update Amounts**, hand it the statement workbook Finance sends, review, apply. It writes the month column for you. Editing the sheet by hand still works — the page re-fetches every 5 minutes and on "Refresh now". |
-| **Invoices** | A daily Vercel Cron job (2 AM UTC) mirrors *new* invoice PDFs from the source SharePoint folders into `Invoices/{App}/…`. Only files not already present are copied. |
+| **Invoices (mailbox)** | A daily Cron job (3 AM UTC) reads `invoices@sarasanalytics.com`, files each invoice PDF into `Invoices/{App}/{YYYY-MM}/` and ticks that app's month in the **Invoices tracker** sheet. **📧 Fetch Invoices** runs it on demand. |
+| **Invoices (folders)** | A daily Cron job (2 AM UTC) mirrors *new* invoice PDFs from the source SharePoint folders into `Invoices/{App}/…`. Only files not already present are copied. |
 | **Access** | Microsoft sign-in; only emails in `ALLOWED_EMAILS` are let in. |
 
 **Manual tasks going forward:** ask Finance for the monthly statement workbook and run
-**Update Amounts** with it; drop new invoice PDFs into the source `Procurement bills/{vendor}/…`
-folders. Everything else is automatic.
+**Update Amounts** with it, and occasionally map a vendor the mailbox sync couldn't place.
+Invoices forwarded to `invoices@sarasanalytics.com` file themselves.
 
 ---
 
@@ -81,6 +82,48 @@ Claude seats `118`) and that writes land on the right cell and never on the Tota
 
 ---
 
+## Invoices from the shared mailbox
+
+Invoices sent or forwarded to **`invoices@sarasanalytics.com`** are filed automatically. The job
+runs on the daily cron (3 AM UTC) and from **📧 Fetch Invoices** in the header.
+
+**What it does per message**
+
+1. Looks only at mail with a real PDF attachment, and skips account-admin noise
+   ("Verify your email", "Password reset") even when it mentions billing.
+2. Works out the app from the subject, the attachment filename and the sender's domain —
+   taking the *original* sender out of a forwarded message, so `FW: [Bubble] Invoice`
+   forwarded by a colleague is filed under Bubble Starter, not against the colleague.
+3. Saves the PDF to `Invoices/{App}/{YYYY-MM}/`, skipping anything already there.
+4. Ticks that app's month in the **Invoices tracker** sheet (the TRUE/FALSE grid).
+
+**Anything it can't place** goes to `Invoices/_Unmatched/{YYYY-MM}/` and is listed in the run
+summary with its subject and sender, so nothing is silently dropped. Add the vendor once via
+**Update Amounts → Unrecognised vendors** and the mapping applies to mail too — both use the
+same `Invoices/_amount-map.json`.
+
+**It does not write spend amounts, on purpose.** The figures in the sheet reconcile against the
+bank statement, and an invoice total often differs from what was actually charged — tax, currency
+conversion, prepaid or partial billing. Writing invoice totals into the sheet would quietly change
+what those numbers mean. The mailbox sync tracks *which invoices arrived*; **Update Amounts**
+remains the source of the figures.
+
+**Files it keeps**
+
+- `Invoices/_mail-sync.json` — last run time and recently seen message IDs (so nothing is filed twice)
+- `Invoices/_invoice-index.json` — what was filed, from whom, for which app and month
+
+**Manual run:**
+```
+curl -s -X POST -H "Authorization: Bearer <CRON_SECRET>" https://it-spend-dashboard-app.vercel.app/api/invoices/mail-sync
+```
+
+> **Setup required before this works:** the app registration needs the **`Mail.Read`**
+> *application* permission with admin consent (see Azure section below). Until that is granted
+> every run returns a 403 saying exactly that.
+
+---
+
 ## Environment variables (set in Vercel → Settings → Environment Variables)
 
 Secrets live only in Vercel, never in the repo. Names and purpose:
@@ -95,7 +138,9 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 | `SESSION_SECRET` | Signs the login session cookie |
 | `ALLOWED_EMAILS` | Comma-separated allowlist of who can sign in. Add/remove people here — no redeploy needed. |
 | `PUBLIC_APP_URL` | `https://it-spend-dashboard-app.vercel.app` (used to build the OAuth redirect) |
-| `CRON_SECRET` | Authorizes the daily invoice-sync cron. Vercel auto-sends it as a Bearer token on scheduled runs. |
+| `CRON_SECRET` | Authorizes the daily invoice-sync crons. Vercel auto-sends it as a Bearer token on scheduled runs. |
+| `INVOICE_MAILBOX` | Shared mailbox the invoice sync reads. Defaults to `invoices@sarasanalytics.com` (note the plural) if unset. |
+| `SPEND_SHEET_NAME` | Worksheet holding the amounts. Defaults to `Spendings`; only set it if that tab is renamed. |
 
 > Env-var changes take effect only on the **next deployment**. To apply: push any commit
 > (an empty commit works: `git commit --allow-empty -m "redeploy"`), or redeploy in Vercel.
@@ -105,7 +150,16 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 ## Azure app registration
 
 - Find it in **portal.azure.com → Entra ID → App registrations** by searching the client ID.
-- **API permissions (application):** `Files.ReadWrite.All` (Graph) with admin consent granted.
+- **API permissions (application):** `Files.ReadWrite.All` **and `Mail.Read`** (Graph), both with
+  admin consent granted. `Mail.Read` is what lets the invoice mailbox sync run — without it that
+  job returns 403 and nothing else is affected.
+- **Restrict `Mail.Read` to the one mailbox.** Granted plainly it can read *every* mailbox in the
+  tenant, so scope it with an application access policy (Exchange Online PowerShell):
+  ```
+  New-ApplicationAccessPolicy -AppId <AZURE_CLIENT_ID> `
+    -PolicyScopeGroupId invoices@sarasanalytics.com `
+    -AccessRight RestrictAccess -Description "Spend dashboard: invoices mailbox only"
+  ```
 - **Authentication → Web redirect URI:** `https://it-spend-dashboard-app.vercel.app/api/auth/callback`
 - **Client secret expiry:** secrets expire. When it does, Graph calls start failing —
   create a new secret in the app registration and update `AZURE_CLIENT_SECRET` in Vercel, then redeploy.
@@ -119,6 +173,8 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 - **Invoice source:** `Desktop/Anudeep files/Procurement bills/{vendor}/…` — where you drop new invoices. Folder names don't match app names, which is why there's a saved mapping.
 - **Auto-sync config:** `Invoices/_sync-config.json` — holds the source folder link and the
   folder→app mapping the cron uses. Created/updated whenever you run **Import Invoices** and confirm.
+- **Mailbox invoices:** `Invoices/{App}/{YYYY-MM}/…` — written by the mailbox sync.
+- **Unmatched invoices:** `Invoices/_Unmatched/{YYYY-MM}/…` — invoices whose vendor didn't match an app row.
 
 ---
 
@@ -157,6 +213,7 @@ lib/
   statement.js                 Parses Finance's statement workbook into transactions
   vendor-map.js                Vendor label → app row matching (seeded aliases + descriptor rules)
   spend-sheet.js               Opens the spend workbook, alias map and audit log
+  mail.js                      Graph mail helpers — invoice detection, forwarded-sender parsing
 api/
   spend-data.js                Reads + parses the Excel sheet → JSON the dashboard renders (60s cache)
   amounts/
@@ -170,6 +227,7 @@ api/
     import.js                  Bulk import: preview (suggest matches) + batched commit (skips existing)
     save-sync-config.js        Persists the folder→app mapping to _sync-config.json
     sync-cron.js               Daily job: mirrors new source invoices using the saved mapping
+    mail-sync.js               Daily job: files invoice PDFs from the shared mailbox, ticks the tracker
 ```
 
 ## Notes / gotchas
