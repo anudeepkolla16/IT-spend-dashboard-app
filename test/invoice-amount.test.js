@@ -1,0 +1,161 @@
+// Run with: node --test
+//
+// Fixtures are verbatim text extracted from real invoices in the live archive,
+// not invented samples. Each one is checked against the figure that is actually
+// in the spend sheet for that app and month.
+
+const test = require('node:test');
+const assert = require('node:assert');
+const { extractInvoiceTotal, detectCurrency } = require('../lib/invoice-amount');
+
+// Invoices/Bubble Starter — sheet has no Aug-26 figure yet; invoice says $32.
+const BUBBLE = `Bubble Group, Inc.  22 W 21st Street  2nd Floor  New York, NY 10010  United States of America
+Bubble Support Center  bubble.io  Invoice:   2026-08-1218140  Application:   adverio  Date:   8/12/26
+Saras Analytics LLC  92 Ruggles Street Massachusetts Westborough, MA 01581  audit@sarasanalytics.com
+DETAIL  Starter Web Plan   8/12/26 - 9/12/26   $32  TOTAL PAID   $32
+Amounts are in usd - payment by credit card ending in 4154.  Thank you - we really appreciate your business.`;
+
+// Invoices/Adobe/June 26.pdf — the sheet's Adobe Jun-26 cell holds 37.16.
+// Note the pre-tax "NET AMOUNT (USD) 34.97" appears BEFORE the grand total.
+const ADOBE = `Bill To  Harsha Anathneni  MA 01581  INVOICE  Item Details  Service Term: 01-JUN-2026 to 30-JUN-2026
+Invoice Information  3474509584 Invoice Number  01-JUN-2026 Invoice Date  Credit Card Payment Terms
+USD Currency  Adobe Inc.  345 Park Avenue  San Jose CA 95110-2704  United States
+PRODUCT NUMBER   PRODUCT DESCRIPTION   QUANTITY   UNIT   UNIT PRICE   TOTAL DISCOUNT AMOUNT/UNIT   NET AMOUNT   TAX RATE   TAXES   TOTAL
+65182902   Creative Cloud Pro   1   EA   69.99   (35.02)   34.97   6.25%   2.19   37.16
+Invoice Total   NET AMOUNT (USD)   34.97  TAXES (SEE DETAILS FOR RATES)   2.19  GRAND TOTAL (USD)   37.16  Comments:`;
+
+// Invoices/MICROSOFT(Tata Tele)/June 2026.pdf — invoice is INR 150591.60, while
+// the sheet correctly holds 1574.40 (the converted figure). Writing the face
+// value would be a ~95x error.
+const TATA = `TATA TELE NXTGEN SOLUTIONS LTD  TAX INVOICE - ORIGINAL  BILL DETAILS
+Invoice No.   :   20260636I182669 Invoice Date   :   28-06-2026 Payment Due Date   :   16-07-2026
+Billed To:  SARAS SOLUTIONS INDIA PRIVATE LIMITED
+S. No.   Item   HSN   Price (INR)   UoM   Quantity   Sub Total (INR)   Total (INR)
+1   Microsoft 365 Business Standard with Email Security   997331   604.00   Monthly   186   112344.00   112344.00
+2   Microsoft 365 Business basic with Email Security   997331   114.00   Monthly   134   15276.00   15276.00
+Sub Total (INR)   127620.00 IGST @ 18.00% (INR)   22971.60 Net Payable (INR)   150591.60`;
+
+test('reads the total from a simple USD invoice', () => {
+  const r = extractInvoiceTotal(BUBBLE);
+  assert.strictEqual(r.amount, 32);
+  assert.strictEqual(r.currency, 'USD');
+  assert.strictEqual(r.usable, true);
+});
+
+test('prefers the grand total over the pre-tax net amount', () => {
+  const r = extractInvoiceTotal(ADOBE);
+  // 37.16 is what the sheet holds; 34.97 is the pre-tax figure printed first.
+  assert.strictEqual(r.amount, 37.16, `picked ${r.amount} — the pre-tax 34.97 must not win`);
+  assert.strictEqual(r.currency, 'USD');
+  assert.strictEqual(r.usable, true);
+});
+
+test('refuses to offer an INR invoice as a USD figure', () => {
+  const r = extractInvoiceTotal(TATA);
+  // It still reads the number, so a human can see it — but never as usable.
+  assert.strictEqual(r.amount, 150591.60);
+  assert.strictEqual(r.currency, 'INR');
+  assert.strictEqual(r.usable, false, 'an INR total must never be written into a USD sheet');
+  assert.match(r.note, /INR/);
+});
+
+test('declared currency beats a stray symbol', () => {
+  assert.strictEqual(detectCurrency('USD Currency ... total $50').code, 'USD');
+  assert.strictEqual(detectCurrency('Net Payable (INR) 150591.60').code, 'INR');
+  assert.strictEqual(detectCurrency('Amounts are in usd - payment by credit card').code, 'USD');
+});
+
+test('reports an unreadable or scanned PDF rather than guessing', () => {
+  const r = extractInvoiceTotal('');
+  assert.strictEqual(r.usable, false);
+  assert.strictEqual(r.amount, null);
+  assert.match(r.note, /scan/i);
+});
+
+test('reports an invoice with no recognisable total', () => {
+  const r = extractInvoiceTotal('Thank you for your business. Your subscription is active. USD');
+  assert.strictEqual(r.amount, null);
+  assert.strictEqual(r.usable, false);
+  assert.strictEqual(r.via, 'no-total');
+});
+
+test('does not mistake a thousands separator for a decimal point', () => {
+  const r = extractInvoiceTotal('Currency USD\nGrand Total   12,345.67');
+  assert.strictEqual(r.amount, 12345.67);
+});
+
+test('will not offer a figure when the currency is ambiguous', () => {
+  const r = extractInvoiceTotal('Total Paid  £100  also shown as €120');
+  assert.strictEqual(r.usable, false);
+});
+
+// --- Which Spendings cells an invoice total may fill ---------------------
+
+const { planAmountCells } = require('../lib/mail-sync');
+const { locateGrid, cellAddress } = require('../lib/excel');
+const { cellValue } = require('../lib/spend-sheet');
+
+// Shaped like the live Spendings sheet: date-serial headers, a Total row.
+const VALUES = [
+  ['Spendings'],
+  ['APPLICATION / SW / LICENSE', 'Department', 'POC', 'Renewal data', 'Recurring/Onetime', 'FREQUENCY', 'Payment Method', 46023, 46174, 46235],
+  ['Adobe', 'Marketing', 'Bhavana', '', 'Recurring', 'Monthly', 'US Debit Card', 37.16, 37.16, ''],
+  ['Bubble Starter', 'Product', 'Ganesh', '', 'Recurring', 'Monthly', 'US Debit Card', 320, 751.96, ''],
+  ['MICROSOFT(Tata Tele)', 'org', 'Anudeep', '', 'Recurring', 'Monthly', 'HDFC bank', 1651.42, 1574.4, ''],
+  ['Total', '', '', '', '', '', '', 2008.58, 2363.52, ''],
+];
+const TEXT = VALUES.map((row, i) => row.map((c, j) => {
+  if (i === 1 && j >= 7) return ['Jan-26', 'Jun-26', 'Aug-26'][j - 7];
+  return c == null ? '' : String(c);
+}));
+const USED = { values: VALUES, start: { col: 0, row: 0 } };
+const grid = () => locateGrid(VALUES, TEXT);
+
+test('fills an empty month cell from the invoice total', () => {
+  const { write, skippedFilled } = planAmountCells(
+    { 'Bubble Starter': { '2026-08': 256 } }, grid(), USED, cellValue
+  );
+  assert.strictEqual(write.length, 1);
+  assert.strictEqual(write[0].address, 'J4'); // Bubble Starter row 4, Aug-26 column J
+  assert.strictEqual(write[0].value, 256);
+  assert.strictEqual(skippedFilled.length, 0);
+});
+
+test('never overwrites a cell that already holds a figure', () => {
+  const { write, skippedFilled } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 999 } }, grid(), USED, cellValue
+  );
+  assert.strictEqual(write.length, 0, 'Jun-26 already holds 751.96 and must be left alone');
+  assert.strictEqual(skippedFilled.length, 1);
+  assert.strictEqual(skippedFilled[0].current, 751.96);
+  assert.strictEqual(skippedFilled[0].invoiceTotal, 999);
+});
+
+test('never writes to the Total row or an unknown app', () => {
+  const { write } = planAmountCells(
+    { 'Total': { '2026-08': 5 }, 'Nonexistent App': { '2026-08': 5 } }, grid(), USED, cellValue
+  );
+  assert.strictEqual(write.length, 0);
+});
+
+test('ignores a month the sheet has no column for', () => {
+  const { write } = planAmountCells({ 'Adobe': { '2027-01': 40 } }, grid(), USED, cellValue);
+  assert.strictEqual(write.length, 0);
+});
+
+test('ignores a zero or negative total', () => {
+  const { write } = planAmountCells({ 'Adobe': { '2026-08': 0 } }, grid(), USED, cellValue);
+  assert.strictEqual(write.length, 0);
+});
+
+test('an INR invoice never reaches the planner at all', () => {
+  // extractInvoiceTotal marks it unusable, so it is never summed into `amounts`
+  // — this asserts the boundary that keeps a 150591.60 out of a USD cell.
+  const r = extractInvoiceTotal(TATA);
+  assert.strictEqual(r.usable, false);
+  const { write } = planAmountCells(
+    r.usable ? { 'MICROSOFT(Tata Tele)': { '2026-08': r.amount } } : {},
+    grid(), USED, cellValue
+  );
+  assert.strictEqual(write.length, 0);
+});
