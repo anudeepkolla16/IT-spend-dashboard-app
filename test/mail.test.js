@@ -265,3 +265,18 @@ test('skips a mark that has no row or no column in the tracker', () => {
   );
   assert.strictEqual(cells.length, 0);
 });
+
+// --- Reseller-billed charges --------------------------------------------
+//
+// A dry run against the real June statement routed "Google ChatGPT" to
+// GOOGLE ADS. It is an OpenAI charge billed through Google, and it inflated the
+// proposed Google Ads figure by exactly its own 20.50.
+
+test('routes a reseller-billed charge to the real vendor, not the reseller', () => {
+  const apps = ['GOOGLE ADS', 'Google cloud', 'Google Workspace', 'OPENAI', 'Anthropic(Api Console)'];
+  const r = buildResolver({}, apps);
+  assert.strictEqual(r('', 'Google ChatGPT 6502530000 CA').app, 'OPENAI');
+  // The genuine Google lines must still land where they did.
+  assert.strictEqual(r('', 'GOOGLE *ADS710 06/01 PURCHASE Mountain View CA').app, 'GOOGLE ADS');
+  assert.strictEqual(r('', 'GOOGLE *CLOUD 9Q4THP 6502530000 CA').app, 'Google cloud');
+});
