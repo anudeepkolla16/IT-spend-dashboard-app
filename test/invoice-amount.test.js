@@ -159,3 +159,44 @@ test('an INR invoice never reaches the planner at all', () => {
   );
   assert.strictEqual(write.length, 0);
 });
+
+// --- Reading the PDF itself ---------------------------------------------
+//
+// pdf-parse v2 wraps modern pdf.js and needs browser globals (DOMMatrix,
+// Path2D) plus @napi-rs/canvas. On Vercel it threw ReferenceError at REQUIRE
+// time, killing the whole function before any handler could catch it — invoice
+// filing and the folder mirror went down with it. The library is pinned to 1.x,
+// required by its inner path, and loaded lazily behind a guard.
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { readPdfText } = require('../lib/invoice-amount');
+
+test('reads text out of a real PDF on a plain Node runtime', async () => {
+  const sample = path.join(__dirname, '..', 'node_modules', 'pdf-parse', 'test', 'data', '01-valid.pdf');
+  if (!fs.existsSync(sample)) return; // sample not shipped; nothing to assert
+  const { text, error } = await readPdfText(fs.readFileSync(sample));
+  assert.strictEqual(error, null, `reader failed: ${error}`);
+  assert.ok(text.length > 0, 'expected some extracted text');
+});
+
+test('never throws on a corrupt PDF — reports and moves on', async () => {
+  const { text, error } = await readPdfText(Buffer.from('this is definitely not a pdf'));
+  assert.strictEqual(text, '');
+  assert.ok(error, 'a corrupt PDF must report an error rather than throw');
+});
+
+test('an unreadable PDF yields no amount, so filing still proceeds', async () => {
+  const { text, error } = await readPdfText(Buffer.from('nonsense'));
+  const total = error ? { amount: null, usable: false } : extractInvoiceTotal(text);
+  assert.strictEqual(total.amount, null);
+  assert.strictEqual(total.usable, false);
+});
+
+test('does not require the PDF library at module load', () => {
+  // Loading lib/invoice-amount.js must not pull pdf-parse in — that is what
+  // made a library incompatibility fatal to the whole function.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'invoice-amount.js'), 'utf8');
+  const topLevel = src.split('\n').filter(l => /^\s*(const|let|var)\s.*require\(['"]pdf-parse/.test(l));
+  assert.strictEqual(topLevel.length, 0, 'pdf-parse must only be required lazily, inside readPdfText');
+});

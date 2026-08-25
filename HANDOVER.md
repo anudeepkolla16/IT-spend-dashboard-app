@@ -280,6 +280,14 @@ api/
 - **Invoice uploads handle any size** — files over 4 MB go via a Graph resumable upload session.
 - **Browsers won't cache the HTML** (no-cache headers), so deployed changes show up on a normal refresh.
 - **Cron is once-daily** on the current Vercel plan. If more frequent mirroring is ever needed, that's a plan/scheduler change.
+- **`pdf-parse` is pinned to 1.x on purpose, and required by its inner path**
+  (`require('pdf-parse/lib/pdf-parse.js')`). Version 2 wraps modern pdf.js, which needs browser
+  globals (`DOMMatrix`, `Path2D`) and `@napi-rs/canvas`; on Vercel's Node runtime it throws
+  `ReferenceError: DOMMatrix is not defined` **at require time**, which kills the entire function
+  before any handler runs — that took the folder mirror down along with invoice reading. The inner
+  path also dodges 1.1.1's debug branch, which reads a bundled sample file that isn't deployed.
+  The require is lazy and guarded so a future incompatibility degrades to "no amount read" instead
+  of a 500. Do not upgrade it without testing a deployed run.
 - **The Hobby plan allows 12 Serverless Functions per deployment, and the project is at exactly 12.**
   That is the 11 files under `api/` **plus `middleware.js`**, which also compiles to a function —
   easy to forget when counting. Vercel reports the total as `lambdaRuntimeStats` on a deployment
