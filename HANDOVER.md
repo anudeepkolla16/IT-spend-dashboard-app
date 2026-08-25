@@ -15,7 +15,7 @@ deployed automatically from GitHub.
 
 | Data | How it updates |
 |---|---|
-| **Spend amounts** | Click **💰 Update Amounts**, hand it the statement workbook Finance sends, review, apply. It writes the month column for you. Editing the sheet by hand still works — the page re-fetches every 5 minutes and on "Refresh now". |
+| **Spend amounts** | Two sources. **💰 Update Amounts** with Finance's statement writes a whole month (reviewed). The invoice sync fills *empty* month cells from invoice totals, USD only, never overwriting. Editing by hand still works. |
 | **Invoices** | One daily Cron job (2 AM UTC) does both halves: mirrors *new* PDFs from the source SharePoint folders, then files invoices out of `invoices@sarasanalytics.com` into `Invoices/{App}/{YYYY-MM}/` and ticks that app's month in the **Invoices tracker** sheet. **📧 Fetch Invoices** runs the mailbox half on demand. |
 | **Access** | Microsoft sign-in; only emails in `ALLOWED_EMAILS` are let in. |
 
@@ -113,11 +113,35 @@ map it via **Import Invoices** so the mirror starts picking it up. Add the vendo
 **Update Amounts → Unrecognised vendors** and the mapping applies to mail too — both use the
 same `Invoices/_amount-map.json`.
 
-**It does not write spend amounts, on purpose.** The figures in the sheet reconcile against the
-bank statement, and an invoice total often differs from what was actually charged — tax, currency
-conversion, prepaid or partial billing. Writing invoice totals into the sheet would quietly change
-what those numbers mean. The mailbox sync tracks *which invoices arrived*; **Update Amounts**
-remains the source of the figures.
+### Invoice totals and the Spendings sheet
+
+The sync reads the payable total out of each invoice PDF and **fills the app's month cell in
+Spendings when that cell is empty**. It never overwrites a figure that is already there — an
+existing value may be the bank-statement figure or a hand correction, and an invoice total is not
+authoritative over either. Anything it declines to write is listed in the run summary.
+
+**Only unambiguously USD invoices are used.** This matters more than it sounds. The sheet is
+entirely in USD, but Indian vendors bill in INR — Tata Tele's June invoice reads
+`Net Payable (INR) 150591.60`, where the sheet correctly holds `1574.40`, the converted figure.
+Writing the face value would have been a ~95x error. So an invoice whose currency is not plainly
+USD is reported with its amount and currency and left for a human; it is never totalled into the
+sheet.
+
+Totals are matched most-specific first, because invoices state several. Adobe prints
+`NET AMOUNT (USD) 34.97` (pre-tax) *before* `GRAND TOTAL (USD) 37.16`; the payable total wins, and
+37.16 is what the sheet holds.
+
+**Be aware of what this changes.** Spend figures sourced from invoices will no longer tie exactly
+to the bank statement — invoice totals and card charges differ on tax, FX and proration. Apps whose
+cells are filled from invoices are recorded in `Invoices/_amount-log.json` with `source: "invoice"`,
+so the two can always be told apart.
+
+**Re-reading invoices already seen:** the sync skips mail it has processed before. To pick up totals
+from invoices filed before amounts were being read, add `?rescan=1`:
+```
+curl -s -X POST -H "Authorization: Bearer <CRON_SECRET>" \
+  "https://it-spend-dashboard-app.vercel.app/api/invoices/sync-cron?mode=mail&rescan=1"
+```
 
 **Files it keeps**
 
@@ -233,7 +257,8 @@ lib/
   vendor-map.js                Vendor label → app row matching (seeded aliases + descriptor rules)
   spend-sheet.js               Opens the spend workbook, alias map and audit log
   mail.js                      Graph mail helpers — invoice detection, forwarded-sender parsing
-  mail-sync.js                 Files invoice PDFs from the shared mailbox, ticks the tracker
+  mail-sync.js                 Files invoice PDFs from the shared mailbox, ticks the tracker, fills empty amounts
+  invoice-amount.js            Reads the payable total + currency out of an invoice PDF
   amounts/{preview,apply,log}.js  The amount-import handlers, behind api/amounts.js
 api/
   spend-data.js                Reads + parses the Excel sheet → JSON the dashboard renders (60s cache)

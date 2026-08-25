@@ -1229,6 +1229,24 @@ $('#mailSyncBtn').onclick = async () => {
     const lines = [`Scanned ${json.scanned} message${json.scanned===1?'':'s'} in ${json.mailbox}.`];
     lines.push(`Filed ${json.filed} invoice PDF${json.filed===1?'':'s'}${json.alreadyPresent?`, ${json.alreadyPresent} already there`:''}.`);
     if (json.tracker && json.tracker.marked) lines.push(`Ticked ${json.tracker.marked} cell${json.tracker.marked===1?'':'s'} in the "${json.tracker.sheet}" sheet.`);
+
+    const wrote = json.amountsWritten || [];
+    if (wrote.length){
+      lines.push(`\nWrote ${wrote.length} amount${wrote.length===1?'':'s'} into the Spendings sheet:`);
+      wrote.slice(0,10).forEach(w => lines.push(`  · ${w.app} ${w.month} = ${Number(w.amount).toLocaleString('en-US',{minimumFractionDigits:2})}`));
+    }
+    const filled = json.amountsSkippedFilled || [];
+    if (filled.length){
+      lines.push(`\n${filled.length} cell${filled.length===1?'':'s'} already had a figure and were left alone:`);
+      filled.slice(0,8).forEach(f => lines.push(`  · ${f.app} ${f.month}: sheet has ${Number(f.current).toLocaleString('en-US',{minimumFractionDigits:2})}, invoice says ${Number(f.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})}`));
+    }
+    const review = json.amountsNeedingReview || [];
+    if (review.length){
+      lines.push(`\n${review.length} invoice${review.length===1?'':'s'} could not be used as an amount:`);
+      review.slice(0,8).forEach(r => lines.push(`  · ${r.app}: ${Number(r.amount).toLocaleString('en-US')} ${r.currency||'?'} — ${r.note}`));
+    }
+    const unread = json.amountsUnread || [];
+    if (unread.length) lines.push(`\n${unread.length} invoice${unread.length===1?'':'s'} had no readable total (possibly scanned).`);
     if (json.unmatched){
       lines.push(`\n${json.unmatched} invoice${json.unmatched===1?" couldn't":"s couldn't"} be matched to an app and went to Invoices/_Unmatched/:`);
       (json.unmatchedItems||[]).slice(0,8).forEach(u => lines.push(`  · ${u.subject} — ${u.from||'unknown sender'}`));

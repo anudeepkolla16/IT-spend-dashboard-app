@@ -161,6 +161,9 @@ module.exports = async (req, res) => {
         out.mail = await runMailSync(token, targetDriveId, {
           deadline: mode === 'mail' ? HARD_DEADLINE : started + 25 * 1000,
           mapping: config && config.mapping,
+          // ?rescan=1 re-reads mail already seen, so totals can be picked up
+          // from invoices that were filed before amounts were being read.
+          rescan: !!(req.query && (req.query.rescan === '1' || req.query.rescan === 'true')),
         });
       } catch (e) {
         out.mail = { error: e.message };

@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "xlsx": "^0.18.5",
-    "@vercel/functions": "^1.5.0"
+    "@vercel/functions": "^1.5.0",
+    "pdf-parse": "^2.4.5",
+    "xlsx": "^0.18.5"
   },
   "scripts": {
     "test": "node --test test/*.test.js"
