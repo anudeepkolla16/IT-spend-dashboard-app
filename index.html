@@ -1243,6 +1243,12 @@ async function runMailSync(rescan){
       lines.push(`\nWrote ${wrote.length} amount${wrote.length===1?'':'s'} into the Spendings sheet:`);
       wrote.slice(0,10).forEach(w => lines.push(`  · ${w.app} ${w.month} = ${Number(w.amount).toLocaleString('en-US',{minimumFractionDigits:2})}`));
     }
+    const folderTotals = json.folderTotals || [];
+    if (folderTotals.length){
+      lines.push(`\nInvoice totals by folder:`);
+      folderTotals.slice(0,10).forEach(f => lines.push(
+        `  · ${f.app} ${f.month}: ${Number(f.total).toLocaleString('en-US',{minimumFractionDigits:2})} from ${f.invoicesCounted}/${f.pdfsInFolder} invoice${f.pdfsInFolder===1?'':'s'}`));
+    }
     const filled = json.amountsSkippedFilled || [];
     if (filled.length){
       lines.push(`\n${filled.length} cell${filled.length===1?'':'s'} already had a figure and were left alone:`);

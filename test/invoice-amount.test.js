@@ -200,3 +200,32 @@ test('does not require the PDF library at module load', () => {
   const topLevel = src.split('\n').filter(l => /^\s*(const|let|var)\s.*require\(['"]pdf-parse/.test(l));
   assert.strictEqual(topLevel.length, 0, 'pdf-parse must only be required lazily, inside readPdfText');
 });
+
+// --- Totalling the folder, not just the mail ----------------------------
+//
+// A live run reported "Bubble Starter 2026-08: invoice says 64.00" against an
+// actual 524.27. Only 2 of Bubble's 9 August charges arrived by email; the rest
+// reached the archive by other routes. Summing only emailed attachments
+// undercounts silently, and would have written 64.00 into an empty cell.
+// The total now comes from every invoice in the app-month folder.
+
+test('the message loop no longer accumulates amounts by itself', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'mail-sync.js'), 'utf8');
+  // The per-attachment accumulator was the bug; the folder pass replaces it.
+  assert.ok(!/byMonth\[month\] = Math\.round\(\(\(byMonth\[month\] \|\| 0\) \+ total\.amount\)/.test(src),
+    'amounts must not be summed per emailed attachment');
+  assert.match(src, /sumFolderInvoices/, 'the folder-wide total must be what feeds the sheet');
+});
+
+test('the folder pass is bounded so one run cannot parse without limit', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'mail-sync.js'), 'utf8');
+  assert.match(src, /maxParse/, 'a parse budget must bound the run');
+  assert.match(src, /budget\.deadline/, 'the folder pass must respect the run deadline');
+});
+
+test('parsed totals are cached by path so a PDF is read once', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'mail-sync.js'), 'utf8');
+  assert.match(src, /cache\.set\(key, entry\)/);
+  assert.match(src, /amounts: existing\.concat\(budget\.fresh\)/,
+    'fresh results must persist to the index for the next run');
+});
