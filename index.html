@@ -109,6 +109,33 @@
   .amt-empty{color:var(--muted);font-size:12.5px;padding:10px 2px}
   .amt-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
   .amt-controls select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:12.5px}
+  /* Invoice checklist */
+  .inv-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .inv-grid{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .inv-grid table{font-size:11px}
+  .inv-grid td.mark{text-align:center;font-weight:700;cursor:pointer;width:34px}
+  /* Absorbs the slack so Application/months/On-file pack together at the left
+     rather than being stretched apart across the full table width. */
+  .inv-grid th.fill,.inv-grid td.fill{width:100%;padding:0}
+  .inv-grid td.mark span{display:inline-block;min-width:20px;border-radius:6px;padding:1px 4px}
+  .mark-have span{background:rgba(61,220,151,.16);color:#7ff0c2}
+  .mark-missing span{background:rgba(255,176,32,.2);color:#ffd28a}
+  .mark-extra span{background:rgba(108,140,255,.16);color:#a9bcff}
+  .mark-planned span{color:var(--muted);opacity:.6}
+  .mark-none span{color:var(--muted);opacity:.28}
+  .inv-legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:11.5px;color:var(--muted)}
+  .inv-legend b{font-weight:700;margin-right:4px}
+  .inv-files{display:flex;flex-direction:column;gap:2px;max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px 10px}
+  .inv-file{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:12px}
+  .inv-file:last-child{border-bottom:none}
+  .inv-file .who{font-weight:600;min-width:150px}
+  .inv-file .when{color:var(--muted);font-size:11px;min-width:64px}
+  .inv-file a{color:var(--accent);text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .inv-file a:hover{text-decoration:underline}
+  .inv-file .amt{font-variant-numeric:tabular-nums;white-space:nowrap;min-width:76px;text-align:right}
+  .inv-file .amt.soft{color:var(--muted)}
+  @media(max-width:700px){.inv-file{flex-wrap:wrap}.inv-file .who{min-width:0}}
+
   /* Drill-down modal */
   .modal-overlay{position:fixed;inset:0;background:rgba(5,7,15,.7);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
   .modal-overlay.show{display:flex}
@@ -172,7 +199,7 @@
     <div class="card">
       <h3>📅 Upcoming Renewals</h3>
       <div class="cap">Yearly renewals in the next 6 months, and every monthly renewal in the current month, with expected cost (click a row for full detail)</div>
-      <div class="tabs">
+      <div class="tabs" id="renewalTabs">
         <button class="tab-btn active" data-tab="yearly" id="renewTabYearly">Yearly</button>
         <button class="tab-btn" data-tab="monthly" id="renewTabMonthly">Monthly</button>
       </div>
@@ -216,6 +243,37 @@
       <div class="cap">What each app costs per year at its current rate. Monthly apps use a trailing 3-month average (smooths volatile cloud/API metering); annual, half-yearly and quarterly charges are spread over their billing cycle rather than counted every month. One-time purchases and cancelled apps are excluded.</div>
       <div class="chartwrap sm"><canvas id="runrateChart"></canvas></div>
       <div id="runrateNote" class="cap" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h3>🧾 Invoice Checklist</h3>
+      <div class="cap">Which invoices are actually on file, per app and per month, set against the months the sheet records a charge for. Click a cell to open that app's invoices.</div>
+      <div class="tabs" id="invTabs">
+        <button class="tab-btn active" data-invtab="checklist">Checklist</button>
+        <button class="tab-btn" data-invtab="files">All invoices</button>
+      </div>
+      <div class="filters">
+        <select id="invFilter">
+          <option value="all">All applications</option>
+          <option value="gaps">Only apps missing an invoice</option>
+          <option value="have">Only apps with invoices on file</option>
+        </select>
+        <input id="invSearch" placeholder="Search app / file…" />
+        <div class="grow"></div>
+        <span class="chip" id="invCount" style="align-self:center"></span>
+        <button class="btn ghost" id="invRefresh">↻ Rescan archive</button>
+      </div>
+      <div class="inv-summary" id="invSummary"></div>
+      <div id="invStatus" class="cap" style="margin-bottom:10px"></div>
+      <div id="invChecklist"></div>
+      <div id="invFiles" class="hidden"></div>
+      <div class="inv-legend" id="invLegend">
+        <span><b style="color:#7ff0c2">✓</b> invoice on file</span>
+        <span><b style="color:#ffd28a">!</b> charged, no invoice found</span>
+        <span><b style="color:#a9bcff">●</b> invoice on file, nothing charged in the sheet</span>
+        <span><b style="color:var(--muted)">·</b> nothing charged</span>
+        <span><b style="color:var(--muted)">–</b> future month budgeted in the sheet, not yet billed</span>
+      </div>
     </div>
 
     <div class="card">
@@ -452,8 +510,11 @@ function drawRenewalsTab(){
   }).join('');
   el.querySelectorAll('.renewal-row').forEach(row=>row.onclick=()=>openModal(decodeURIComponent(row.dataset.name)));
 }
-document.querySelectorAll('.tab-btn').forEach(btn=>btn.onclick=()=>{
-  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+// Scoped to this tab group on purpose: the Invoice Checklist card has its own
+// row of .tab-btn buttons, and an unscoped handler would clear both groups'
+// active state and switch the wrong panel.
+document.querySelectorAll('#renewalTabs .tab-btn').forEach(btn=>btn.onclick=()=>{
+  document.querySelectorAll('#renewalTabs .tab-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   renewalsTab = btn.dataset.tab;
   drawRenewalsTab();
@@ -655,6 +716,10 @@ function build(){
   renderTop(all.filter(r=>r.kind==='Apps'));
   renderRunRate(all.filter(r=>r.kind==='Apps'));
   setupTable(all);
+  // The checklist joins the archive to the sheet, so it can only be drawn once
+  // setupTable has populated ALL_MONTHS and window.PIVOTED.
+  drawInvoices();
+  if (!invData && !invLoading) loadInventory(false);
 }
 
 function monthTotals(rows){
@@ -1047,6 +1112,254 @@ $('#modalUploadFile').onchange = async (e) => {
 };
 
 /* ------------------------------------------------------------------ *
+ * Invoice checklist
+ *
+ * Two views over the same data: a per-app x per-month grid of what is
+ * actually filed in the archive, and a flat list of every invoice on file.
+ *
+ * The grid is a checklist rather than an inventory, so it is only useful set
+ * against the sheet: a month with a charge and no PDF is the thing worth
+ * seeing. Months the sheet has budgeted but not yet reached are shown apart
+ * from real gaps -- an invoice for next February is not missing, it has not
+ * been issued.
+ * ------------------------------------------------------------------ */
+
+let invData = null;          // archive inventory from the API
+let invTab = 'checklist';
+let invLoading = false;
+
+// Archive folders are the sheet's app names run through sanitizeSegment, so
+// they mostly match exactly -- but not always ("ZOHO Books" vs "Zoho books").
+// Compare on letters and digits alone.
+const invNorm = s => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+
+function invArchiveIndex(){
+  const byApp = new Map();
+  for (const f of (invData && invData.files) || []){
+    const key = invNorm(f.app);
+    let rec = byApp.get(key);
+    if (!rec) byApp.set(key, rec = { app:f.app, months:new Map(), undated:[], count:0 });
+    rec.count++;
+    if (f.month){
+      const list = rec.months.get(f.month) || [];
+      list.push(f);
+      rec.months.set(f.month, list);
+    } else rec.undated.push(f);
+  }
+  return byApp;
+}
+
+// One row per app: the sheet's amounts joined to the archive's files.
+function invBuildRows(){
+  const archive = invArchiveIndex();
+  const pivoted = window.PIVOTED || [];
+  const rows = new Map();
+
+  for (const g of pivoted){
+    rows.set(invNorm(g.name), { name:g.name, dept:g.dept, sheet:g, files:new Map(), undated:[], fileCount:0 });
+  }
+  for (const [key, rec] of archive){
+    let row = rows.get(key);
+    // An app with invoices but no row in the sheet still belongs on the list --
+    // that is spend the sheet does not know about.
+    if (!row) rows.set(key, row = { name:rec.app, dept:'—', sheet:null, files:new Map(), undated:[], fileCount:0 });
+    row.files = rec.months;
+    row.undated = rec.undated;
+    row.fileCount = rec.count;
+  }
+  return [...rows.values()].sort((a,b)=>a.name.localeCompare(b.name));
+}
+
+function invMonths(){
+  const fromSheet = ALL_MONTHS || [];
+  const fromArchive = (invData && invData.months) || [];
+  return [...new Set([...fromSheet, ...fromArchive])].sort();
+}
+
+// 'have' | 'missing' | 'extra' | 'planned' | 'none'
+function invCellState(row, month, todayKey){
+  const n = (row.files.get(month) || []).length;
+  const spend = row.sheet ? (row.sheet[month] || 0) : 0;
+  if (n) return spend ? 'have' : 'extra';
+  if (spend) return month > todayKey ? 'planned' : 'missing';
+  return 'none';
+}
+const INV_GLYPH = { have:'✓', missing:'!', extra:'●', planned:'–', none:'·' };
+
+function invVisibleRows(){
+  const mode = ($('#invFilter')||{}).value || 'all';
+  const q = (($('#invSearch')||{}).value || '').trim().toLowerCase();
+  const todayKey = realMonthKey(0);
+  const months = invMonths();
+  return invBuildRows().filter(row=>{
+    if (q && !row.name.toLowerCase().includes(q) && !String(row.dept||'').toLowerCase().includes(q)) return false;
+    if (mode === 'have') return row.fileCount > 0;
+    if (mode === 'gaps') return months.some(m => invCellState(row, m, todayKey) === 'missing');
+    return true;
+  });
+}
+
+function drawInvoices(){
+  const statusEl = $('#invStatus');
+  if (!statusEl) return;
+
+  if (!invData){
+    statusEl.textContent = invLoading
+      ? 'Scanning the invoice archive…'
+      : 'Invoice archive not loaded yet.';
+    $('#invSummary').innerHTML = '';
+    $('#invCount').textContent = '';
+    return;
+  }
+
+  const todayKey = realMonthKey(0);
+  const months = invMonths();
+  const allRows = invBuildRows();
+
+  // Only months already billed count towards coverage. Counting the sheet's
+  // budgeted future months would report a permanent shortfall that no amount
+  // of filing could close.
+  let charged = 0, covered = 0, extra = 0;
+  for (const row of allRows){
+    for (const m of months){
+      const st = invCellState(row, m, todayKey);
+      if (st === 'have'){ charged++; covered++; }
+      else if (st === 'missing') charged++;
+      else if (st === 'extra') extra++;
+    }
+  }
+  const missing = charged - covered;
+  const pct = charged ? Math.round(covered/charged*100) : 100;
+
+  $('#invSummary').innerHTML = [
+    `<span class="amt-pill auto">${covered} of ${charged} charged months have an invoice · ${pct}%</span>`,
+    missing ? `<span class="amt-pill review">${missing} charged month${missing===1?'':'s'} with no invoice</span>` : '',
+    extra ? `<span class="amt-pill muted">${extra} month${extra===1?'':'s'} with an invoice but no charge in the sheet</span>` : '',
+    `<span class="amt-pill muted">${invData.fileCount||0} invoice${(invData.fileCount||0)===1?'':'s'} on file across ${(invData.apps||[]).length} folder${(invData.apps||[]).length===1?'':'s'}</span>`,
+    invData.undatedCount ? `<span class="amt-pill muted">${invData.undatedCount} not filed under a month</span>` : '',
+  ].filter(Boolean).join('');
+
+  statusEl.innerHTML = [
+    `Archive scanned ${new Date(invData.scannedAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}.`,
+    invData.truncated ? ' <b style="color:var(--warn)">The scan ran out of time and this is a partial picture — press “Rescan archive”.</b>' : '',
+    (invData.errors && invData.errors.length) ? ` ${invData.errors.length} folder(s) could not be read: ${invData.errors.slice(0,3).join('; ')}` : '',
+  ].join('');
+
+  const rows = invVisibleRows();
+  $('#invCount').textContent = `${rows.length} app${rows.length===1?'':'s'}`;
+
+  if (invTab === 'files') drawInvoiceFiles(rows);
+  else drawInvoiceGrid(rows, months, todayKey);
+}
+
+function drawInvoiceGrid(rows, months, todayKey){
+  const el = $('#invChecklist');
+  if (!rows.length){
+    el.innerHTML = '<div class="cap" style="padding:12px 4px">No applications match this filter.</div>';
+    return;
+  }
+  const head = `<tr><th class="stickycol">Application</th>${
+    months.map(m=>`<th class="num">${monthLabel(m)}</th>`).join('')
+  }<th class="num total">On file</th><th class="fill"></th></tr>`;
+
+  const body = rows.map(row=>{
+    const cells = months.map(m=>{
+      const st = invCellState(row, m, todayKey);
+      const n = (row.files.get(m)||[]).length;
+      const spend = row.sheet ? (row.sheet[m]||0) : 0;
+      const tip = [
+        `${row.name} · ${monthLabel(m)}`,
+        spend ? `sheet: ${fmtUSD(spend)}` : 'sheet: no charge',
+        n ? `${n} invoice${n===1?'':'s'} on file` : 'no invoice on file',
+      ].join(' — ');
+      const label = st === 'have' && n > 1 ? String(n) : INV_GLYPH[st];
+      return `<td class="mark mark-${st}" title="${tip.replace(/"/g,'&quot;')}"><span>${label}</span></td>`;
+    }).join('');
+    const undated = row.undated.length ? ` <span class="chip" title="filed without a month subfolder">${row.undated.length} undated</span>` : '';
+    // The drill-down modal is built from the sheet row, so an app that only
+    // exists in the archive has nothing to open. Leave it unclickable rather
+    // than offering a click that silently does nothing.
+    const openable = !!row.sheet;
+    return `<tr${openable?` data-name="${encodeURIComponent(row.name)}"`:' style="cursor:default"'}>
+      <td class="stickycol">${row.name}${openable?'':' <span class="chip" title="has invoices but no row in the spend sheet">not in sheet</span>'}${undated}</td>
+      ${cells}
+      <td class="num total">${row.fileCount||''}</td>
+      <td class="fill"></td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `<div class="inv-grid"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+  el.querySelectorAll('tr[data-name]').forEach(tr=>{
+    tr.onclick = () => openModal(decodeURIComponent(tr.dataset.name));
+  });
+}
+
+function drawInvoiceFiles(rows){
+  const el = $('#invFiles');
+  const q = (($('#invSearch')||{}).value || '').trim().toLowerCase();
+  const keep = new Set(rows.map(r=>invNorm(r.name)));
+  const files = ((invData && invData.files) || [])
+    .filter(f => keep.has(invNorm(f.app)))
+    .filter(f => !q || f.app.toLowerCase().includes(q) || f.name.toLowerCase().includes(q));
+
+  if (!files.length){
+    el.innerHTML = '<div class="cap" style="padding:12px 4px">No invoices match this filter.</div>';
+    return;
+  }
+  el.innerHTML = '<div class="inv-files">' + files.map(f=>{
+    const clean = f.name.replace(/^\d{4}-\d{2}-\d{2}T[\d-]+Z_/,'');
+    // Only an unambiguously-USD total is shown as a figure. A foreign-currency
+    // total is shown with its currency and greyed, because it is not comparable
+    // to the sheet, which is USD throughout.
+    const amt = f.amount == null ? ''
+      : (f.amountUsable ? fmtUSD(f.amount) : `${(f.currency||'?')} ${f.amount.toLocaleString('en-US')}`);
+    const when = f.uploadedAt ? new Date(f.uploadedAt).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
+    return `<div class="inv-file">
+      <span class="who">${f.app}</span>
+      <span class="when">${f.month?monthLabel(f.month):'—'}</span>
+      ${f.webUrl?`<a href="${f.webUrl}" target="_blank" rel="noopener">${clean}</a>`:`<span style="flex:1">${clean}</span>`}
+      <span class="amt${f.amountUsable?'':' soft'}">${amt}</span>
+      <span class="when">${when}</span>
+    </div>`;
+  }).join('') + '</div>';
+}
+
+async function loadInventory(force){
+  if (invLoading) return;
+  invLoading = true;
+  drawInvoices();
+  try{
+    const res = await fetch(`/api/invoices/list?mode=checklist${force?'&refresh=1':''}`, {cache:'no-store'});
+    // Read as text first: a runtime crash returns a plain-text body, and
+    // res.json() would report that as a JSON syntax error instead of the fault.
+    const raw = await res.text();
+    let json;
+    try{ json = JSON.parse(raw); }
+    catch{ throw new Error(raw.slice(0,160) || ('HTTP '+res.status)); }
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    invData = json;
+    invLoading = false;
+    drawInvoices();
+  }catch(err){
+    invLoading = false;
+    $('#invStatus').innerHTML = `<span style="color:var(--danger)">Couldn't scan the invoice archive: ${err.message}</span>`;
+  }
+}
+
+document.querySelectorAll('#invTabs .tab-btn').forEach(btn=>btn.onclick=()=>{
+  document.querySelectorAll('#invTabs .tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  invTab = btn.dataset.invtab;
+  $('#invChecklist').classList.toggle('hidden', invTab !== 'checklist');
+  $('#invFiles').classList.toggle('hidden', invTab !== 'files');
+  $('#invLegend').classList.toggle('hidden', invTab !== 'checklist');
+  drawInvoices();
+});
+$('#invFilter').onchange = drawInvoices;
+$('#invSearch').oninput = drawInvoices;
+$('#invRefresh').onclick = () => loadInventory(true);
+
+/* ------------------------------------------------------------------ *
  * Update amounts from a statement
  *
  * Finance hands over a statement workbook; this reads it, works out what
@@ -1367,6 +1680,9 @@ async function runMailSync(rescan){
     }
 
     alert(lines.join('\n'));
+    // Newly filed PDFs change what the checklist shows, so rescan the archive
+    // rather than leaving the tab reporting gaps that were just closed.
+    if (json.filed) loadInventory(true);
     if (json.filed || (json.amountsWritten||[]).length || (json.amountsUpdated||[]).length) syncFromApi(true);
   }catch(err){
     alert('Mailbox fetch failed: ' + err.message);

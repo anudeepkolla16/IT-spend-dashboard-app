@@ -215,6 +215,59 @@ The response nests each half under `folders` and `mail`. A mailbox failure (most
 
 ---
 
+## The Invoice Checklist tab
+
+The **Invoice Checklist** card on the dashboard answers one question: for every month the sheet says
+we were charged, do we actually have the invoice? It has two views, switched by the tabs on the card:
+
+- **Checklist** — a grid of applications down the side and months across the top. Each cell is one of:
+
+  | Mark | Meaning |
+  |---|---|
+  | `✓` (green) | The sheet records a charge and there is at least one invoice on file. A number instead of the tick means that many invoices. |
+  | `!` (amber) | The sheet records a charge for a month already billed, and **no invoice was found** — the gap worth chasing. |
+  | `●` (blue) | Invoices are on file but the sheet records no charge for that month. Either the amount has not been entered yet, or the invoice belongs elsewhere. |
+  | `·` | Nothing charged, nothing filed. |
+  | `–` | A **future** month the sheet has budgeted. Not a gap — the invoice has not been issued yet. |
+
+  Clicking a row opens that app's drill-down, which lists the invoice files themselves.
+
+- **All invoices** — every PDF in the archive, flat, with the app, the month, a link to the file, and
+  the total that was read out of it. A non-USD total is shown greyed with its currency (e.g.
+  `INR 150,591.60`) because it is not comparable to the sheet, which is USD throughout.
+
+The filter picks all apps, only apps with a gap, or only apps with invoices on file; the search box
+matches app, department or file name.
+
+**Where the numbers come from.** The grid is a join, not a single source:
+
+- the **archive** — `Invoices/{App}/{Month}/`, the mirrored copy the folder sync maintains — says which
+  PDFs exist;
+- the **spend sheet** (already loaded by the dashboard) says which app-months were charged;
+- `Invoices/_invoice-index.json` supplies the per-file totals, joined **by file name**, because the
+  amounts were parsed against the procurement folder's paths and the archive is a mirror at a different
+  path. A file name that carries two conflicting totals is shown with no total rather than a guessed one.
+
+**Coverage only counts months already billed.** Including the sheet's budgeted future months would
+report a shortfall that no amount of filing could ever close.
+
+**Month subfolders are read leniently.** They were named by hand over the years and are not consistent —
+`Aug-26` under one vendor, `July` under another, `2026-08` elsewhere; all are understood. A folder named
+only for a month takes its year from when the file landed, rolling back a year when the folder names a
+month well ahead of that date (a December invoice filed in January belongs to the year before). A PDF
+sitting directly in the app folder with no month subfolder is counted and flagged as *undated* rather
+than silently dropped.
+
+**Scanning.** The tab loads with the dashboard and the result is cached for five minutes; **↻ Rescan
+archive** forces a fresh crawl, and a run of **📧 Fetch Invoices** that files anything triggers one
+automatically. A crawl that runs past its deadline is reported as partial and is **not** cached — a
+truncated scan would otherwise make closed gaps look open for the next five minutes.
+
+**Endpoint:** `GET /api/invoices/list?mode=checklist` (add `&refresh=1` to bypass the cache). It shares
+a route with the per-app listing on purpose — see the function-count note below.
+
+---
+
 ## Environment variables (set in Vercel → Settings → Environment Variables)
 
 Secrets live only in Vercel, never in the repo. Names and purpose:
@@ -310,13 +363,14 @@ lib/
   mail.js                      Graph mail helpers — invoice detection, forwarded-sender parsing
   mail-sync.js                 Files invoice PDFs from the shared mailbox, ticks the tracker, fills empty amounts
   invoice-amount.js            Reads the payable total + currency out of an invoice PDF
+  invoices/inventory.js        Crawls the invoice archive for the checklist tab (month folders, per-file totals)
   amounts/{preview,apply,log}.js  The amount-import handlers, behind api/amounts.js
 api/
   spend-data.js                Reads + parses the Excel sheet → JSON the dashboard renders (60s cache)
   amounts.js                   One route for the amount import; dispatches on `action`
   auth/{login,callback,logout,me}.js   Microsoft OAuth sign-in flow
   invoices/
-    list.js                    Lists an app's invoices (recurses into month subfolders)
+    list.js                    Lists an app's invoices; `?mode=checklist` returns the whole archive
     upload.js                  Manual single-PDF upload from a drill-down modal
     import.js                  Bulk import: preview (suggest matches) + batched commit (skips existing)
     save-sync-config.js        Persists the folder→app mapping to _sync-config.json
@@ -347,6 +401,6 @@ api/
   endpoints were first added as four separate routes.
 
   That is why the three amount handlers share `api/amounts.js` (dispatching on `action`) and the
-  mailbox sync runs inside `api/invoices/sync-cron.js` (`?mode=mail`). **Add any new endpoint the
-  same way** — logic in `lib/`, dispatched from an existing route — or move the project to a Pro
-  team, which raises the limit.
+  mailbox sync runs inside `api/invoices/sync-cron.js` (`?mode=mail`), and the invoice checklist
+  inside `api/invoices/list.js` (`?mode=checklist`). **Add any new endpoint the same way** — logic in
+  `lib/`, dispatched from an existing route — or move the project to a Pro team, which raises the limit.
