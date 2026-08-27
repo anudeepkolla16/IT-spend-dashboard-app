@@ -31,10 +31,16 @@ function lift(name) {
 }
 
 const invNorm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// INV_FILING_WORDS is a const the function closes over, so it is lifted too.
+const FILING_WORDS_SRC = html.match(/const INV_FILING_WORDS = [^\n]+/);
+assert.ok(FILING_WORDS_SRC, 'INV_FILING_WORDS is no longer in index.html — this test is stale');
 const invResolveFolder = new Function(
   'invNorm',
-  `${lift('invResolveFolder')}; return invResolveFolder;`
+  `${FILING_WORDS_SRC[0]}\n${lift('invResolveFolder')}; return invResolveFolder;`
 )(invNorm);
+
+// The curated aliases the endpoint serves to the page.
+const { SEED_ALIASES } = require('../lib/vendor-map');
 
 // The spend sheet's real app names.
 const APPS = ['Adobe', 'Anthropic(Api Console)', 'AWS', 'Bubble Starter', 'Claude Ai',
@@ -49,7 +55,7 @@ const MAPPING = {
   'Laptop procurment': 'Laptops Procurement',
 };
 
-const resolve = (folder, mapping) => invResolveFolder(folder, sheetIndex, mapping || {});
+const resolve = (folder, mapping, aliases) => invResolveFolder(folder, sheetIndex, mapping || {}, aliases || {});
 
 test('an exact name needs no help', () => {
   assert.equal(resolve('Adobe'), 'Adobe');
@@ -84,6 +90,31 @@ test('an ambiguous folder is left unresolved rather than guessed', () => {
   // answers, so it gets neither. Picking one would file invoices against a row
   // nobody chose, and a wrong tick is worse than a visible gap.
   assert.equal(invResolveFolder('acmeclo', both, {}), null);
+});
+
+test('the curated vendor aliases place folders the sheet names differently', () => {
+  // No saved mapping needed: this is the same knowledge the statement importer
+  // uses, so the checklist places "Claude Api" the moment the archive is read.
+  assert.equal(resolve('Claude Api'), null, 'nothing about the name resembles the row');
+  assert.equal(resolve('Claude Api', null, SEED_ALIASES), 'Anthropic(Api Console)');
+  assert.equal(resolve('Laptop procurment', null, SEED_ALIASES), 'Laptops Procurement');
+});
+
+test('a trailing filing word is stripped before the alias lookup', () => {
+  // The folder is "click up invoices"; the alias key is "clickup".
+  assert.equal(resolve('click up invoices'), null);
+  assert.equal(resolve('click up invoices', null, SEED_ALIASES), 'Mango technology(Clickup)');
+});
+
+test('an exact row name still wins over an alias pointing elsewhere', () => {
+  // "Claude Ai" is its own row. An alias must never pull it onto another.
+  assert.equal(resolve('Claude Ai', null, { claudeai: 'Anthropic(Api Console)' }), 'Claude Ai');
+});
+
+test('a folder that is only a filing word resolves to nothing', () => {
+  // Stripping "bills" off "Courier bills" leaves "courier", which is no app.
+  assert.equal(resolve('Courier bills', null, SEED_ALIASES), null);
+  assert.equal(resolve('invoices', null, SEED_ALIASES), null);
 });
 
 test('the saved mapping settles what name-matching cannot', () => {

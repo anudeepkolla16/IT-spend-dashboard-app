@@ -1139,16 +1139,36 @@ const invNorm = s => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
 // "Cumul(Luzmo)", "Claude Api" is "Anthropic(Api Console)". Joining on the raw
 // name reports invoices the archive is holding as missing, which is the whole
 // failure this tab exists to catch, so resolve the folder to a sheet row first.
-function invResolveFolder(folderName, sheetIndex, mapping){
+// Folder names carry filing words the vendor's name does not: "click up
+// invoices", "Courier bills". Strip them before looking a vendor up.
+const INV_FILING_WORDS = /(invoices?|bills?|receipts?|subscriptions?)$/;
+
+function invResolveFolder(folderName, sheetIndex, mapping, aliases){
   const k = invNorm(folderName);
-  const mapped = mapping && mapping[folderName];
-  if (mapped && sheetIndex.has(invNorm(mapped))) return sheetIndex.get(invNorm(mapped));
+  const hit = name => (name && sheetIndex.has(invNorm(name))) ? sheetIndex.get(invNorm(name)) : null;
+
+  // 1. What a human confirmed in the import review beats everything.
+  const mapped = hit(mapping && mapping[folderName]);
+  if (mapped) return mapped;
+
+  // 2. The folder is named exactly like the row.
   if (sheetIndex.has(k)) return sheetIndex.get(k);
 
-  // Failing an explicit mapping, one-sided containment — but only when exactly
-  // one row matches. "Cursor" is unambiguously "Cursor pro"; "Claude Ai" must not
-  // sweep up "Claude Ai Max 6 Accounts", which is why the exact test comes first
-  // and an ambiguous match is left unresolved rather than guessed.
+  // 3. The curated vendor aliases the statement importer already uses — the
+  // same knowledge that knows "Claude Api" is the API console row. Tried with
+  // and without a trailing filing word, so "click up invoices" reaches "clickup".
+  if (aliases){
+    const stripped = k.replace(INV_FILING_WORDS, '');
+    for (const key of [k, stripped]){
+      const byAlias = key && hit(aliases[key]);
+      if (byAlias) return byAlias;
+    }
+  }
+
+  // 4. Last, one-sided containment — but only when exactly one row matches.
+  // "Cursor" is unambiguously "Cursor pro"; "Claude Ai" must not sweep up
+  // "Claude Ai Max 6 Accounts", which is why the exact test comes first and an
+  // ambiguous match is left unresolved rather than guessed.
   const cands = [];
   for (const [nk, name] of sheetIndex){
     if (k.length >= 4 && nk.includes(k)) cands.push(name);
@@ -1161,6 +1181,7 @@ function invResolveFolder(folderName, sheetIndex, mapping){
 function invBuildRows(){
   const pivoted = window.PIVOTED || [];
   const mapping = (invData && invData.mapping) || {};
+  const aliases = (invData && invData.aliases) || {};
   const sheetIndex = new Map(pivoted.map(g => [invNorm(g.name), g.name]));
 
   const rows = new Map();
@@ -1170,7 +1191,7 @@ function invBuildRows(){
 
   window.INV_UNRESOLVED = [];
   for (const f of (invData && invData.files) || []){
-    const appName = invResolveFolder(f.app, sheetIndex, mapping);
+    const appName = invResolveFolder(f.app, sheetIndex, mapping, aliases);
     const key = appName ? invNorm(appName) : invNorm(f.app);
     let row = rows.get(key);
     if (!row){
@@ -1272,7 +1293,8 @@ function drawInvoices(){
     missing ? `<span class="amt-pill review">${missing} charged month${missing===1?'':'s'} with no invoice</span>` : '',
     extra ? `<span class="amt-pill muted">${extra} month${extra===1?'':'s'} with an invoice but no charge in the sheet</span>` : '',
     `<span class="amt-pill muted">${invData.fileCount||0} invoice${(invData.fileCount||0)===1?'':'s'} on file across ${(invData.apps||[]).length} folder${(invData.apps||[]).length===1?'':'s'}</span>`,
-    invData.undatedCount ? `<span class="amt-pill muted">${invData.undatedCount} not filed under a month</span>` : '',
+    invData.undatedCount ? `<span class="amt-pill muted">${invData.undatedCount} with no month to read</span>` : '',
+    invData.datedFromNameCount ? `<span class="amt-pill muted" title="filed straight in the app folder, with the month in the file name">${invData.datedFromNameCount} dated from the file name</span>` : '',
     (window.INV_UNRESOLVED||[]).length ? `<span class="amt-pill unmapped" title="${window.INV_UNRESOLVED.join(', ').replace(/"/g,'&quot;')}">${window.INV_UNRESOLVED.length} folder${window.INV_UNRESOLVED.length===1?'':'s'} not matched to a sheet row</span>` : '',
   ].filter(Boolean).join('');
 

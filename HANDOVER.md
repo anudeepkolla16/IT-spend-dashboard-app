@@ -314,7 +314,11 @@ to catch. Each folder is resolved in this order:
 
 1. the folder→app mapping saved in `{archive}/_sync-config.json` (written by **Import Invoices**);
 2. an exact match after normalising case and punctuation;
-3. one-sided containment, **only when exactly one row matches** — `Cursor` is unambiguously
+3. the **same curated vendor aliases the statement importer uses** (`SEED_ALIASES` in
+   `lib/vendor-map.js`), served to the page by the endpoint so the two cannot drift. This is what knows
+   `Claude Api` is the API console row. A trailing filing word is stripped first, so `click up invoices`
+   reaches the `clickup` alias;
+4. one-sided containment, **only when exactly one row matches** — `Cursor` is unambiguously
    `Cursor pro`, but `Claude Ai` must not sweep up `Claude Ai Max 6 Accounts`, which is why the exact
    test comes first and an ambiguous folder is left unresolved rather than guessed.
 
@@ -323,18 +327,37 @@ folders is shown as a pill — a wrong tick is worse than a visible gap. When a 
 under a differently-named folder, that folder name is shown on the row as a chip, so the join is
 visible rather than magic.
 
-> **If lots of folders show as "not matched to a sheet row"**, `_sync-config.json` is missing or
-> stale. Run **📥 Import Invoices** once against the archive folder and confirm the dropdowns; that
-> saves the mapping permanently.
+> **If folders still show as "not matched to a sheet row"**, they are vendors the alias list doesn't
+> know. Either add them to `SEED_ALIASES` in `lib/vendor-map.js`, or run **📥 Import Invoices** once
+> against the archive folder and confirm the dropdowns — that saves the mapping into
+> `_sync-config.json` permanently, and takes precedence over everything else.
 
 **Coverage only counts months already billed.** Including the sheet's budgeted future months would
 report a shortfall that no amount of filing could ever close.
 
-**Month subfolders are read leniently.** They were named by hand over the years and are not consistent —
-`Aug-26` under one vendor, `July` under another, `2026-08` elsewhere; all are understood. A folder named
-only for a month takes its year from when the file landed, rolling back a year when the folder names a
-month well ahead of that date (a December invoice filed in January belongs to the year before). A PDF
-sitting directly in the app folder with no month subfolder is counted and flagged as *undated* rather
+**Where an invoice's month comes from.** Two sources, in this order:
+
+1. **The month subfolder**, when there is one — somebody put the file there deliberately, and that beats
+   anything inferred. They were named by hand over the years and are not consistent (`Aug-26` under one
+   vendor, `July` under another, `2026-08` elsewhere); all are understood.
+2. **The file name**, when there is no month subfolder — which is most of the archive. Adobe, AWS and
+   Chargebee keep their invoices flat and put the month in the name: `jan 26.pdf`, `Apr-26.pdf`,
+   `June 26.pdf`, `Aug 2026.pdf`. Reading only the subfolder left **220 of 472 invoices undated**, which
+   the checklist showed as months charged with no invoice while the PDF sat right there.
+
+A month name never matches inside a longer word, so `Marchant`, `Augustine` and `Decision` are not
+months. The upload timestamp this app prefixes onto hand-uploaded files is stripped first — it is when
+the file arrived, never which month it bills.
+
+**Ambiguous numeric dates are refused, not guessed.** `27-01-2026` can only be day-first and `01-13-2026`
+can only be month-first, but `03-12-2025` is neither on its own. The order is settled **per folder** from
+whichever of its files happen to be unambiguous (Anthropic's `Claude Purchase 27-01-2026.pdf` settles the
+rest of that folder), and a folder that offers no evidence gets no guess. Filing an invoice under the
+wrong month is worse than leaving it undated: a wrong tick hides a real gap.
+
+**A bare month with no year** — in a folder name or a file name — takes its year from when the file
+landed, rolling back a year when the month is well ahead of that date, so a December invoice filed in
+January is not dated a year forward. A PDF with no readable month at all is counted and reported rather
 than silently dropped.
 
 **Scanning.** The tab loads with the dashboard and the result is cached for five minutes; **↻ Rescan
