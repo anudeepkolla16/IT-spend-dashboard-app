@@ -343,6 +343,12 @@ visible rather than magic.
 > know. Either add them to `SEED_ALIASES` in `lib/vendor-map.js`, or run **📥 Import Invoices** once
 > against the archive folder and confirm the dropdowns — that saves the mapping into
 > `_sync-config.json` permanently, and takes precedence over everything else.
+>
+> Running **Import Invoices** against the archive itself is safe and is now the normal case: the
+> import detects that the source folder *is* the archive and copies nothing, saving only the mapping.
+> It has to, because copying a source subfolder into `{archive}/{app}/` when the two are the same
+> folder would duplicate it under a second name — 85 Anthropic PDFs in both `Claude Api` and
+> `Anthropic(Api Console)`, with no easy way back. The review dialog says so before you confirm.
 
 **Coverage only counts months already billed.** Including the sheet's budgeted future months would
 report a shortfall that no amount of filing could ever close.

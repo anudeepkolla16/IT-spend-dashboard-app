@@ -88,6 +88,16 @@ module.exports = async (req, res) => {
     }
     const sourceDriveId = rootItem.parentReference.driveId;
 
+    // The source and the archive used to be two different folders, with this
+    // copying between them. They are now one and the same, so copying a source
+    // subfolder into {archive}/{app}/ would duplicate it under a second name —
+    // 85 Anthropic PDFs landing in both "Claude Api" and "Anthropic(Api
+    // Console)", with no easy way back. The mapping is still worth saving (the
+    // mailbox sync files by it), so the review flow runs; only the copy stops.
+    const targetDriveId = await resolveDriveId(token, upn);
+    const archiveRoot = await resolveArchiveRoot(token, targetDriveId);
+    const sourceIsArchive = sourceDriveId === targetDriveId && rootItem.id === archiveRoot.itemId;
+
     const subfoldersRes = await graphGet(
       token,
       `https://graph.microsoft.com/v1.0/drives/${sourceDriveId}/items/${rootItem.id}/children?$select=id,name,folder,folder&$top=200`
@@ -105,7 +115,7 @@ module.exports = async (req, res) => {
         const { app, score } = bestMatch(folder.name, appNames || []);
         proposals.push({ folderId: folder.id, folderName: folder.name, fileCount, suggestedApp: app, score });
       }
-      res.status(200).json({ sourceDriveId, folders: proposals });
+      res.status(200).json({ sourceDriveId, folders: proposals, sourceIsArchive, archive: archiveRoot.path });
       return;
     }
 
@@ -126,10 +136,21 @@ module.exports = async (req, res) => {
       return;
     }
 
-    const targetDriveId = await resolveDriveId(token, upn);
-    const archiveRoot = await resolveArchiveRoot(token, targetDriveId);
     const targetApp = sanitizeSegment(commitApp);
     const startOffset = Number(offset) || 0;
+
+    // Already where it belongs: record it as present rather than copying it
+    // beside itself under another name.
+    if (sourceIsArchive) {
+      let already = 0;
+      try { already = (await listFilesRecursive(token, sourceDriveId, folder.id)).length; } catch { /* count is cosmetic */ }
+      res.status(200).json({
+        folderName: folder.name, total: already, done: already, nextOffset: null,
+        copied: [], alreadyPresent: already, skippedTooLarge: [], errors: [],
+        note: `"${folder.name}" is already inside the archive (${archiveRoot.path}) — nothing to copy; the mapping is saved.`,
+      });
+      return;
+    }
 
     let files;
     try {

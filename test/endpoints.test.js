@@ -272,3 +272,31 @@ test('an apply routed through the dispatcher still writes the right cell', async
 });
 
 test.after(() => { excel.writeCells = realWriteCells; });
+
+/* ---------- the import must not duplicate the archive into itself ---------- */
+
+// The source folder and the invoice archive used to be two different places,
+// with the import copying between them. They are now the same folder, so
+// copying a source subfolder into {archive}/{app}/ would duplicate it under a
+// second name — 85 Anthropic PDFs in both "Claude Api" and
+// "Anthropic(Api Console)", with no easy way back.
+test('the import refuses to copy when the source IS the archive', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'invoices', 'import.js'), 'utf8');
+
+  assert.match(src, /const sourceIsArchive = sourceDriveId === targetDriveId && rootItem\.id === archiveRoot\.itemId/,
+    'it has to compare the shared folder against the resolved archive root, not a path string');
+  // The bail-out must come before anything is fetched or uploaded.
+  const guard = src.indexOf('if (sourceIsArchive)');
+  const upload = src.indexOf('uploadFileContent(token, targetDriveId, destPath');
+  assert.ok(guard > -1, 'commit mode must bail out when the source is the archive');
+  assert.ok(guard < upload, 'the bail-out must come before the upload, not after it');
+
+  // The mapping is still worth saving — the mailbox sync files by it — so the
+  // review flow keeps working; only the copying stops.
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(ui, /sourceIsArchive/, 'the review UI must say up front that nothing will be copied');
+  assert.match(ui, /saves the folder→app mapping only/,
+    'and must not let "Confirm & Import" read like it is about to duplicate the archive');
+});
