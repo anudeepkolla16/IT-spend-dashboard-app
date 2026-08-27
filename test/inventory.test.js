@@ -9,7 +9,7 @@ const assert = require('node:assert');
 
 const {
   parseMonthFolder, monthFromRelPath, monthFromFileName, detectDayFirst,
-  amountsByFileName, monthIndexFromWord, buildInventory,
+  amountsByFileName, monthIndexFromWord, buildInventory, isPlausibleMonth,
 } = require('../lib/invoices/inventory');
 
 const AUG_26 = '2026-08-20T10:00:00Z';
@@ -129,6 +129,46 @@ test('the month is read from the file name when there is no month subfolder', ()
   for (const [name, want] of Object.entries(cases)) {
     assert.equal(monthFromFileName(name, AUG_26, null), want, name);
   }
+});
+
+test('two digits after a month name are a year or a day, decided by plausibility', () => {
+  // Half the archive writes the YEAR there -- Adobe's "jan 26.pdf" is January
+  // 2026. The other half writes the DAY -- Slack's "March 31 invoice.pdf" is the
+  // 31st. Nothing in the name says which, so the year reading is checked against
+  // when the file landed. Reading every one as a year put Nov 2004, Feb 2012 and
+  // Mar 2031 across the checklist as real columns.
+  assert.equal(monthFromFileName('jan 26.pdf', AUG_26, null), '2026-01', 'a plausible year is a year');
+  assert.equal(monthFromFileName('March 31 invoice.pdf', AUG_26, null), '2026-03', '31 is a day, not 2031');
+  assert.equal(monthFromFileName('Feb 12.pdf', AUG_26, null), '2026-02', '12 is a day, not 2012');
+  assert.equal(monthFromFileName('Nov 04.pdf', AUG_26, null), '2025-11', '04 is a day, not 2004');
+  // Recent enough to be a real year, and left alone.
+  assert.equal(monthFromFileName('Dec 25.pdf', AUG_26, null), '2025-12');
+});
+
+test('an explicit four-digit year is always taken at its word', () => {
+  // Two digits are ambiguous; four are not. A human who wrote 2024 meant 2024,
+  // and the checklist reports it as outside the sheet's months rather than
+  // quietly rewriting it.
+  assert.equal(monthFromFileName('Aug 2026.pdf', AUG_26, null), '2026-08');
+  assert.equal(monthFromFileName('March 2024 invoice.pdf', AUG_26, null), '2024-03');
+});
+
+test('real Slack file names, which mix all three conventions in one folder', () => {
+  assert.equal(monthFromFileName('March 2, 2026 invoice.pdf', AUG_26, null), '2026-03');
+  assert.equal(monthFromFileName('March 31 invoice.pdf', AUG_26, null), '2026-03');
+  assert.equal(monthFromFileName('Invoice38639008_28-07-2026_093400.pdf', AUG_26, null), '2026-07');
+  // An order number is not a date.
+  assert.equal(monthFromFileName('Order Form_Q-11968953.pdf', AUG_26, null), null);
+});
+
+test('the plausibility window is generous behind and tight ahead', () => {
+  // An invoice can be archived late, so a couple of years back is fine; an
+  // invoice from years in the future never is.
+  assert.equal(isPlausibleMonth('2025-01', AUG_26), true);
+  assert.equal(isPlausibleMonth('2024-09', AUG_26), true);
+  assert.equal(isPlausibleMonth('2024-07', AUG_26), false);
+  assert.equal(isPlausibleMonth('2026-10', AUG_26), true);
+  assert.equal(isPlausibleMonth('2027-01', AUG_26), false);
 });
 
 test('a month never matches inside a longer word', () => {

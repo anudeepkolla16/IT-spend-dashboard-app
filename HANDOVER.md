@@ -306,6 +306,18 @@ matches app, department or file name.
   path, so a total survives the file being moved or the archive being renamed. A file name that carries
   two conflicting totals is shown with no total rather than a guessed one.
 
+**The columns are the sheet's months, not the archive's.** The tab answers "for a month we were
+charged, do we have the invoice?", so a file dated outside the sheet's period has no column to belong
+to. Such files are still counted and still listed — the *dated outside the sheet's months* pill opens
+them — they just do not widen the grid.
+
+**Every pill on the card is a filter.** Clicking one narrows the view to exactly the things it
+counted, so each number can be opened up rather than taken on trust; clicking it again clears it. The
+file-level pills (*on file*, *no month to read*, *dated from the file name*, *dated outside the
+sheet's months*) switch to the **All invoices** tab, since that is the list they are talking about.
+A pill and the dropdown are two ways of narrowing the same list, so picking either clears the other
+rather than silently intersecting.
+
 **Vendor folders are matched to sheet rows before joining.** The archive's folders carry *vendor*
 names and the sheet's rows carry *app* names, and the two often disagree — `Bubble` is
 `Bubble Starter`, `Luzmo` is `Cumul(Luzmo)`, `Claude Api` is `Anthropic(Api Console)`. Joining on the
@@ -348,6 +360,13 @@ report a shortfall that no amount of filing could ever close.
 A month name never matches inside a longer word, so `Marchant`, `Augustine` and `Decision` are not
 months. The upload timestamp this app prefixes onto hand-uploaded files is stripped first — it is when
 the file arrived, never which month it bills.
+
+**Two digits after a month name are a year in half the archive and a day in the other half.** Adobe's
+`jan 26.pdf` is January 2026; Slack's `March 31 invoice.pdf` is the 31st. Nothing in the name says
+which, so the year reading is checked against when the file landed: within 24 months behind and 2
+ahead it is taken as a year, otherwise the digits were a day and only the month survives. Reading
+every one as a year is what put **Nov 2004, Feb 2012 and Mar 2031** across the grid as real columns.
+An explicit **four**-digit year is never second-guessed — a human who wrote `2024` meant 2024.
 
 **Ambiguous numeric dates are refused, not guessed.** `27-01-2026` can only be day-first and `01-13-2026`
 can only be month-first, but `03-12-2025` is neither on its own. The order is settled **per folder** from
