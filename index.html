@@ -1805,13 +1805,25 @@ $('#periodsBtn').onclick = async () => {
   const money = n => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2 });
 
   try {
-    const scan = await post('periods');
+    // One run reads what it can inside the function's 45 seconds and reports the
+    // rest as unread. Rather than making someone click through a 460-invoice
+    // archive a runful at a time, keep going until nothing is left — each round
+    // re-reads nothing, so the later ones are mostly listing.
+    let scan = await post('periods');
+    for (let round = 2; round <= 12 && scan.unread > 0; round++) {
+      btn.textContent = `Reading invoices… ${scan.invoices - scan.unread}/${scan.invoices}`;
+      const next = await post('periods');
+      // No progress means something other than time is stopping it; another
+      // round would just spin.
+      if (next.unread >= scan.unread) { scan = next; break; }
+      scan = next;
+    }
     const moves = scan.moves || [], cells = (scan.cells || []).filter(c => !c.blocked);
     const blocked = (scan.cells || []).filter(c => c.blocked);
 
     const lines = [`Read ${scan.invoices} invoice${scan.invoices === 1 ? '' : 's'} across ${scan.vendors} vendor folders.`];
     if (scan.parsed) lines.push(`${scan.parsed} of them were opened for the first time this run.`);
-    if (scan.unread) lines.push(`\n${scan.unread} invoice${scan.unread === 1 ? ' has' : 's have'} not been read yet — run this again to finish the archive.`);
+    if (scan.unread) lines.push(`\n${scan.unread} invoice${scan.unread === 1 ? ' has' : 's have'} still not been read — run this again to finish the archive.`);
 
     if (!moves.length) {
       lines.push('\nEvery invoice that states a billing period is already filed under the month it covers. Nothing to move.');

@@ -157,6 +157,27 @@ test('an invoice whose total could not be used still moves, without an amount', 
 
 // --- Wiring ---------------------------------------------------------------
 
+test('a file the run had no time to read is not judged', () => {
+  // Pending is not "unreadable": the next run reads it. Reporting it either way
+  // would put a guess in front of somebody about to move their files.
+  const file = luzmoFile({ pending: true, read: false, periodStart: null, periodEnd: null });
+  assert.strictEqual(planMove(file, luzmoFolder(), BASE), null);
+});
+
+test('reading is bounded by the run clock, not a fixed count', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'invoices', 'period-backfill.js'), 'utf8');
+  // 460 invoices at 25 a run is eighteen clicks. Reads go through a pool and
+  // stop on the deadline, with time in hand to total and cache what was read.
+  assert.match(src, /READ_POOL/, 'PDFs must be read in parallel');
+  assert.match(src, /deadline - READ_RESERVE_MS/, 'reading must stop with time left to finish the run');
+
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(ui, /scan\.unread > 0/, 'the dashboard must keep going until the archive is read');
+  assert.match(ui, /next\.unread >= scan\.unread/, 'and must stop when a round makes no progress');
+});
+
 test('the scan writes nothing and the apply only touches what was approved', () => {
   const fs = require('node:fs');
   const path = require('node:path');
