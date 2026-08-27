@@ -1791,7 +1791,16 @@ $('#periodsBtn').onclick = async () => {
     try { json = JSON.parse(raw); }
     catch { throw new Error(`HTTP ${res.status}: ${raw.slice(0, 300) || 'empty response'}`); }
     if (!res.ok || json.error) throw new Error(json.error || ('HTTP ' + res.status));
-    return json.periods || {};
+    // A reply with no `periods` in it did not come from this feature. That is
+    // what a deployment mid-rollout looks like: the page comes from the new
+    // build and the API call still lands on the previous one, which ignores the
+    // mode and answers as an ordinary sync. Rendering that gave "Read undefined
+    // invoices across undefined vendor folders" — say what happened instead.
+    if (!json.periods) throw new Error(
+      'This request reached an older deployment that does not have the billing-period backfill yet'
+      + (json.mode ? ` (it answered as a "${json.mode}" sync instead)` : '')
+      + '. Wait for the deployment to finish, reload the page and try again.');
+    return json.periods;
   };
   const money = n => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2 });
 

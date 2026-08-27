@@ -26,6 +26,8 @@ const luzmoFile = (extra) => ({
   path: `${BASE}/Cumul/Aug-26/20260826_20260258.pdf`,
   relPath: 'Aug-26',
   currentMonth: '2026-08',
+  folderMonth: '2026-08',   // it sits in a month folder
+  nameMonth: null,
   read: true,
   periodStart: '2026-08-26',
   periodEnd: '2026-09-26',
@@ -94,9 +96,36 @@ test('a PDF nobody could read is reported, never moved', () => {
   assert.ok(!v.move);
 });
 
-test('a file not in a month folder has nothing to be moved from', () => {
-  const file = luzmoFile({ relPath: '', currentMonth: null });
+test('a file not in a month folder, with nothing in its name, is left alone', () => {
+  const file = luzmoFile({ relPath: '', currentMonth: null, folderMonth: null, nameMonth: null });
   assert.strictEqual(planMove(file, luzmoFolder(), BASE), null);
+});
+
+// Much of the archive keeps invoices flat in the app folder with the month in
+// the name — "jan 26.pdf", "Aug 2026.pdf" — which is how the checklist dates
+// them. There is no month folder to move such a file out of, and renaming
+// somebody's files to impose one is a different job from this one.
+
+test('a loose invoice whose name agrees with its period is left alone', () => {
+  const file = luzmoFile({
+    name: 'Aug 2026.pdf', relPath: '', currentMonth: '2026-08',
+    folderMonth: null, nameMonth: '2026-08',
+    periodStart: '2026-08-01', periodEnd: '2026-08-31',
+  });
+  assert.strictEqual(planMove(file, luzmoFolder(), BASE), null);
+});
+
+test('a loose invoice whose period disagrees with its name is reported, not moved', () => {
+  // The checklist dates this one August from the name; it bills September. That
+  // is worth knowing, and it is the owner's call whether to rename or re-file.
+  const file = luzmoFile({
+    name: 'Aug 2026.pdf', relPath: '', currentMonth: '2026-08',
+    folderMonth: null, nameMonth: '2026-08',
+  });
+  const v = planMove(file, luzmoFolder(), BASE);
+  assert.ok(v.skip, 'expected it to be reported');
+  assert.ok(!v.move, 'a loose file is never moved');
+  assert.match(v.skip, /name reads as 2026-08, but it bills 2026-09/);
 });
 
 test('a file nested deeper than {vendor}/{month} is left for a human', () => {
@@ -150,4 +179,8 @@ test('the scan writes nothing and the apply only touches what was approved', () 
   assert.match(ui, /post\('periods-apply', \{ moves, cells \}\)/,
     'and must send back the very moves and cells the scan proposed');
   assert.match(ui, /Move the files and update the sheet\?/, 'nothing moves without a confirmation');
+  // A reply without a `periods` payload is not this feature answering, and
+  // rendering it printed "Read undefined invoices across undefined folders".
+  assert.match(ui, /if \(!json\.periods\) throw new Error\(/,
+    'a reply from an older deployment must be named, not rendered as undefined');
 });

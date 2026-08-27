@@ -162,6 +162,13 @@ It runs in two steps, and **nothing moves until you have read the list and confi
    it now stands** and writes those cells. The figure written is never the previewed one: a file
    that failed to move cannot leave behind a total that assumes it did.
 
+**Invoices filed loose are reported, never re-filed.** Most of the archive keeps its invoices flat in
+the app folder with the month in the name (`jan 26.pdf`, `Aug 2026.pdf`), which is how the checklist
+dates them. There is no month folder to move such a file out of, and renaming somebody's files to
+impose one is a different job — so when a loose invoice's billing period disagrees with the month
+its name reads as, the scan says so and leaves it alone. Whether to rename it or file it under a
+month folder is yours to decide.
+
 Both halves work off the archive root `resolveArchiveRoot` finds, never a hardcoded path, so a
 rename moves the backfill with it. A vendor folder is matched to its sheet row through the saved
 `_sync-config.json` mapping first and the vendor aliases second (`Cumul` → `Cumul(Luzmo)`); a folder
