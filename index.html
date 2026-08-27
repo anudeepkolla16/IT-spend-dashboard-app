@@ -1671,7 +1671,13 @@ async function runMailSync(rescan){
       review.slice(0,8).forEach(r => lines.push(`  · ${r.app}: ${Number(r.amount).toLocaleString('en-US')} ${r.currency||'?'} — ${r.note}`));
     }
     const unread = json.amountsUnread || [];
-    if (unread.length) lines.push(`\n${unread.length} invoice${unread.length===1?'':'s'} had no readable total (possibly scanned).`);
+    if (unread.length){
+      // Say which invoice and why. "Possibly scanned" alone was untraceable —
+      // a PDF whose text could not be read and one whose wording no pattern
+      // matched are different problems and only the note tells them apart.
+      lines.push(`\n${unread.length} invoice${unread.length===1?'':'s'} had no readable total:`);
+      unread.slice(0,8).forEach(u => lines.push(`  · ${u.app||'?'} ${u.month||''} ${u.file} — ${u.note||'no reason given'}`));
+    }
     if (json.unmatched){
       lines.push(`\n${json.unmatched} invoice${json.unmatched===1?" couldn't":"s couldn't"} be matched to an app and went to Invoices/_Unmatched/:`);
       (json.unmatchedItems||[]).slice(0,8).forEach(u => lines.push(`  · ${u.subject} — ${u.from||'unknown sender'}`));
