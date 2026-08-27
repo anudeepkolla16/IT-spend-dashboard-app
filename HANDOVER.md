@@ -411,6 +411,32 @@ a route with the per-app listing on purpose — see the function-count note belo
 
 ---
 
+### How a month's amount is topped up
+
+A cell holds **the invoices on file, plus whatever spend the sheet already knows about that no
+invoice has explained yet.** When a new invoice arrives it is **absorbed by that excess rather than
+added on top of it**, because the excess was anticipating it.
+
+The case it comes from: Bubble's cell held `524.27` against eight invoices totalling `492.27`, and
+the ninth was `32.00`. `492.27 + 32 = 524.27` — the sheet was never wrong, only early. Adding the
+ninth on arrival would have made it `556.27`.
+
+Written out that is `remainder_after + folderTotal_after`, which is exactly `max(cell, folderTotal)`:
+
+| Sheet cell | Invoices on file | Written |
+|---|---|---|
+| empty | 492.27 | **492.27** |
+| 524.27 | 492.27 (8 of 9) | left alone, gap reported |
+| 524.27 | 524.27 (9th arrived) | left alone — already correct |
+| 524.27 | 600.00 | **600.00** |
+
+So the cell never moves until the folder total passes it. That also makes the write **idempotent**,
+which no additive rule could be — the daily cron would grow the figure on every run.
+
+**Non-USD totals are never written**, whatever the comparison says.
+
+---
+
 ## Environment variables (set in Vercel → Settings → Environment Variables)
 
 Secrets live only in Vercel, never in the repo. Names and purpose:
