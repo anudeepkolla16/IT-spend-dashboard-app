@@ -18,8 +18,11 @@ function cycleFromRow(recurringOnetime, frequency) {
   if (ro.includes('one')) return 'One-time';
   const numMatch = f.match(/(\d+)\s*year/);
   if (numMatch) return `${numMatch[1]} Years`;
-  if (f.includes('year') || f.includes('annual')) return 'Annual';
+  // "Half Yearly" contains "year", so it has to be tested before the year rule —
+  // otherwise Keka's half-yearly billing is reported as Annual and its cost gets
+  // spread over twelve months instead of six.
   if (f.includes('half')) return 'Half-Yearly';
+  if (f.includes('year') || f.includes('annual')) return 'Annual';
   if (f.includes('quarter')) return 'Quarterly';
   if (f.includes('week')) return 'Weekly';
   return 'Monthly';

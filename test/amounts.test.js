@@ -280,3 +280,74 @@ test('refuses a sheet with no Total row rather than guessing one', () => {
   const grid = locateGrid(values, null);
   assert.throws(() => planTotals(grid, { values, formulas: [], start: { col: 0, row: 0 } }), /Total row/);
 });
+
+// --- Billing cycles ------------------------------------------------------
+//
+// The run-rate read 133K against actual monthly spend of 36-114K because every
+// app's recent charges were averaged and called monthly, whatever its billing
+// cycle: WINGMAN's yearly 12,189 and Clickup's 23,026.50 were counted twelve
+// times over. Getting the cycle right is what makes the run-rate mean anything.
+
+// Mirrors cycleFromRow in api/spend-data.js.
+function cycleFromRow(recurringOnetime, frequency) {
+  const ro = String(recurringOnetime || '').toLowerCase();
+  const f = String(frequency || '').toLowerCase();
+  if (ro.includes('one')) return 'One-time';
+  const numMatch = f.match(/(\d+)\s*year/);
+  if (numMatch) return `${numMatch[1]} Years`;
+  if (f.includes('half')) return 'Half-Yearly';
+  if (f.includes('year') || f.includes('annual')) return 'Annual';
+  if (f.includes('quarter')) return 'Quarterly';
+  if (f.includes('week')) return 'Weekly';
+  return 'Monthly';
+}
+
+// Mirrors cycleMonths in index.html.
+function cycleMonths(c) {
+  c = String(c || 'Monthly').toLowerCase();
+  if (c.includes('one')) return 0;
+  const nYear = c.match(/(\d+)\s*year/);
+  if (nYear) return parseInt(nYear[1], 10) * 12;
+  if (c.includes('half')) return 6;
+  if (c.includes('quarter')) return 3;
+  if (c.includes('week')) return 0.23;
+  if (c.includes('year') || c.includes('annual')) return 12;
+  return 1;
+}
+
+test('reads every FREQUENCY value the sheet actually uses', () => {
+  const cases = [
+    ['Monthly', 'Monthly'],
+    ['Yearly', 'Annual'],
+    ['Half Yearly', 'Half-Yearly'], // contains "year" — must not become Annual
+    ['Quarterly', 'Quarterly'],
+    ['3 years', '3 Years'],
+  ];
+  for (const [freq, want] of cases) {
+    assert.strictEqual(cycleFromRow('Recurring', freq), want, `FREQUENCY "${freq}"`);
+  }
+  assert.strictEqual(cycleFromRow('Onetime', 'Onetime'), 'One-time');
+});
+
+test('spreads a charge over the right number of months', () => {
+  assert.strictEqual(cycleMonths('Monthly'), 1);
+  assert.strictEqual(cycleMonths('Annual'), 12);
+  assert.strictEqual(cycleMonths('Half-Yearly'), 6);
+  assert.strictEqual(cycleMonths('Quarterly'), 3);
+  assert.strictEqual(cycleMonths('3 Years'), 36);
+  assert.strictEqual(cycleMonths('One-time'), 0, 'one-time purchases do not recur');
+  // A raw sheet value, in case one ever reaches the browser un-normalised.
+  assert.strictEqual(cycleMonths('Yearly'), 12);
+  assert.strictEqual(cycleMonths('Half Yearly'), 6);
+});
+
+test('a yearly invoice costs its own value per year, not twelve times it', () => {
+  const monthly = (amount, freq) => amount / cycleMonths(cycleFromRow('Recurring', freq));
+  // The apps whose bars were wrong on the chart.
+  assert.ok(Math.abs(monthly(12189, 'Yearly') * 12 - 12189) < 0.01, 'WINGMAN(Clari)');
+  assert.ok(Math.abs(monthly(23026.50, 'Yearly') * 12 - 23026.50) < 0.01, 'Clickup');
+  assert.ok(Math.abs(monthly(3888.75, 'Yearly') * 12 - 3888.75) < 0.01, 'FIGMA');
+  // Quarterly bills four times a year, half-yearly twice.
+  assert.ok(Math.abs(monthly(3796.38, 'Quarterly') * 12 - 3796.38 * 4) < 0.01, 'Hubspot');
+  assert.ok(Math.abs(monthly(2418.81, 'Half Yearly') * 12 - 2418.81 * 2) < 0.01, 'Keka');
+});

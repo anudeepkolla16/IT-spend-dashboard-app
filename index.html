@@ -171,7 +171,7 @@
 
     <div class="card">
       <h3>📅 Upcoming Renewals</h3>
-      <div class="cap">Renewals coming up in the next 60 days, with expected cost (click a row for full detail)</div>
+      <div class="cap">Yearly renewals in the next 6 months, and every monthly renewal in the current month, with expected cost (click a row for full detail)</div>
       <div class="tabs">
         <button class="tab-btn active" data-tab="yearly" id="renewTabYearly">Yearly</button>
         <button class="tab-btn" data-tab="monthly" id="renewTabMonthly">Monthly</button>
@@ -213,7 +213,7 @@
 
     <div class="card">
       <h3>🔮 Annual Run-Rate Projection</h3>
-      <div class="cap">Each app's trailing 3-month average spend, annualised — smooths out volatile usage-based costs like cloud/API metering (One-time items excluded)</div>
+      <div class="cap">What each app costs per year at its current rate. Monthly apps use a trailing 3-month average (smooths volatile cloud/API metering); annual, half-yearly and quarterly charges are spread over their billing cycle rather than counted every month. One-time purchases and cancelled apps are excluded.</div>
       <div class="chartwrap sm"><canvas id="runrateChart"></canvas></div>
       <div id="runrateNote" class="cap" style="margin-top:10px"></div>
     </div>
@@ -345,16 +345,23 @@ function realMonthKey(offset){
   d.setMonth(d.getMonth() + (offset||0));
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
+// Months per billing cycle, from the sheet's FREQUENCY column.
+//
+// Order matters. "Half Yearly" and "3 Years" both contain "year", so the more
+// specific cases have to be tested first — and a bare "Yearly", which is what
+// the sheet actually says, has to be caught at all. It previously was not: the
+// year test required a digit ("3 Years") or the word "annual", so every Yearly
+// app fell through to the monthly default and was counted twelve times over.
 function cycleMonths(c){
   c = String(c||'Monthly').toLowerCase();
+  if (c.includes('one')) return 0;                       // Onetime
   const nYear = c.match(/(\d+)\s*year/);
-  if (nYear) return parseInt(nYear[1],10)*12;
-  if (c.includes('annual')) return 12;
+  if (nYear) return parseInt(nYear[1],10)*12;            // "3 years"
+  if (c.includes('half')) return 6;                      // "Half Yearly" — before the year test
   if (c.includes('quarter')) return 3;
-  if (c.includes('half')) return 6;
   if (c.includes('week')) return 0.23;
-  if (c.includes('one')) return 0;
-  return 1;
+  if (c.includes('year') || c.includes('annual')) return 12;
+  return 1;                                              // Monthly
 }
 
 /* Renewal Date text in the sheet is either a real date ("1/21/2027") or a
@@ -378,34 +385,68 @@ function parseRenewal(text){
   return null;
 }
 let renewalsTab = 'yearly';
+const RENEWAL_HORIZON_DAYS = 183; // ~6 months, for dated (yearly-style) renewals
+
 function renderRenewals(all){
   const apps = latestActualRowsPerApp(all.filter(r=>r.kind==='Apps'));
   const today = new Date(); today.setHours(0,0,0,0);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth()+1, 0);
+
   const items = apps.map(a=>{
     const p = parseRenewal(a.renewalDate);
     if (!p) return null;
-    const days = Math.round((p.date - today)/86400000);
-    return { name:a.name, dept:a.dept, days, recurring:p.recurring, date:p.date, cost:a.amt };
-  }).filter(x=>x && x.days>=0 && x.days<=60).sort((a,b)=>a.days-b.days);
+    if (p.recurring){
+      // A monthly renewal happens every month, so the one that matters for "this
+      // month" is this month's — parseRenewal rolls past a day already gone,
+      // which would hide it from the current month entirely.
+      const day = Math.min(p.date.getDate(), monthEnd.getDate());
+      const date = new Date(today.getFullYear(), today.getMonth(), day);
+      return { name:a.name, dept:a.dept, recurring:true, date,
+               days: Math.round((date - today)/86400000), cost:a.amt };
+    }
+    return { name:a.name, dept:a.dept, recurring:false, date:p.date,
+             days: Math.round((p.date - today)/86400000), cost:a.amt };
+  }).filter(Boolean);
+
   window.RENEWAL_ITEMS = items;
   drawRenewalsTab();
 }
+
 function drawRenewalsTab(){
-  const items = (window.RENEWAL_ITEMS||[]).filter(x=> renewalsTab==='monthly' ? x.recurring : !x.recurring);
+  const all = window.RENEWAL_ITEMS || [];
+  // Monthly: every recurring renewal in the current month, including ones whose
+  // day has already passed — the point is the month's whole schedule.
+  // Yearly: dated renewals still ahead, out to six months.
+  const items = (renewalsTab === 'monthly'
+    ? all.filter(x => x.recurring)
+    : all.filter(x => !x.recurring && x.days >= 0 && x.days <= RENEWAL_HORIZON_DAYS)
+  ).sort((a,b) => a.days - b.days);
+
   const el = $('#renewalsList');
   if (!items.length){
-    el.innerHTML = `<div class="cap" style="padding:8px 4px">No ${renewalsTab} renewals in the next 60 days.</div>`;
+    el.innerHTML = `<div class="cap" style="padding:8px 4px">${renewalsTab==='monthly'
+      ? 'No monthly renewals in the sheet.'
+      : 'No yearly renewals in the next 6 months.'}</div>`;
     return;
   }
-  el.innerHTML = items.slice(0,10).map(x=>{
-    const urgency = x.days<=7 ? 'danger' : (x.days<=30 ? 'warn' : 'ok');
+
+  const monthName = new Date().toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  const total = items.reduce((s,x)=>s+(x.cost||0),0);
+  const head = renewalsTab === 'monthly'
+    ? `${items.length} renewal${items.length===1?'':'s'} in ${monthName}${total?` · ${fmtUSD(total)} expected`:''}`
+    : `${items.length} renewal${items.length===1?'':'s'} in the next 6 months${total?` · ${fmtUSD(total)} expected`:''}`;
+
+  el.innerHTML = `<div class="cap" style="padding:2px 4px 8px">${head}</div>` + items.map(x=>{
+    const past = x.days < 0;
+    const urgency = past ? 'ok' : (x.days<=7 ? 'danger' : (x.days<=30 ? 'warn' : 'ok'));
     const when = x.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-    return `<div class="renewal-row" data-name="${encodeURIComponent(x.name)}">
+    const label = past ? `${Math.abs(x.days)}d ago` : (x.days===0 ? 'today' : x.days+'d');
+    return `<div class="renewal-row" data-name="${encodeURIComponent(x.name)}"${past?' style="opacity:.55"':''}>
       <div class="renewal-name">${x.name}<span class="renewal-dept">${x.dept}</span></div>
       <div class="renewal-when">
         <span class="renewal-cost">${x.cost?fmtUSD(x.cost):'—'}</span>
         <span class="cap">${when}</span>
-        <span class="pill ${urgency}">${x.days===0?'today':x.days+'d'}</span>
+        <span class="pill ${urgency}">${label}</span>
       </div>
     </div>`;
   }).join('');
@@ -631,11 +672,28 @@ function latestActualRowsPerApp(apps){
   const todayKey = realMonthKey(0);
   return latestRowsPerApp(apps.filter(a => a.month <= todayKey));
 }
-// Per app: average of its last (up to) 3 ACTUAL months' spend, annualized.
-// Deliberately not "latest month × 12" — usage-based costs (cloud, API metering)
-// swing a lot month to month, so a single month badly over/under-states the true
-// run-rate. A trailing average smooths that out. One-time purchases are excluded
-// entirely (they're not a recurring cost to project).
+// Per app: what it costs per month, on average, right now.
+//
+// The charge has to be spread over its billing cycle first. An annual invoice is
+// one row in the sheet like any other, so averaging an app's last few rows and
+// calling the result monthly counted WINGMAN's 12,189 and Clickup's 23,026.50 as
+// if they recurred every month — which is why this read 133K against actual
+// monthly spend of 36-114K.
+//
+// Monthly-billed apps still use a trailing average: usage-based costs (cloud, API
+// metering) swing hard month to month, and a single month over- or under-states
+// them badly. Everything else divides its latest charge by the cycle length.
+//
+// One-time purchases are excluded — they are not a recurring cost to project —
+// and so is anything that has stopped being charged: an app whose last actual
+// charge is more than a cycle overdue has almost certainly been cancelled, and
+// the sheet has several (Hex and windsurf pro are both marked "cancled after
+// june"). Counting those would keep billing them for ever.
+function monthsBetween(fromKey, toKey){
+  const [fy, fm] = String(fromKey).split('-').map(Number);
+  const [ty, tm] = String(toKey).split('-').map(Number);
+  return (ty - fy) * 12 + (tm - fm);
+}
 function trailingRunRateByApp(apps){
   const todayKey = realMonthKey(0);
   const byApp = {};
@@ -646,10 +704,21 @@ function trailingRunRateByApp(apps){
   return Object.entries(byApp).map(([name, rows]) => {
     rows.sort((a, b) => a.month.localeCompare(b.month));
     const latest = rows[rows.length - 1];
-    if (cycleMonths(latest.cycle) === 0) return null; // one-time item
-    const last3 = rows.slice(-3);
-    const avg = last3.reduce((s, r) => s + r.usd, 0) / last3.length;
-    return { name, dept: latest.dept, m: avg };
+    const cm = cycleMonths(latest.cycle);
+    if (!cm) return null; // one-time purchase
+
+    // Overdue by more than one whole cycle (plus a month's grace) — treat as gone.
+    const staleBy = monthsBetween(latest.month, todayKey);
+    if (staleBy > Math.max(cm, 1) + 1) return null;
+
+    if (cm <= 1) {
+      // Monthly (or weekly) — smooth the last few actual months.
+      const last3 = rows.slice(-3);
+      const avg = last3.reduce((s, r) => s + r.usd, 0) / last3.length;
+      return { name, dept: latest.dept, m: cm < 1 ? avg / cm : avg, cycle: latest.cycle };
+    }
+    // Annual, half-yearly, quarterly, multi-year: spread over the cycle.
+    return { name, dept: latest.dept, m: latest.usd / cm, cycle: latest.cycle };
   }).filter(Boolean);
 }
 function monthlyRunRate(apps){
@@ -793,7 +862,7 @@ function renderRunRate(apps){
   });
   $('#runrateNote').innerHTML =
     `Current recurring run-rate: <b style="color:var(--txt)">${fmtUSD(rr)}/mo</b> → <b style="color:var(--txt)">${fmtUSD(rr*12)}/yr</b> across ${latest.length} active subscriptions. ` +
-    `Each app's rate is its trailing 3-month average (smooths out volatile usage-based costs), annualised. One-time purchases are excluded. Figures are in $ (USD), the sheet's native currency.`;
+    `Monthly apps use a trailing 3-month average; annual, half-yearly and quarterly charges are divided by their billing cycle so a yearly invoice counts once a year, not every month. One-time purchases, and apps whose last charge is more than a cycle overdue, are excluded. Figures are in $ (USD), the sheet's native currency.`;
 }
 
 let sortKey='total', sortDir=-1;
