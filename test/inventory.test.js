@@ -8,7 +8,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const {
-  parseMonthFolder, monthFromRelPath, amountsByFileName, monthIndexFromWord, buildInventory,
+  parseMonthFolder, monthFromRelPath, monthFromFileName, detectDayFirst,
+  amountsByFileName, monthIndexFromWord, buildInventory,
 } = require('../lib/invoices/inventory');
 
 const AUG_26 = '2026-08-20T10:00:00Z';
@@ -109,6 +110,81 @@ test('an empty or missing index yields an empty map rather than throwing', () =>
   assert.equal(amountsByFileName({ amounts: 'nonsense' }).size, 0);
 });
 
+test('the month is read from the file name when there is no month subfolder', () => {
+  // Verbatim file names from the archive. Most vendors are filed flat in the app
+  // folder with the month in the name, so reading only the subfolder left 220 of
+  // 472 invoices undated -- shown on the checklist as months charged with no
+  // invoice, while the PDF sat right there.
+  const cases = {
+    // Adobe
+    'jan 26.pdf': '2026-01', 'feb 26.pdf': '2026-02', 'March 26.pdf': '2026-03',
+    'apr 26.pdf': '2026-04', 'May 26.pdf': '2026-05', 'June 26.pdf': '2026-06',
+    'july 26.pdf': '2026-07', 'Aug 2026.pdf': '2026-08',
+    // AWS
+    'Jan-26.pdf': '2026-01', 'feb-26.pdf': '2026-02', 'mar-26.pdf': '2026-03',
+    'Apr-26.pdf': '2026-04', 'May-26.pdf': '2026-05', 'June-26.pdf': '2026-06',
+    // Chargebee
+    'April 26.pdf': '2026-04', 'may 26.pdf': '2026-05',
+  };
+  for (const [name, want] of Object.entries(cases)) {
+    assert.equal(monthFromFileName(name, AUG_26, null), want, name);
+  }
+});
+
+test('a month never matches inside a longer word', () => {
+  // "Marchant", "Augustine", "Decision" are not months, and a vendor name that
+  // happens to contain one must not date an invoice.
+  for (const name of ['Marchant Ltd 1234.pdf', 'Augustine Partners.pdf', 'Decision-support.pdf', 'Janus Systems.pdf']) {
+    assert.equal(monthFromFileName(name, AUG_26, null), null, name);
+  }
+});
+
+test('a file name with no date at all stays undated', () => {
+  for (const name of ['Invoice-1234.pdf', 'receipt.pdf', 'Signed Delivery Report.pdf', '']) {
+    assert.equal(monthFromFileName(name, AUG_26, null), null, name);
+  }
+});
+
+test('the upload timestamp this app prefixes is not read as the month', () => {
+  // A hand-uploaded January invoice must not be dated by the day it was uploaded.
+  assert.equal(monthFromFileName('2026-08-27T09-15-00-000Z_jan 26.pdf', AUG_26, null), '2026-01');
+});
+
+test('an ISO date in the name is read year-first', () => {
+  assert.equal(monthFromFileName('invoice_2026-03-14.pdf', AUG_26, null), '2026-03');
+  assert.equal(monthFromFileName('statement 2026-11.pdf', AUG_26, null), '2026-11');
+  assert.equal(monthFromFileName('bad 2026-13-01.pdf', AUG_26, null), null);
+});
+
+test("a folder's date order is settled by its own unambiguous names", () => {
+  // Real Anthropic file names. "27-01-2026" can only be day-first, and that
+  // settles "02-03-2026", which on its own could be either.
+  const names = ['Claude Purchase 02-03-2026.pdf', 'Claude Purchase 27-01-2026.pdf',
+    'Claude Purchase 03-12-2025.pdf', 'Claude Purchase 09-01-2026.pdf'];
+  assert.equal(detectDayFirst(names), true);
+  assert.equal(monthFromFileName(names[0], AUG_26, true), '2026-03');
+  assert.equal(monthFromFileName(names[1], AUG_26, true), '2026-01');
+  assert.equal(monthFromFileName(names[2], AUG_26, true), '2025-12');
+});
+
+test('a month-first folder is detected too', () => {
+  const names = ['inv 01-13-2026.pdf', 'inv 02-05-2026.pdf'];
+  assert.equal(detectDayFirst(names), false);
+  assert.equal(monthFromFileName('inv 02-05-2026.pdf', AUG_26, false), '2026-02');
+});
+
+test('an ambiguous numeric date with nothing to settle it is refused', () => {
+  // Filing an invoice under the wrong month is worse than leaving it undated:
+  // a wrong tick claims a gap is covered when it is not.
+  assert.equal(detectDayFirst(['inv 03-12-2025.pdf', 'inv 05-06-2026.pdf']), null);
+  assert.equal(monthFromFileName('inv 03-12-2025.pdf', AUG_26, null), null);
+});
+
+test('a bare month name in the file name takes the year from the file date', () => {
+  assert.equal(monthFromFileName('adobe july.pdf', AUG_26, null), '2026-07');
+  assert.equal(monthFromFileName('december statement.pdf', '2026-01-09T00:00:00Z', null), '2025-12');
+});
+
 /* ---------- buildInventory against a stubbed Graph ---------- */
 
 // Mirrors the Graph shapes the real calls return, including the fields
@@ -161,7 +237,7 @@ test('buildInventory flattens the archive and dates each file by its folder', as
     index: { amounts: [{ path: 'src/Bubble/Aug-26/bubble-aug.pdf', amount: 64, currency: 'USD', usable: true }] },
     children: {
       'root-inv': [folder('f-bubble', 'Bubble Starter'), folder('f-adobe', 'Adobe'), folder('f-un', '_Unmatched')],
-      'f-bubble': [folder('f-bubble-aug', 'Aug-26'), file('x-loose', 'loose.pdf')],
+      'f-bubble': [folder('f-bubble-aug', 'Aug-26'), file('x-loose', 'loose.pdf'), file('x-flat', 'jan 26.pdf')],
       'f-bubble-aug': [file('x1', 'bubble-aug.pdf')],
       'f-adobe': [folder('f-adobe-jul', 'July')],
       'f-adobe-jul': [file('x2', 'adobe-jul.pdf')],
@@ -171,12 +247,19 @@ test('buildInventory flattens the archive and dates each file by its folder', as
     const inv = await buildInventory('tok', nextDrive(), { pool: 2 });
 
     assert.deepEqual(inv.apps, ['Adobe', 'Bubble Starter']);
-    assert.equal(inv.fileCount, 3);
-    assert.deepEqual(inv.months, ['2026-07', '2026-08']);
+    assert.equal(inv.fileCount, 4);
+    assert.deepEqual(inv.months, ['2026-01', '2026-07', '2026-08']);
+
+    // A flat file dated only by its name is picked up alongside the foldered ones.
+    const flat = inv.files.find(f => f.name === 'jan 26.pdf');
+    assert.equal(flat.month, '2026-01');
+    assert.equal(flat.monthSource, 'filename');
+    assert.equal(inv.datedFromNameCount, 1);
 
     const bubbleAug = inv.files.find(f => f.name === 'bubble-aug.pdf');
     assert.equal(bubbleAug.app, 'Bubble Starter');
     assert.equal(bubbleAug.month, '2026-08');
+    assert.equal(bubbleAug.monthSource, 'folder');
     assert.equal(bubbleAug.amount, 64);
     assert.equal(bubbleAug.amountUsable, true);
 
