@@ -104,8 +104,7 @@ second half of the daily invoice cron (2 AM UTC), and from **📧 Fetch Invoices
 2. Works out the app from the subject, the attachment filename and the sender's domain —
    taking the *original* sender out of a forwarded message, so `FW: [Bubble] Invoice`
    forwarded by a colleague is filed under Bubble Starter, not against the colleague.
-3. Saves the PDF into the procurement archive at
-   `Desktop/Anudeep files/Procurment bills/{vendor}/{month}/`, skipping anything already there.
+3. Saves the PDF into the archive at `{archive}/{vendor}/{month}/`, skipping anything already there.
    The vendor folder is the one that app is already mapped to in `_sync-config.json`
    (`Bubble Starter` → `Bubble`, `Cursor pro` → `Cursor`), and the month subfolder **reuses
    whatever is already there** — `Bubble/Aug`, `Cursor/July` — rather than adding a second
@@ -138,7 +137,7 @@ two**. The folder mirror then copies them on to `Invoices/{App}/` for the dashbo
 because the mailbox pass runs *first* in the cron, an invoice that arrives by mail reaches the
 dashboard in the same run instead of waiting a day.
 
-**Anything it can't place** goes to `Procurment bills/_Unmatched/{month}/` and is listed in the run
+**Anything it can't place** goes to `{archive}/_Unmatched/{month}/` and is listed in the run
 summary with its subject and sender, so nothing is silently dropped. If an app has no procurement
 folder mapped at all, a folder named after the app is created and reported under `newFolders` —
 map it via **Import Invoices** so the mirror starts picking it up. Add the vendor once via
@@ -154,16 +153,19 @@ August cell.
 
 It runs in two steps, and **nothing moves until you have read the list and confirmed it**:
 
-1. **The scan** opens every PDF in `Procurment bills/{vendor}/{month}/`, reads the billing period
-   and the total, and reports which invoices belong in another month and what that would do to the
-   sheet. It writes nothing except a cache of what it read, so re-running it is cheap — only PDFs
-   it has never opened cost a download. A run reads 25 of them; if the archive is bigger, the
-   summary says how many are left and you run it again.
-2. **The apply** moves the files you confirmed — in the procurement archive *and* in the
-   `Invoices/{App}/` mirror the dashboard reads, or the checklist would keep showing them under the
-   old month — then totals each affected month **from the folder as it now stands** and writes those
-   cells. The figure written is never the previewed one: a file that failed to move cannot leave
-   behind a total that assumes it did.
+1. **The scan** opens every PDF in `{archive}/{vendor}/{month}/`, reads the billing period and the
+   total, and reports which invoices belong in another month and what that would do to the sheet.
+   It writes nothing except a cache of what it read, so re-running it is cheap — only PDFs it has
+   never opened cost a download. A run reads 25 of them; if the archive is bigger, the summary says
+   how many are left and you run it again.
+2. **The apply** moves the files you confirmed, then totals each affected month **from the folder as
+   it now stands** and writes those cells. The figure written is never the previewed one: a file
+   that failed to move cannot leave behind a total that assumes it did.
+
+Both halves work off the archive root `resolveArchiveRoot` finds, never a hardcoded path, so a
+rename moves the backfill with it. A vendor folder is matched to its sheet row through the saved
+`_sync-config.json` mapping first and the vendor aliases second (`Cumul` → `Cumul(Luzmo)`); a folder
+that resolves to no row still has its files moved, but no cell is proposed for it.
 
 Nothing is deleted. A Graph move keeps the file's identity, its version history and anyone's link
 to it, so putting one back is just a move the other way, and every cell written goes to the audit
@@ -251,10 +253,12 @@ curl -s -X POST -H "Authorization: Bearer <CRON_SECRET>" \
 
 **Files it keeps**
 
-- `Invoices/_mail-sync.json` — last run time and recently seen message IDs (so nothing is filed twice)
-- `Invoices/_sync-config.json` — the folder→app mapping, read in **both** directions: the mirror
+All directly inside the invoice archive (see the layout section for where that is):
+
+- `_mail-sync.json` — last run time and recently seen message IDs (so nothing is filed twice)
+- `_sync-config.json` — the folder→app mapping, read in **both** directions: the mirror
   uses folder→app, the mailbox sync uses app→folder
-- `Invoices/_invoice-index.json` — what was filed, from whom, for which app and month
+- `_invoice-index.json` — what was filed, from whom, for which app and month
 
 **Manual run** (`mode=mail` for the mailbox only, `mode=folders` for the folder mirror, omit for both):
 ```
@@ -296,12 +300,32 @@ matches app, department or file name.
 
 **Where the numbers come from.** The grid is a join, not a single source:
 
-- the **archive** — `Invoices/{App}/{Month}/`, the mirrored copy the folder sync maintains — says which
-  PDFs exist;
+- the **archive** — `{archive}/{Vendor}/{Month}/`, located by `resolveArchiveRoot` — says which PDFs exist;
 - the **spend sheet** (already loaded by the dashboard) says which app-months were charged;
-- `Invoices/_invoice-index.json` supplies the per-file totals, joined **by file name**, because the
-  amounts were parsed against the procurement folder's paths and the archive is a mirror at a different
-  path. A file name that carries two conflicting totals is shown with no total rather than a guessed one.
+- `{archive}/_invoice-index.json` supplies the per-file totals, joined **by file name** rather than by
+  path, so a total survives the file being moved or the archive being renamed. A file name that carries
+  two conflicting totals is shown with no total rather than a guessed one.
+
+**Vendor folders are matched to sheet rows before joining.** The archive's folders carry *vendor*
+names and the sheet's rows carry *app* names, and the two often disagree — `Bubble` is
+`Bubble Starter`, `Luzmo` is `Cumul(Luzmo)`, `Claude Api` is `Anthropic(Api Console)`. Joining on the
+raw name reports invoices the archive is holding as missing, which is the very thing this tab exists
+to catch. Each folder is resolved in this order:
+
+1. the folder→app mapping saved in `{archive}/_sync-config.json` (written by **Import Invoices**);
+2. an exact match after normalising case and punctuation;
+3. one-sided containment, **only when exactly one row matches** — `Cursor` is unambiguously
+   `Cursor pro`, but `Claude Ai` must not sweep up `Claude Ai Max 6 Accounts`, which is why the exact
+   test comes first and an ambiguous folder is left unresolved rather than guessed.
+
+A folder that resolves to nothing gets its own row marked *not in sheet*, and the count of such
+folders is shown as a pill — a wrong tick is worse than a visible gap. When a row's invoices live
+under a differently-named folder, that folder name is shown on the row as a chip, so the join is
+visible rather than magic.
+
+> **If lots of folders show as "not matched to a sheet row"**, `_sync-config.json` is missing or
+> stale. Run **📥 Import Invoices** once against the archive folder and confirm the dropdowns; that
+> saves the mapping permanently.
 
 **Coverage only counts months already billed.** Including the sheet's budgeted future months would
 report a shortfall that no amount of filing could ever close.
@@ -339,7 +363,8 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 | `PUBLIC_APP_URL` | `https://it-spend-dashboard-app.vercel.app` (used to build the OAuth redirect) |
 | `CRON_SECRET` | Authorizes the daily invoice-sync crons. Vercel auto-sends it as a Bearer token on scheduled runs. |
 | `INVOICE_MAILBOX` | Shared mailbox the invoice sync reads. Defaults to `invoices@sarasanalytics.com` (note the plural) if unset. |
-| `INVOICE_SOURCE_PATH` | Where invoices are archived. Defaults to `Desktop/Anudeep files/Procurment bills` — note the folder really is spelled *Procurment*. Set this if the archive ever moves. |
+| `INVOICE_ARCHIVE_PATH` | Where invoices are archived, relative to the OneDrive root. Normally **unset** — the path is probed (see "The archive path is resolved, not hardcoded" below). Set it only if the folder is renamed to something the probe doesn't know. |
+| `INVOICE_SOURCE_PATH` | Older name for the same thing; still honoured, second in the probe order. Prefer `INVOICE_ARCHIVE_PATH`. |
 | `SPEND_SHEET_NAME` | Worksheet holding the amounts. Defaults to `Spendings`; only set it if that tab is renamed. |
 
 > Env-var changes take effect only on the **next deployment**. To apply: push any commit
@@ -369,13 +394,42 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 ## SharePoint / OneDrive layout (under `TARGET_USER_UPN`'s OneDrive)
 
 - **Spend sheet:** the file at `TARGET_FILE_PATH`. Amounts are all in USD; month columns are headers like `Jan-26`.
-- **Dashboard invoice store:** `Invoices/{App Name}/…` — one folder per app (exact dashboard app name). Written by the app.
-- **Invoice source:** `Desktop/Anudeep files/Procurment bills/{vendor}/…` — where you drop new invoices. Folder names don't match app names, which is why there's a saved mapping.
-- **Auto-sync config:** `Invoices/_sync-config.json` — holds the source folder link and the
-  folder→app mapping the cron uses. Created/updated whenever you run **Import Invoices** and confirm.
-- **Mailbox invoices:** written into the procurement archive above, under
-  `Procurment bills/{vendor}/{month}/` — the same folders used for hand-filed invoices.
-- **Unmatched invoices:** `Procurment bills/_Unmatched/{month}/…` — invoices whose vendor didn't match an app row.
+- **Invoice archive:** one folder, currently `Desktop/Anudeep files/Invoices/`. Everything reads and
+  writes under it — hand-filed invoices, mailbox invoices, dashboard uploads, and the sync's own
+  bookkeeping. Inside it: `{vendor or app}/{month}/invoice.pdf`.
+- **Unmatched invoices:** `{archive}/_Unmatched/{month}/…` — invoices whose vendor didn't match an app row.
+- **Bookkeeping files**, all directly inside the archive: `_sync-config.json` (source link +
+  folder→app mapping), `_mail-sync.json` (last run, seen message IDs), `_invoice-index.json`
+  (what was filed and each invoice's parsed total), `_amount-map.json` (confirmed vendor aliases),
+  `_amount-log.json` (the write audit trail).
+
+### The archive path is **resolved, not hardcoded**
+
+Every path used to be written as `Invoices/…` relative to the OneDrive root, while the archive
+actually lived at `Desktop/Anudeep files/Procurment bills` — later renamed to
+`Desktop/Anudeep files/Invoices`. Nothing errored. The reads resolved to a folder that did not
+exist and quietly returned nothing, so the dashboard reported **all 293 charged months as missing
+an invoice**, the per-app invoice lists all read "No invoices uploaded yet", and the next mailbox
+sync would have recreated `Procurment bills` and split the archive in two.
+
+So `resolveArchiveRoot` (in `lib/graph.js`) probes for it and takes the first path that actually
+exists, in this order:
+
+1. `INVOICE_ARCHIVE_PATH` (if set)
+2. `INVOICE_SOURCE_PATH` (the name this used to be configured under)
+3. `Desktop/Anudeep files/Invoices`
+4. `Desktop/Anudeep files/Procurment bills`
+5. `Invoices`
+
+The result is cached per drive for 10 minutes. A **renamed or moved** archive is picked up on its
+own within that window. A transient Graph error on one candidate is **rethrown rather than skipped**
+— falling through to a later candidate is how invoices end up filed in the wrong folder. If none of
+the candidates exists, readers say so explicitly (the checklist tab prints the paths it tried)
+rather than rendering an empty archive, because on screen "no invoices" and "no archive" look
+identical and only one of them is true.
+
+**If the folder is renamed to something not on that list**, set `INVOICE_ARCHIVE_PATH` in Vercel to
+the new path, relative to the OneDrive root, and redeploy.
 
 ---
 
@@ -386,7 +440,7 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 **Point at a different / renamed sheet:** update `TARGET_FILE_PATH` to the new relative path, then redeploy.
 
 **Re-map invoice folders (e.g. new vendor folder):** click **Import Invoices**, paste the source
-`Procurment bills` folder link, review the folder→app dropdowns, **Confirm & Import**. This also
+invoice archive folder link, review the folder→app dropdowns, **Confirm & Import**. This also
 re-saves `_sync-config.json`, so the daily cron picks up the new mapping.
 
 **Manually trigger the invoice sync (test):**
@@ -421,6 +475,7 @@ lib/
   invoice-period.js            Reads the billing period, and picks the month it mostly covers
   invoices/period-backfill.js  Re-files invoices archived before that rule, in the folders and the sheet
   invoices/inventory.js        Crawls the invoice archive for the checklist tab (month folders, per-file totals)
+                               (the archive's location comes from graph.js's resolveArchiveRoot)
   amounts/{preview,apply,log}.js  The amount-import handlers, behind api/amounts.js
 api/
   spend-data.js                Reads + parses the Excel sheet → JSON the dashboard renders (60s cache)

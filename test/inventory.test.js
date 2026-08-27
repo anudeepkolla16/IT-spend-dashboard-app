@@ -114,17 +114,24 @@ test('an empty or missing index yields an empty map rather than throwing', () =>
 // Mirrors the Graph shapes the real calls return, including the fields
 // listFilesRecursive selects. Getting these wrong in a fixture is how the
 // header-row bug shipped, so the stub answers the same URLs the code builds.
+const ARCHIVE_PATH = 'Desktop/Anudeep files/Invoices';
+
 function stubGraph(tree) {
   const original = global.fetch;
   const calls = [];
   global.fetch = async (url) => {
     calls.push(String(url));
     const u = String(url);
-    if (u.includes('/root:/Invoices?')) {
-      return { ok: true, status: 200, json: async () => ({ id: 'root-inv' }) };
-    }
     if (u.includes('_invoice-index.json')) {
       return { ok: true, status: 200, json: async () => tree.index || {} };
+    }
+    // The archive-root probe: only the real archive path resolves, so the
+    // earlier candidates 404 exactly as they do on the live drive.
+    const probe = u.match(/\/root:\/(.+?)\?/);
+    if (probe) {
+      const path = decodeURIComponent(probe[1]).split('/').map(decodeURIComponent).join('/');
+      if (path === ARCHIVE_PATH) return { ok: true, status: 200, json: async () => ({ id: 'root-inv', folder: {} }) };
+      return { ok: false, status: 404, text: async () => 'itemNotFound' };
     }
     const m = u.match(/items\/([^/]+)\/children/);
     if (m) {
@@ -138,6 +145,10 @@ function stubGraph(tree) {
   };
   return { calls, restore: () => { global.fetch = original; } };
 }
+
+// resolveArchiveRoot caches per driveId, so every test needs its own.
+let driveN = 0;
+const nextDrive = () => `drive-inv-${++driveN}`;
 
 const folder = (id, name) => ({ id, name, folder: {} });
 const file = (id, name, extra) => ({
@@ -157,7 +168,7 @@ test('buildInventory flattens the archive and dates each file by its folder', as
     },
   });
   try {
-    const inv = await buildInventory('tok', 'drive1', { pool: 2 });
+    const inv = await buildInventory('tok', nextDrive(), { pool: 2 });
 
     assert.deepEqual(inv.apps, ['Adobe', 'Bubble Starter']);
     assert.equal(inv.fileCount, 3);
@@ -190,7 +201,7 @@ test('the sync\'s own bookkeeping folders are not reported as applications', asy
     },
   });
   try {
-    const inv = await buildInventory('tok', 'drive1');
+    const inv = await buildInventory('tok', nextDrive());
     assert.deepEqual(inv.apps, ['Adobe']);
     assert.equal(inv.fileCount, 1);
   } finally { stub.restore(); }
@@ -200,7 +211,7 @@ test('a missing Invoices folder reports empty rather than failing', async () => 
   const original = global.fetch;
   global.fetch = async () => ({ ok: false, status: 404, text: async () => 'not found' });
   try {
-    const inv = await buildInventory('tok', 'drive1');
+    const inv = await buildInventory('tok', nextDrive());
     assert.equal(inv.empty, true);
     assert.deepEqual(inv.files, []);
   } finally { global.fetch = original; }
@@ -215,7 +226,7 @@ test('one unreadable folder is reported but does not lose the rest', async () =>
     },
   });
   try {
-    const inv = await buildInventory('tok', 'drive1', { pool: 1 });
+    const inv = await buildInventory('tok', nextDrive(), { pool: 1 });
     assert.equal(inv.fileCount, 1);
     assert.equal(inv.errors.length, 1);
     assert.match(inv.errors[0], /^Broken: /);
@@ -231,7 +242,7 @@ test('a scan that runs past its deadline says so instead of reporting false gaps
     },
   });
   try {
-    const inv = await buildInventory('tok', 'drive1', { pool: 1, deadline: Date.now() - 1 });
+    const inv = await buildInventory('tok', nextDrive(), { pool: 1, deadline: Date.now() - 1 });
     assert.equal(inv.truncated, true);
   } finally { stub.restore(); }
 });

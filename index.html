@@ -1134,39 +1134,59 @@ let invLoading = false;
 // Compare on letters and digits alone.
 const invNorm = s => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
 
-function invArchiveIndex(){
-  const byApp = new Map();
-  for (const f of (invData && invData.files) || []){
-    const key = invNorm(f.app);
-    let rec = byApp.get(key);
-    if (!rec) byApp.set(key, rec = { app:f.app, months:new Map(), undated:[], count:0 });
-    rec.count++;
-    if (f.month){
-      const list = rec.months.get(f.month) || [];
-      list.push(f);
-      rec.months.set(f.month, list);
-    } else rec.undated.push(f);
+// Archive folders carry VENDOR names; the sheet's rows carry APP names, and the
+// two only sometimes agree — "Bubble" is "Bubble Starter", "Luzmo" is
+// "Cumul(Luzmo)", "Claude Api" is "Anthropic(Api Console)". Joining on the raw
+// name reports invoices the archive is holding as missing, which is the whole
+// failure this tab exists to catch, so resolve the folder to a sheet row first.
+function invResolveFolder(folderName, sheetIndex, mapping){
+  const k = invNorm(folderName);
+  const mapped = mapping && mapping[folderName];
+  if (mapped && sheetIndex.has(invNorm(mapped))) return sheetIndex.get(invNorm(mapped));
+  if (sheetIndex.has(k)) return sheetIndex.get(k);
+
+  // Failing an explicit mapping, one-sided containment — but only when exactly
+  // one row matches. "Cursor" is unambiguously "Cursor pro"; "Claude Ai" must not
+  // sweep up "Claude Ai Max 6 Accounts", which is why the exact test comes first
+  // and an ambiguous match is left unresolved rather than guessed.
+  const cands = [];
+  for (const [nk, name] of sheetIndex){
+    if (k.length >= 4 && nk.includes(k)) cands.push(name);
+    else if (nk.length >= 4 && k.includes(nk)) cands.push(name);
   }
-  return byApp;
+  return cands.length === 1 ? cands[0] : null;
 }
 
 // One row per app: the sheet's amounts joined to the archive's files.
 function invBuildRows(){
-  const archive = invArchiveIndex();
   const pivoted = window.PIVOTED || [];
-  const rows = new Map();
+  const mapping = (invData && invData.mapping) || {};
+  const sheetIndex = new Map(pivoted.map(g => [invNorm(g.name), g.name]));
 
+  const rows = new Map();
   for (const g of pivoted){
-    rows.set(invNorm(g.name), { name:g.name, dept:g.dept, sheet:g, files:new Map(), undated:[], fileCount:0 });
+    rows.set(invNorm(g.name), { name:g.name, dept:g.dept, sheet:g, folders:[], files:new Map(), undated:[], fileCount:0 });
   }
-  for (const [key, rec] of archive){
+
+  window.INV_UNRESOLVED = [];
+  for (const f of (invData && invData.files) || []){
+    const appName = invResolveFolder(f.app, sheetIndex, mapping);
+    const key = appName ? invNorm(appName) : invNorm(f.app);
     let row = rows.get(key);
-    // An app with invoices but no row in the sheet still belongs on the list --
-    // that is spend the sheet does not know about.
-    if (!row) rows.set(key, row = { name:rec.app, dept:'—', sheet:null, files:new Map(), undated:[], fileCount:0 });
-    row.files = rec.months;
-    row.undated = rec.undated;
-    row.fileCount = rec.count;
+    if (!row){
+      // Invoices with no row in the sheet still belong on the list — that is
+      // either spend the sheet doesn't know about, or a folder whose name the
+      // join couldn't place. Both are worth seeing; neither is a silent drop.
+      rows.set(key, row = { name: appName || f.app, dept:'—', sheet:null, folders:[], files:new Map(), undated:[], fileCount:0 });
+      if (!appName && !window.INV_UNRESOLVED.includes(f.app)) window.INV_UNRESOLVED.push(f.app);
+    }
+    if (!row.folders.includes(f.app)) row.folders.push(f.app);
+    row.fileCount++;
+    if (f.month){
+      const list = row.files.get(f.month) || [];
+      list.push(f);
+      row.files.set(f.month, list);
+    } else row.undated.push(f);
   }
   return [...rows.values()].sort((a,b)=>a.name.localeCompare(b.name));
 }
@@ -1193,7 +1213,8 @@ function invVisibleRows(){
   const todayKey = realMonthKey(0);
   const months = invMonths();
   return invBuildRows().filter(row=>{
-    if (q && !row.name.toLowerCase().includes(q) && !String(row.dept||'').toLowerCase().includes(q)) return false;
+    const hay = [row.name, row.dept||'', ...(row.folders||[])].join(' ').toLowerCase();
+    if (q && !hay.includes(q)) return false;
     if (mode === 'have') return row.fileCount > 0;
     if (mode === 'gaps') return months.some(m => invCellState(row, m, todayKey) === 'missing');
     return true;
@@ -1210,6 +1231,20 @@ function drawInvoices(){
       : 'Invoice archive not loaded yet.';
     $('#invSummary').innerHTML = '';
     $('#invCount').textContent = '';
+    return;
+  }
+
+  // An archive that could not be located looks exactly like an empty one once
+  // it is drawn as a grid — every month an amber "no invoice found". That is
+  // what happened when these paths were hardcoded, so say it outright instead.
+  if (!invData.root){
+    $('#invSummary').innerHTML = '<span class="amt-pill unmapped">Invoice archive not found</span>';
+    $('#invCount').textContent = '';
+    $('#invChecklist').innerHTML = '';
+    $('#invFiles').innerHTML = '';
+    statusEl.innerHTML = `<span style="color:var(--danger)">Couldn't find the invoice folder on OneDrive, so nothing below would be true. Looked for: ${
+      (invData.triedPaths||[]).map(p=>`<code>${p}</code>`).join(', ') || '—'
+    }. If the folder has been renamed or moved, set <code>INVOICE_ARCHIVE_PATH</code> in Vercel to its path (relative to the OneDrive root).</span>`;
     return;
   }
 
@@ -1238,10 +1273,11 @@ function drawInvoices(){
     extra ? `<span class="amt-pill muted">${extra} month${extra===1?'':'s'} with an invoice but no charge in the sheet</span>` : '',
     `<span class="amt-pill muted">${invData.fileCount||0} invoice${(invData.fileCount||0)===1?'':'s'} on file across ${(invData.apps||[]).length} folder${(invData.apps||[]).length===1?'':'s'}</span>`,
     invData.undatedCount ? `<span class="amt-pill muted">${invData.undatedCount} not filed under a month</span>` : '',
+    (window.INV_UNRESOLVED||[]).length ? `<span class="amt-pill unmapped" title="${window.INV_UNRESOLVED.join(', ').replace(/"/g,'&quot;')}">${window.INV_UNRESOLVED.length} folder${window.INV_UNRESOLVED.length===1?'':'s'} not matched to a sheet row</span>` : '',
   ].filter(Boolean).join('');
 
   statusEl.innerHTML = [
-    `Archive scanned ${new Date(invData.scannedAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}.`,
+    `Archive <b>${invData.root||'—'}</b> scanned ${new Date(invData.scannedAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}.`,
     invData.truncated ? ' <b style="color:var(--warn)">The scan ran out of time and this is a partial picture — press “Rescan archive”.</b>' : '',
     (invData.errors && invData.errors.length) ? ` ${invData.errors.length} folder(s) could not be read: ${invData.errors.slice(0,3).join('; ')}` : '',
   ].join('');
@@ -1281,8 +1317,13 @@ function drawInvoiceGrid(rows, months, todayKey){
     // exists in the archive has nothing to open. Leave it unclickable rather
     // than offering a click that silently does nothing.
     const openable = !!row.sheet;
+    // The folder an app's invoices actually live under, when it is not just the
+    // app's own name — otherwise the join looks like magic and a wrong one is
+    // impossible to spot.
+    const via = (row.folders||[]).filter(f => invNorm(f) !== invNorm(row.name));
+    const viaChip = via.length ? ` <span class="chip" title="filed under ${via.join(', ').replace(/"/g,'&quot;')}">${via.join(', ')}</span>` : '';
     return `<tr${openable?` data-name="${encodeURIComponent(row.name)}"`:' style="cursor:default"'}>
-      <td class="stickycol">${row.name}${openable?'':' <span class="chip" title="has invoices but no row in the spend sheet">not in sheet</span>'}${undated}</td>
+      <td class="stickycol">${row.name}${openable?'':' <span class="chip" title="invoices on file, but no row in the spend sheet matched this folder">not in sheet</span>'}${viaChip}${undated}</td>
       ${cells}
       <td class="num total">${row.fileCount||''}</td>
       <td class="fill"></td>
@@ -1298,7 +1339,7 @@ function drawInvoiceGrid(rows, months, todayKey){
 function drawInvoiceFiles(rows){
   const el = $('#invFiles');
   const q = (($('#invSearch')||{}).value || '').trim().toLowerCase();
-  const keep = new Set(rows.map(r=>invNorm(r.name)));
+  const keep = new Set(rows.flatMap(r => (r.folders||[]).map(invNorm)));
   const files = ((invData && invData.files) || [])
     .filter(f => keep.has(invNorm(f.app)))
     .filter(f => !q || f.app.toLowerCase().includes(q) || f.name.toLowerCase().includes(q));

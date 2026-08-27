@@ -102,14 +102,15 @@ test('defaults to the shared invoices mailbox', () => {
 
 // --- Where invoices get filed -------------------------------------------
 //
-// Invoices belong in the procurement archive they have always been filed in —
-// Desktop/Anudeep files/Procurment bills/{vendor}/{month}/ — not in a separate
-// store. The vendor folder comes from the folder->app mapping the invoice
-// import already saved, and the month subfolder reuses whatever is there.
+// Invoices belong in the archive they have always been filed in, under
+// {archive}/{vendor}/{month}/ — not in a separate store. The vendor folder comes
+// from the folder->app mapping the invoice import already saved, and the month
+// subfolder reuses whatever is there. Where the archive itself lives is resolved
+// at run time (see test/archive.test.js), never assumed.
 
-const { appToSourceFolder, monthFolderName, sourceBase } = require('../lib/mail-sync');
+const { appToSourceFolder, monthFolderName } = require('../lib/mail-sync');
 
-// The real mapping saved in Invoices/_sync-config.json.
+// The real mapping saved in the archive's _sync-config.json.
 const SAVED_MAPPING = {
   Adobe: 'Adobe',
   Bubble: 'Bubble Starter',
@@ -129,14 +130,6 @@ test('routes an app back to the vendor folder it is archived under', () => {
   assert.strictEqual(byApp['WEBFLOW'], 'Webflow');
   // An app with no procurement folder has no mapping to fall back on.
   assert.strictEqual(byApp['Sentry.io'], undefined);
-});
-
-test('defaults to the procurement path, spelled as it really is on disk', () => {
-  delete process.env.INVOICE_SOURCE_PATH;
-  assert.strictEqual(sourceBase(), 'Desktop/Anudeep files/Procurment bills');
-  process.env.INVOICE_SOURCE_PATH = 'Some/Other/Path/';
-  assert.strictEqual(sourceBase(), 'Some/Other/Path');
-  delete process.env.INVOICE_SOURCE_PATH;
 });
 
 test('reuses an existing month subfolder rather than adding one beside it', () => {

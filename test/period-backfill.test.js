@@ -8,7 +8,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { planMove } = require('../lib/invoices/period-backfill');
 
-const BASE = 'Desktop/Anudeep files/Procurment bills';
+// The archive is one folder, located at run time (lib/graph.js). These paths
+// are built from whatever root the caller resolved, so the fixture names one.
+const BASE = 'Desktop/Anudeep files/Invoices';
 
 // The Cumul(Luzmo) folder as it stands: an Aug-26 folder, no Sep-26 folder yet.
 const luzmoFolder = (extra) => ({
@@ -42,17 +44,18 @@ test('the invoice that started this moves to the month it bills for', () => {
   assert.strictEqual(v.move.amount, 557.28);
 });
 
-test('the dashboard copy moves with it, or the checklist keeps showing the old month', () => {
-  const v = planMove(luzmoFile(), luzmoFolder(), BASE);
-  assert.strictEqual(v.move.mirrorFromPath, 'Invoices/Cumul(Luzmo)/Aug-26/20260826_20260258.pdf');
-  assert.strictEqual(v.move.mirrorToFolderPath, 'Invoices/Cumul(Luzmo)/Sep-26');
+test('every path is built from the archive root it was given', () => {
+  // The archive has been renamed once already, and hardcoding its old name is
+  // what broke the checklist. A move must follow the root the caller resolved.
+  const other = 'Some/Other/Archive';
+  const v = planMove(luzmoFile({ path: `${other}/Cumul/Aug-26/x.pdf` }), luzmoFolder(), other);
+  assert.strictEqual(v.move.toFolderPath, `${other}/Cumul/Sep-26`);
 });
 
-test('an unmapped vendor moves in the archive only', () => {
+test('a vendor folder with no app row still moves', () => {
   const v = planMove(luzmoFile(), luzmoFolder({ app: null }), BASE);
   assert.ok(v.move);
-  assert.strictEqual(v.move.mirrorFromPath, null);
-  assert.strictEqual(v.move.mirrorToFolderPath, null);
+  assert.strictEqual(v.move.app, null);
 });
 
 test('the destination reuses what this vendor already calls that month', () => {

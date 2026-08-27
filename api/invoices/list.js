@@ -1,4 +1,4 @@
-const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, graphFetch } = require('../../lib/graph');
+const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, resolveArchiveRoot, graphFetch } = require('../../lib/graph');
 const { buildInventory } = require('../../lib/invoices/inventory');
 
 // Two shapes behind one route:
@@ -26,7 +26,7 @@ async function checklist(req, res) {
   if (!upn) throw new Error('Missing TARGET_USER_UPN env var');
   const token = await getGraphToken();
   const driveId = await resolveDriveId(token, upn);
-  const data = await buildInventory(token, driveId, { deadline: now + 40 * 1000 });
+  const data = await buildInventory(token, driveId, { deadline: now + 40 * 1000, fresh: forceRefresh });
   // A crawl cut short by the deadline is a partial picture; caching it would
   // make the gaps look real for the next five minutes.
   if (!data.truncated) inventoryCache = { data, expiresAt: now + INVENTORY_TTL_MS };
@@ -39,9 +39,10 @@ async function perApp(req, res, appName) {
   const upn = (process.env.TARGET_USER_UPN || '').trim();
   if (!upn) throw new Error('Missing TARGET_USER_UPN env var');
 
-  const folder = `Invoices/${sanitizeSegment(appName)}`;
   const token = await getGraphToken();
   const driveId = await resolveDriveId(token, upn);
+  const root = await resolveArchiveRoot(token, driveId);
+  const folder = `${root.path}/${sanitizeSegment(appName)}`;
   const folderUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root:/${encodeGraphPath(folder)}?$select=id`;
 
   const folderRes = await graphFetch(folderUrl, { headers: { Authorization: `Bearer ${token}` } });

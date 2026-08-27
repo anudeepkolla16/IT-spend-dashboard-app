@@ -1,4 +1,4 @@
-const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, uploadFileContent, graphFetch } = require('../../lib/graph');
+const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, uploadFileContent, resolveArchiveRoot, graphFetch } = require('../../lib/graph');
 
 // Graph's "resolve a sharing URL" trick: base64url-encode the URL, prefix with "u!".
 // https://learn.microsoft.com/en-us/graph/api/shares-get
@@ -127,6 +127,7 @@ module.exports = async (req, res) => {
     }
 
     const targetDriveId = await resolveDriveId(token, upn);
+    const archiveRoot = await resolveArchiveRoot(token, targetDriveId);
     const targetApp = sanitizeSegment(commitApp);
     const startOffset = Number(offset) || 0;
 
@@ -142,7 +143,7 @@ module.exports = async (req, res) => {
     // makes re-runs near-instant and far less prone to transient network failures.
     let existing = new Set();
     try {
-      const destId = await lookupFolderId(token, targetDriveId, `Invoices/${targetApp}`);
+      const destId = await lookupFolderId(token, targetDriveId, `${archiveRoot.path}/${targetApp}`);
       if (destId) {
         const destFiles = await listFilesRecursive(token, targetDriveId, destId);
         existing = new Set(destFiles.map(f => `${sanitizeRelPath(f.relPath)}/${sanitizeFileName(f.name)}`));
@@ -165,7 +166,7 @@ module.exports = async (req, res) => {
         const buf = Buffer.from(await contentRes.arrayBuffer());
 
         const relFolder = sanitizeRelPath(file.relPath);
-        const destPath = `Invoices/${targetApp}${relFolder ? '/' + relFolder : ''}/${sanitizeFileName(file.name)}`;
+        const destPath = `${archiveRoot.path}/${targetApp}${relFolder ? '/' + relFolder : ''}/${sanitizeFileName(file.name)}`;
         await uploadFileContent(token, targetDriveId, destPath, buf); // handles >4MB via upload session
         summary.copied.push(label);
       } catch (e) {
