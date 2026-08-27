@@ -405,6 +405,19 @@ api/
 - **Run-rate = trailing 3-month average per app, annualised** (smooths volatile cloud/API costs); future
   budgeted months already in the sheet are excluded from run-rate and "current month" figures.
 - **Invoice uploads handle any size** — files over 4 MB go via a Graph resumable upload session.
+- **Every Graph call goes through `graphFetch`** (`lib/graph.js`), which retries `429` and the
+  `502/503/504` family plus transient network faults, honouring Graph's `Retry-After` (capped at 8s)
+  and never sleeping past the run's deadline. A run makes a few hundred Graph calls and Graph
+  throttles routinely; before this, the first 429 on a file became a line in the run summary beside
+  the invoice it lost. Use it for any new Graph call rather than bare `fetch`.
+- **Listings are paged** — `@odata.nextLink` is followed everywhere children are listed
+  (`graphListAll`, `listFilesRecursive`, `folderChildren`, the archive's app folders, the mirror's
+  source folders). A listing cut off at 200 is worse than one that fails: it reads as "these are all
+  the invoices there are", so folder totals come out short and the checklist shows gaps that aren't.
+- **A failed listing is never treated as an empty folder.** It used to be: a throttled listing read
+  as "this vendor has no month folders", so the run created `Aug-26` beside the existing `Aug` and
+  split that month's invoices across two folders, each totalling short. Listings now throw and the
+  run reports the file it could not place. Only a real `404` counts as "not there yet".
 - **Browsers won't cache the HTML** (no-cache headers), so deployed changes show up on a normal refresh.
 - **Cron is once-daily** on the current Vercel plan. If more frequent mirroring is ever needed, that's a plan/scheduler change.
 - **`pdf-parse` is pinned to 1.x on purpose, and required by its inner path**

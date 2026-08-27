@@ -1,4 +1,4 @@
-const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive } = require('../../lib/graph');
+const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, graphFetch } = require('../../lib/graph');
 const { buildInventory } = require('../../lib/invoices/inventory');
 
 // Two shapes behind one route:
@@ -44,7 +44,7 @@ async function perApp(req, res, appName) {
   const driveId = await resolveDriveId(token, upn);
   const folderUrl = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root:/${encodeGraphPath(folder)}?$select=id`;
 
-  const folderRes = await fetch(folderUrl, { headers: { Authorization: `Bearer ${token}` } });
+  const folderRes = await graphFetch(folderUrl, { headers: { Authorization: `Bearer ${token}` } });
   if (folderRes.status === 404) {
     res.setHeader('Cache-Control', 'no-store');
     res.status(200).json({ files: [] });

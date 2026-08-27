@@ -1,5 +1,5 @@
 const XLSX = require('xlsx');
-const { getGraphToken, resolveDriveId, encodeGraphPath } = require('../lib/graph');
+const { getGraphToken, resolveDriveId, encodeGraphPath, graphFetch } = require('../lib/graph');
 
 const MONTH_RE = /^([A-Za-z]{3})-(\d{2})$/;
 const MONTH_MAP = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
@@ -41,7 +41,7 @@ async function downloadWorkbook(token) {
 
   const driveId = await resolveDriveId(token, upn);
   const url = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root:/${encodeGraphPath(filePath)}:/content`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await graphFetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Graph file download failed (${res.status}) for path "${filePath}": ${text.slice(0, 300)}`);

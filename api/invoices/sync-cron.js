@@ -1,6 +1,7 @@
 const {
   getGraphToken, resolveDriveId, resolveShare, listFilesRecursive,
   encodeGraphPath, sanitizeSegment, readJsonFile, uploadFileContent,
+  graphFetch, graphListAll,
 } = require('../../lib/graph');
 const { verify, parseCookies } = require('../../lib/session');
 const { runMailSync } = require('../../lib/mail-sync');
@@ -24,7 +25,7 @@ const keyOf = (relPath, name) => `${sanitizeRelPath(relPath)}/${sanitizeFileName
 
 // Resolve a folder path to its item id (null if it doesn't exist yet).
 async function readDestFolderId(token, driveId, path) {
-  const res = await fetch(
+  const res = await graphFetch(
     `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root:/${encodeGraphPath(path)}?$select=id`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -42,13 +43,15 @@ async function mirrorSourceFolders(token, targetDriveId, deadline, config) {
   const share = await resolveShare(token, config.sourceUrl);
   if (!share.isFolder) throw new Error('Saved sourceUrl no longer points to a folder');
 
-  // List source subfolders (one per app/vendor).
-  const subRes = await fetch(
+  // List source subfolders (one per app/vendor). Paged: there is one folder per
+  // vendor and they only accumulate, so a listing cut off at 200 would stop
+  // mirroring every vendor past it without ever saying so.
+  const children = await graphListAll(
+    token,
     `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(share.driveId)}/items/${share.itemId}/children?$select=id,name,folder&$top=200`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    'Source listing'
   );
-  if (!subRes.ok) throw new Error(`Source listing failed (${subRes.status})`);
-  const subfolders = ((await subRes.json()).value || []).filter(f => f.folder);
+  const subfolders = children.filter(f => f.folder);
 
   const summary = { copiedNew: 0, alreadyPresent: 0, errors: [], perApp: {}, timedOut: false };
   const mapped = subfolders.filter(f => config.mapping[f.name]);
@@ -83,7 +86,7 @@ async function mirrorSourceFolders(token, targetDriveId, deadline, config) {
       if (existing.has(k)) { summary.alreadyPresent++; continue; }
       if (Date.now() > deadline) { summary.timedOut = true; break; }
       try {
-        const contentRes = await fetch(
+        const contentRes = await graphFetch(
           `https://graph.microsoft.com/v1.0/drives/${share.driveId}/items/${file.id}/content`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
