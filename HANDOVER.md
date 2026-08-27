@@ -145,6 +145,40 @@ map it via **Import Invoices** so the mirror starts picking it up. Add the vendo
 **Update Amounts → Unrecognised vendors** and the mapping applies to mail too — both use the
 same `Invoices/_amount-map.json`.
 
+### Re-checking billing periods on invoices already filed
+
+**🗓 Recheck Periods** in the header applies the billing-period rule to the archive as it stands.
+Everything filed before that rule existed sits where its email happened to land — Luzmo's invoice
+of Aug 26, which bills `2026-08-26 → 2026-09-26`, is in the August folder with its 557.28 in the
+August cell.
+
+It runs in two steps, and **nothing moves until you have read the list and confirmed it**:
+
+1. **The scan** opens every PDF in `Procurment bills/{vendor}/{month}/`, reads the billing period
+   and the total, and reports which invoices belong in another month and what that would do to the
+   sheet. It writes nothing except a cache of what it read, so re-running it is cheap — only PDFs
+   it has never opened cost a download. A run reads 25 of them; if the archive is bigger, the
+   summary says how many are left and you run it again.
+2. **The apply** moves the files you confirmed — in the procurement archive *and* in the
+   `Invoices/{App}/` mirror the dashboard reads, or the checklist would keep showing them under the
+   old month — then totals each affected month **from the folder as it now stands** and writes those
+   cells. The figure written is never the previewed one: a file that failed to move cannot leave
+   behind a total that assumes it did.
+
+Nothing is deleted. A Graph move keeps the file's identity, its version history and anyone's link
+to it, so putting one back is just a move the other way, and every cell written goes to the audit
+log in `_amount-log.json` with what it held before.
+
+**This one lowers a cell**, which the invoice sync never does. That is the point: an invoice that
+has moved out of a month is not a missing invoice, it is one that was never that month's. A month
+holding any invoice that could not be read, or read as a USD total, is reported and left alone
+rather than written short.
+
+Left alone as a matter of course: invoices that state no period (most of them — their arrival month
+is the best thing known about them), a period more than two months from where the file sits (a
+contract term misread as a cycle), an annual or quarterly period (no majority month — it stays where
+it starts), and anything filed deeper than `{vendor}/{month}`.
+
 ### Invoice totals and the Spendings sheet
 
 The sync totals **every invoice in the app's month folder** — not just the ones that arrived by
@@ -385,6 +419,7 @@ lib/
   mail-sync.js                 Files invoice PDFs from the shared mailbox, ticks the tracker, fills empty amounts
   invoice-amount.js            Reads the payable total + currency out of an invoice PDF
   invoice-period.js            Reads the billing period, and picks the month it mostly covers
+  invoices/period-backfill.js  Re-files invoices archived before that rule, in the folders and the sheet
   invoices/inventory.js        Crawls the invoice archive for the checklist tab (month folders, per-file totals)
   amounts/{preview,apply,log}.js  The amount-import handlers, behind api/amounts.js
 api/
