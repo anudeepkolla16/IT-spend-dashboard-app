@@ -591,7 +591,7 @@ $('#importBtn').onclick = async () => {
     });
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
-    openImportReview(json.folders, appNames);
+    openImportReview(json.folders, appNames, json);
   }catch(err){
     alert('Scan failed: ' + err.message);
   }finally{
@@ -599,7 +599,7 @@ $('#importBtn').onclick = async () => {
   }
 };
 
-function openImportReview(folders, appNames){
+function openImportReview(folders, appNames, meta){
   const sortedApps = [...appNames].sort((a,b)=>a.localeCompare(b));
   $('#importTblBody').innerHTML = folders.map(f => `
     <tr data-folder-id="${encodeURIComponent(f.folderId)}">
@@ -612,7 +612,13 @@ function openImportReview(folders, appNames){
         </select>
       </td>
     </tr>`).join('') || '<tr><td colspan="3" class="cap" style="text-align:center;padding:16px">No subfolders found.</td></tr>';
-  $('#importModalStatus').textContent = '';
+  // Pointing this at the archive itself is the normal case now that the source
+  // and the archive are one folder. Nothing is copied then — say so up front,
+  // rather than letting "Confirm & Import" read like it is about to duplicate
+  // everything.
+  $('#importModalStatus').textContent = (meta && meta.sourceIsArchive)
+    ? `These folders are already inside the archive (${meta.archive}). Confirming saves the folder→app mapping only — no files are copied or moved.`
+    : '';
   $('#importModalOverlay').classList.add('show');
 }
 function closeImportReview(){ $('#importModalOverlay').classList.remove('show'); }
@@ -682,7 +688,9 @@ $('#importModalConfirm').onclick = async () => {
       } while (offset != null);
     }
     const lines = [
-      `${totalCopied} new invoice(s) copied, ${totalPresent} already present, across ${jobs.length} folder(s).`,
+      totalCopied
+        ? `${totalCopied} new invoice(s) copied, ${totalPresent} already present, across ${jobs.length} folder(s).`
+        : `Nothing needed copying — all ${totalPresent} invoice(s) across ${jobs.length} folder(s) are already in the archive.`,
       totalSkipped ? `Skipped ${totalSkipped} file(s) over 4 MB.` : '',
       allErrors.length ? `Errors (${allErrors.length}):\n  ${allErrors.slice(0,20).join('\n  ')}${allErrors.length>20?'\n  …':''}` : '',
     ].filter(Boolean).join('\n') + autoSyncNote;
