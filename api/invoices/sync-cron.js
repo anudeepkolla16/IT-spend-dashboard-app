@@ -1,6 +1,7 @@
 const {
   getGraphToken, resolveDriveId, resolveShare, listFilesRecursive,
   encodeGraphPath, sanitizeSegment, readJsonFile, uploadFileContent,
+  resolveArchiveRoot, archiveFile,
 } = require('../../lib/graph');
 const { verify, parseCookies } = require('../../lib/session');
 const { runMailSync } = require('../../lib/mail-sync');
@@ -33,14 +34,21 @@ async function readDestFolderId(token, driveId, path) {
   return (await res.json()).id;
 }
 
-// Mirror new files from the mapped source folders into Invoices/{App}/.
-async function mirrorSourceFolders(token, targetDriveId, deadline, config) {
+// Mirror new files from the mapped source folders into {archive}/{App}/.
+async function mirrorSourceFolders(token, targetDriveId, deadline, config, archiveRoot) {
   if (!config || !config.sourceUrl || !config.mapping) {
     return { note: 'No sync config saved yet — run an import from the dashboard once to set it up.' };
   }
 
   const share = await resolveShare(token, config.sourceUrl);
   if (!share.isFolder) throw new Error('Saved sourceUrl no longer points to a folder');
+
+  // The source and the archive used to be two folders, with this copying between
+  // them. They are now one and the same, and mirroring a folder onto itself is at
+  // best a wasted crawl of the whole archive on every run.
+  if (share.driveId === targetDriveId && share.itemId === archiveRoot.itemId) {
+    return { note: `Source and archive are the same folder ("${archiveRoot.path}") — nothing to mirror.`, copiedNew: 0, alreadyPresent: 0, errors: [], perApp: {}, timedOut: false };
+  }
 
   // List source subfolders (one per app/vendor).
   const subRes = await fetch(
@@ -61,7 +69,7 @@ async function mirrorSourceFolders(token, targetDriveId, deadline, config) {
 
     let existing = new Set();
     try {
-      const destFolder = await readDestFolderId(token, targetDriveId, `Invoices/${targetApp}`);
+      const destFolder = await readDestFolderId(token, targetDriveId, `${archiveRoot.path}/${targetApp}`);
       if (destFolder) {
         const destFiles = await listFilesRecursive(token, targetDriveId, destFolder);
         existing = new Set(destFiles.map(f => keyOf(f.relPath, f.name)));
@@ -91,7 +99,7 @@ async function mirrorSourceFolders(token, targetDriveId, deadline, config) {
         const buf = Buffer.from(await contentRes.arrayBuffer());
 
         const relFolder = sanitizeRelPath(file.relPath);
-        const destPath = `Invoices/${targetApp}${relFolder ? '/' + relFolder : ''}/${sanitizeFileName(file.name)}`;
+        const destPath = `${archiveRoot.path}/${targetApp}${relFolder ? '/' + relFolder : ''}/${sanitizeFileName(file.name)}`;
         await uploadFileContent(token, targetDriveId, destPath, buf); // handles >4MB via upload session
         summary.copiedNew++;
         summary.perApp[targetAppRaw] = (summary.perApp[targetAppRaw] || 0) + 1;
@@ -136,10 +144,11 @@ module.exports = async (req, res) => {
 
     const token = await getGraphToken();
     const targetDriveId = await resolveDriveId(token, upn);
+    const archiveRoot = await resolveArchiveRoot(token, targetDriveId, { fresh: true });
 
     // Loaded once and shared: the mailbox pass needs the folder->app mapping to
     // file each invoice under the vendor folder it has always lived in.
-    const config = await readJsonFile(token, targetDriveId, 'Invoices/_sync-config.json');
+    const config = await readJsonFile(token, targetDriveId, archiveFile(archiveRoot, '_sync-config.json'));
 
     // Time-box the run so we always return before the function's hard limit.
     // Because only NEW files are copied (existing ones skipped), a run that
@@ -147,7 +156,7 @@ module.exports = async (req, res) => {
     // Both halves share the budget, so neither can starve the other completely.
     const started = Date.now();
     const HARD_DEADLINE = started + 45 * 1000;
-    const out = { ok: true, ranAt: new Date().toISOString(), mode };
+    const out = { ok: true, ranAt: new Date().toISOString(), mode, archive: archiveRoot.path, archiveFound: archiveRoot.resolved };
 
     // Mailbox first, then the mirror. The mailbox pass files invoices into the
     // procurement folders, and the mirror copies new files from there into
@@ -172,7 +181,7 @@ module.exports = async (req, res) => {
 
     if (mode !== 'mail') {
       try {
-        out.folders = await mirrorSourceFolders(token, targetDriveId, HARD_DEADLINE, config);
+        out.folders = await mirrorSourceFolders(token, targetDriveId, HARD_DEADLINE, config, archiveRoot);
       } catch (e) {
         out.folders = { error: e.message };
       }

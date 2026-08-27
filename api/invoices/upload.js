@@ -1,4 +1,4 @@
-const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment } = require('../../lib/graph');
+const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, resolveArchiveRoot } = require('../../lib/graph');
 
 // Microsoft Graph's simple (single-request) upload endpoint tops out at 4 MiB.
 // Capped lower here because base64-encoding the file for the JSON request body
@@ -36,10 +36,11 @@ module.exports = async (req, res) => {
 
     const baseName = sanitizeSegment(filename.replace(/\.pdf$/i, ''));
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const path = `Invoices/${sanitizeSegment(app)}/${stamp}_${baseName}.pdf`;
 
     const token = await getGraphToken();
     const driveId = await resolveDriveId(token, upn);
+    const root = await resolveArchiveRoot(token, driveId);
+    const path = `${root.path}/${sanitizeSegment(app)}/${stamp}_${baseName}.pdf`;
     const url = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root:/${encodeGraphPath(path)}:/content`;
 
     const gres = await fetch(url, {
