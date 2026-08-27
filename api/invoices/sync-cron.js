@@ -1,10 +1,11 @@
 const {
   getGraphToken, resolveDriveId, resolveShare, listFilesRecursive,
   encodeGraphPath, sanitizeSegment, readJsonFile, uploadFileContent,
-  resolveArchiveRoot, archiveFile,
+  graphFetch, graphListAll, resolveArchiveRoot, archiveFile,
 } = require('../../lib/graph');
 const { verify, parseCookies } = require('../../lib/session');
 const { runMailSync } = require('../../lib/mail-sync');
+const { scanPeriods, applyBackfill } = require('../../lib/invoices/period-backfill');
 
 // The daily invoice job. Two sources, one function:
 //   1. mirrors new invoice PDFs from the mapped SharePoint source folders
@@ -25,7 +26,7 @@ const keyOf = (relPath, name) => `${sanitizeRelPath(relPath)}/${sanitizeFileName
 
 // Resolve a folder path to its item id (null if it doesn't exist yet).
 async function readDestFolderId(token, driveId, path) {
-  const res = await fetch(
+  const res = await graphFetch(
     `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root:/${encodeGraphPath(path)}?$select=id`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -50,13 +51,15 @@ async function mirrorSourceFolders(token, targetDriveId, deadline, config, archi
     return { note: `Source and archive are the same folder ("${archiveRoot.path}") — nothing to mirror.`, copiedNew: 0, alreadyPresent: 0, errors: [], perApp: {}, timedOut: false };
   }
 
-  // List source subfolders (one per app/vendor).
-  const subRes = await fetch(
+  // List source subfolders (one per app/vendor). Paged: there is one folder per
+  // vendor and they only accumulate, so a listing cut off at 200 would stop
+  // mirroring every vendor past it without ever saying so.
+  const children = await graphListAll(
+    token,
     `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(share.driveId)}/items/${share.itemId}/children?$select=id,name,folder&$top=200`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    'Source listing'
   );
-  if (!subRes.ok) throw new Error(`Source listing failed (${subRes.status})`);
-  const subfolders = ((await subRes.json()).value || []).filter(f => f.folder);
+  const subfolders = children.filter(f => f.folder);
 
   const summary = { copiedNew: 0, alreadyPresent: 0, errors: [], perApp: {}, timedOut: false };
   const mapped = subfolders.filter(f => config.mapping[f.name]);
@@ -91,7 +94,7 @@ async function mirrorSourceFolders(token, targetDriveId, deadline, config, archi
       if (existing.has(k)) { summary.alreadyPresent++; continue; }
       if (Date.now() > deadline) { summary.timedOut = true; break; }
       try {
-        const contentRes = await fetch(
+        const contentRes = await graphFetch(
           `https://graph.microsoft.com/v1.0/drives/${share.driveId}/items/${file.id}/content`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -137,6 +140,9 @@ module.exports = async (req, res) => {
     }
 
     // ?mode=mail or ?mode=folders runs just one half; the cron runs both.
+    // ?mode=periods and ?mode=periods-apply are the billing-period backfill,
+    // which lives here for the same reason the mailbox sync does: the Hobby plan
+    // allows 12 serverless functions and the project is at exactly 12.
     const mode = String((req.query && req.query.mode) || 'all').trim();
 
     const upn = (process.env.TARGET_USER_UPN || '').trim();
@@ -149,6 +155,19 @@ module.exports = async (req, res) => {
     // Loaded once and shared: the mailbox pass needs the folder->app mapping to
     // file each invoice under the vendor folder it has always lived in.
     const config = await readJsonFile(token, targetDriveId, archiveFile(archiveRoot, '_sync-config.json'));
+
+    // The billing-period backfill. The scan writes nothing; the apply moves only
+    // the files, and writes only the cells, that the scan proposed and the user
+    // ticked — the browser sends both lists back.
+    if (mode === 'periods' || mode === 'periods-apply') {
+      const deadline = Date.now() + 45 * 1000;
+      const result = mode === 'periods'
+        ? await scanPeriods(token, targetDriveId, { deadline, root: archiveRoot, mapping: config && config.mapping })
+        : await applyBackfill(token, targetDriveId, req.body || {}, { deadline, root: archiveRoot });
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({ ok: true, ranAt: new Date().toISOString(), mode, periods: result });
+      return;
+    }
 
     // Time-box the run so we always return before the function's hard limit.
     // Because only NEW files are copied (existing ones skipped), a run that

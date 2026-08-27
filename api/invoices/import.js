@@ -1,4 +1,4 @@
-const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, uploadFileContent, resolveArchiveRoot } = require('../../lib/graph');
+const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, uploadFileContent, resolveArchiveRoot, graphFetch } = require('../../lib/graph');
 
 // Graph's "resolve a sharing URL" trick: base64url-encode the URL, prefix with "u!".
 // https://learn.microsoft.com/en-us/graph/api/shares-get
@@ -9,7 +9,7 @@ function encodeShareUrl(url) {
 }
 
 async function graphGet(token, url) {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await graphFetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`${res.status}: ${text.slice(0, 200)}`);
@@ -158,7 +158,7 @@ module.exports = async (req, res) => {
       try {
         const destKey = `${sanitizeRelPath(file.relPath)}/${sanitizeFileName(file.name)}`;
         if (existing.has(destKey)) { summary.alreadyPresent++; continue; }
-        const contentRes = await fetch(
+        const contentRes = await graphFetch(
           `https://graph.microsoft.com/v1.0/drives/${sourceDriveId}/items/${file.id}/content`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -185,7 +185,7 @@ module.exports = async (req, res) => {
 
 // Resolve a folder path to its item id (null if it doesn't exist yet).
 async function lookupFolderId(token, driveId, path) {
-  const res = await fetch(
+  const res = await graphFetch(
     `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/root:/${encodeGraphPath(path)}?$select=id`,
     { headers: { Authorization: `Bearer ${token}` } }
   );

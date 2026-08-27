@@ -1,4 +1,5 @@
 const { sign, parseCookies, decodeIdTokenPayload } = require('../../lib/session');
+const { graphFetch } = require('../../lib/graph');
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -27,7 +28,7 @@ module.exports = async (req, res) => {
     }
 
     const redirectUri = `${PUBLIC_APP_URL.replace(/\/$/, '')}/api/auth/callback`;
-    const tokenRes = await fetch(`https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token`, {
+    const tokenRes = await graphFetch(`https://login.microsoftonline.com/${AZURE_TENANT_ID}/oauth2/v2.0/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({

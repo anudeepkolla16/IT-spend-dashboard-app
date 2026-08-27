@@ -35,6 +35,40 @@ S. No.   Item   HSN   Price (INR)   UoM   Quantity   Sub Total (INR)   Total (IN
 2   Microsoft 365 Business basic with Email Security   997331   114.00   Monthly   134   15276.00   15276.00
 Sub Total (INR)   127620.00 IGST @ 18.00% (INR)   22971.60 Net Payable (INR)   150591.60`;
 
+// Invoices/Cumul(Luzmo)/20260826_20260258.pdf — the invoice that exposed this.
+// Its totals block is three lines that all begin "Total", and only the last is
+// what is owed. Which of them a bare /total/ pattern reached first depended on
+// how the PDF's table came out as text, so all three layouts are checked.
+const LUZMO_TOTALS = {
+  inline: 'Total excl. Sales Tax: $524.50  Total Sales Tax: $32.78  TOTAL INCL. SALES TAX: $557.28',
+  stacked: 'Total excl. Sales Tax:\n$ 524.50\nTotal Sales Tax:\n$ 32.78\nTOTAL INCL. SALES TAX:\n$ 557.28',
+  columns: 'Total excl. Sales Tax:   $ 524.50\nTotal Sales Tax:   $ 32.78\nTOTAL INCL. SALES TAX:   $ 557.28\n',
+};
+
+test('the payable total wins over the pre-tax subtotal and the tax itself', () => {
+  for (const [layout, text] of Object.entries(LUZMO_TOTALS)) {
+    const r = extractInvoiceTotal(text);
+    assert.strictEqual(r.amount, 557.28, `${layout} layout read ${r.amount}`);
+    assert.strictEqual(r.usable, true, layout);
+  }
+});
+
+test('the sales tax on its own is never read as a total', () => {
+  // 32.78 against a real 557.28 is a 17x error, and it would have gone into the
+  // sheet as that month's Luzmo spend.
+  const r = extractInvoiceTotal('Total Sales Tax: $32.78');
+  assert.strictEqual(r.amount, null);
+  assert.strictEqual(r.usable, false);
+});
+
+test('an invoice that only states a pre-tax total still yields that', () => {
+  // Refusing the tax line must not refuse everything: some invoices print no
+  // other figure, and the one they do print beats reporting nothing.
+  const r = extractInvoiceTotal('Total excl. Sales Tax: $524.50');
+  assert.strictEqual(r.amount, 524.5);
+  assert.strictEqual(r.via, 'total excl. tax');
+});
+
 test('reads the total from a simple USD invoice', () => {
   const r = extractInvoiceTotal(BUBBLE);
   assert.strictEqual(r.amount, 32);

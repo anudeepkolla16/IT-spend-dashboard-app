@@ -104,13 +104,33 @@ second half of the daily invoice cron (2 AM UTC), and from **📧 Fetch Invoices
 2. Works out the app from the subject, the attachment filename and the sender's domain —
    taking the *original* sender out of a forwarded message, so `FW: [Bubble] Invoice`
    forwarded by a colleague is filed under Bubble Starter, not against the colleague.
-3. Saves the PDF into the procurement archive at
-   `{archive}/{vendor}/{month}/`, skipping anything already there.
+3. Saves the PDF into the archive at `{archive}/{vendor}/{month}/`, skipping anything already there.
    The vendor folder is the one that app is already mapped to in `_sync-config.json`
    (`Bubble Starter` → `Bubble`, `Cursor pro` → `Cursor`), and the month subfolder **reuses
    whatever is already there** — `Bubble/Aug`, `Cursor/July` — rather than adding a second
    folder beside it. Only when no month folder exists is one created, named `Aug-26`.
 4. Ticks that app's month in the **Invoices tracker** sheet (the TRUE/FALSE grid).
+
+**Which month an invoice belongs to.** The invoice's own **billing period** decides it, not the
+day the mail arrived: an invoice is filed under the month holding **most of the period it pays
+for**. Luzmo's invoice of Aug 26 reads *"period from 2026-08-26 until 2026-09-26"* — six days of
+that fall in August and twenty-five in September, and the charge falls due on Sep 09 — so it is
+September's, and the folder, the tracker tick and the amount all follow it there. A period inside
+one calendar month (`01-JUN-2026 to 30-JUN-2026`) resolves to that month exactly as before, and a
+quarterly or annual period, which has no majority month, stays in the month it starts.
+
+Only a **labelled** period moves anything — "period", "billing period", "service term". Two things
+on an ordinary invoice look just like a date range and are not one: the invoice date beside the due
+date, and a line item's own dates (`Starter Web Plan 8/12/26 - 9/12/26`, of which Bubble sends nine
+a month on separate cycles). An invoice that names no period, or whose PDF can't be read, is filed
+by the mail's date as it always was. Anything moved is listed in the run summary, and a period more
+than two months from the mail is treated as a misread and ignored.
+
+**Invoices already filed under the old rule stay where they are.** A re-read (**📧 Fetch Invoices** →
+*Re-read the last 60 days*) files them again under the right month, but the copy the earlier run put
+in the mail's month is not deleted — nothing here deletes from the archive. Both folders would then
+be totalled and the charge would count in two months, so the run summary names any leftover copy and
+its full path; delete it in SharePoint, and clear the old month's cell if it was written from it.
 
 Invoices are filed where they have always been filed by hand, so there is **one archive, not
 two**. The folder mirror then copies them on to `Invoices/{App}/` for the dashboard — and
@@ -123,6 +143,43 @@ folder mapped at all, a folder named after the app is created and reported under
 map it via **Import Invoices** so the mirror starts picking it up. Add the vendor once via
 **Update Amounts → Unrecognised vendors** and the mapping applies to mail too — both use the
 same `Invoices/_amount-map.json`.
+
+### Re-checking billing periods on invoices already filed
+
+**🗓 Recheck Periods** in the header applies the billing-period rule to the archive as it stands.
+Everything filed before that rule existed sits where its email happened to land — Luzmo's invoice
+of Aug 26, which bills `2026-08-26 → 2026-09-26`, is in the August folder with its 557.28 in the
+August cell.
+
+It runs in two steps, and **nothing moves until you have read the list and confirmed it**:
+
+1. **The scan** opens every PDF in `{archive}/{vendor}/{month}/`, reads the billing period and the
+   total, and reports which invoices belong in another month and what that would do to the sheet.
+   It writes nothing except a cache of what it read, so re-running it is cheap — only PDFs it has
+   never opened cost a download. A run reads 25 of them; if the archive is bigger, the summary says
+   how many are left and you run it again.
+2. **The apply** moves the files you confirmed, then totals each affected month **from the folder as
+   it now stands** and writes those cells. The figure written is never the previewed one: a file
+   that failed to move cannot leave behind a total that assumes it did.
+
+Both halves work off the archive root `resolveArchiveRoot` finds, never a hardcoded path, so a
+rename moves the backfill with it. A vendor folder is matched to its sheet row through the saved
+`_sync-config.json` mapping first and the vendor aliases second (`Cumul` → `Cumul(Luzmo)`); a folder
+that resolves to no row still has its files moved, but no cell is proposed for it.
+
+Nothing is deleted. A Graph move keeps the file's identity, its version history and anyone's link
+to it, so putting one back is just a move the other way, and every cell written goes to the audit
+log in `_amount-log.json` with what it held before.
+
+**This one lowers a cell**, which the invoice sync never does. That is the point: an invoice that
+has moved out of a month is not a missing invoice, it is one that was never that month's. A month
+holding any invoice that could not be read, or read as a USD total, is reported and left alone
+rather than written short.
+
+Left alone as a matter of course: invoices that state no period (most of them — their arrival month
+is the best thing known about them), a period more than two months from where the file sits (a
+contract term misread as a cycle), an annual or quarterly period (no majority month — it stays where
+it starts), and anything filed deeper than `{vendor}/{month}`.
 
 ### Invoice totals and the Spendings sheet
 
@@ -415,6 +472,8 @@ lib/
   mail.js                      Graph mail helpers — invoice detection, forwarded-sender parsing
   mail-sync.js                 Files invoice PDFs from the shared mailbox, ticks the tracker, fills empty amounts
   invoice-amount.js            Reads the payable total + currency out of an invoice PDF
+  invoice-period.js            Reads the billing period, and picks the month it mostly covers
+  invoices/period-backfill.js  Re-files invoices archived before that rule, in the folders and the sheet
   invoices/inventory.js        Crawls the invoice archive for the checklist tab (month folders, per-file totals)
                                (the archive's location comes from graph.js's resolveArchiveRoot)
   amounts/{preview,apply,log}.js  The amount-import handlers, behind api/amounts.js
@@ -436,6 +495,19 @@ api/
 - **Run-rate = trailing 3-month average per app, annualised** (smooths volatile cloud/API costs); future
   budgeted months already in the sheet are excluded from run-rate and "current month" figures.
 - **Invoice uploads handle any size** — files over 4 MB go via a Graph resumable upload session.
+- **Every Graph call goes through `graphFetch`** (`lib/graph.js`), which retries `429` and the
+  `502/503/504` family plus transient network faults, honouring Graph's `Retry-After` (capped at 8s)
+  and never sleeping past the run's deadline. A run makes a few hundred Graph calls and Graph
+  throttles routinely; before this, the first 429 on a file became a line in the run summary beside
+  the invoice it lost. Use it for any new Graph call rather than bare `fetch`.
+- **Listings are paged** — `@odata.nextLink` is followed everywhere children are listed
+  (`graphListAll`, `listFilesRecursive`, `folderChildren`, the archive's app folders, the mirror's
+  source folders). A listing cut off at 200 is worse than one that fails: it reads as "these are all
+  the invoices there are", so folder totals come out short and the checklist shows gaps that aren't.
+- **A failed listing is never treated as an empty folder.** It used to be: a throttled listing read
+  as "this vendor has no month folders", so the run created `Aug-26` beside the existing `Aug` and
+  split that month's invoices across two folders, each totalling short. Listings now throw and the
+  run reports the file it could not place. Only a real `404` counts as "not there yet".
 - **Browsers won't cache the HTML** (no-cache headers), so deployed changes show up on a normal refresh.
 - **Cron is once-daily** on the current Vercel plan. If more frequent mirroring is ever needed, that's a plan/scheduler change.
 - **`pdf-parse` is pinned to 1.x on purpose, and required by its inner path**

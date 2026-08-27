@@ -182,6 +182,7 @@
     <span class="cap" id="whoami"></span>
     <button class="btn ghost" id="fixTotalsBtn">🧮 Check Totals</button>
     <button class="btn ghost" id="mailSyncBtn">📧 Fetch Invoices</button>
+    <button class="btn ghost" id="periodsBtn" title="Re-read every archived invoice's billing period and re-file the ones that were filed by their arrival date">🗓 Recheck Periods</button>
     <button class="btn ghost" id="amountsBtn">💰 Update Amounts</button>
     <input type="file" id="amountsFile" accept=".xlsx,.xlsm,.xls,.csv" class="hidden" />
     <button class="btn ghost" id="importBtn">📥 Import Invoices</button>
@@ -1672,6 +1673,17 @@ async function runMailSync(rescan){
       lines.push(`\nFiled by invoice contents rather than sender (same vendor, different rows):`);
       rerouted.slice(0,8).forEach(r => lines.push(`  · ${r.file}: ${r.from} → ${r.to}`));
     }
+    const byPeriod = json.reroutedByPeriod || [];
+    if (byPeriod.length){
+      lines.push(`\nFiled by the billing period on the invoice rather than the month the mail arrived:`);
+      byPeriod.slice(0,8).forEach(r => lines.push(
+        `  · ${r.file}: ${r.from} → ${r.to}${r.periodStart ? `   (period ${r.periodStart} → ${r.periodEnd})` : ''}`));
+      const leftovers = byPeriod.filter(r => r.alsoStillAt);
+      if (leftovers.length){
+        lines.push(`  ${leftovers.length===1?'A copy of one of these is':'Copies of '+leftovers.length+' of these are'} still filed under the old month — delete ${leftovers.length===1?'it':'them'} or that month is counted twice:`);
+        leftovers.slice(0,8).forEach(r => lines.push(`    · ${r.alsoStillAt}/${r.file}`));
+      }
+    }
     const folderTotals = json.folderTotals || [];
     if (folderTotals.length){
       lines.push(`\nInvoice totals by folder:`);
@@ -1700,7 +1712,13 @@ async function runMailSync(rescan){
       review.slice(0,8).forEach(r => lines.push(`  · ${r.app}: ${Number(r.amount).toLocaleString('en-US')} ${r.currency||'?'} — ${r.note}`));
     }
     const unread = json.amountsUnread || [];
-    if (unread.length) lines.push(`\n${unread.length} invoice${unread.length===1?'':'s'} had no readable total (possibly scanned).`);
+    if (unread.length){
+      // Say which invoice and why. "Possibly scanned" alone was untraceable —
+      // a PDF whose text could not be read and one whose wording no pattern
+      // matched are different problems and only the note tells them apart.
+      lines.push(`\n${unread.length} invoice${unread.length===1?'':'s'} had no readable total:`);
+      unread.slice(0,8).forEach(u => lines.push(`  · ${u.app||'?'} ${u.month||''} ${u.file} — ${u.note||'no reason given'}`));
+    }
     if (json.unmatched){
       lines.push(`\n${json.unmatched} invoice${json.unmatched===1?" couldn't":"s couldn't"} be matched to an app and went to Invoices/_Unmatched/:`);
       (json.unmatchedItems||[]).slice(0,8).forEach(u => lines.push(`  · ${u.subject} — ${u.from||'unknown sender'}`));
@@ -1731,6 +1749,92 @@ async function runMailSync(rescan){
     btn.textContent = orig; btn.disabled = false;
   }
 }
+
+/* Re-checks the billing period of every invoice already in the archive and
+   re-files the ones filed by their arrival date, in the folders and in the
+   sheet. Two steps on purpose: the scan writes nothing, and nothing moves until
+   the list of moves has been read and confirmed. */
+$('#periodsBtn').onclick = async () => {
+  const btn = $('#periodsBtn'), orig = btn.textContent;
+  btn.textContent = 'Reading invoices…'; btn.disabled = true;
+
+  const post = async (mode, body) => {
+    const res = await fetch('/api/invoices/sync-cron?mode=' + mode, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    const raw = await res.text();
+    let json;
+    try { json = JSON.parse(raw); }
+    catch { throw new Error(`HTTP ${res.status}: ${raw.slice(0, 300) || 'empty response'}`); }
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP ' + res.status));
+    return json.periods || {};
+  };
+  const money = n => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2 });
+
+  try {
+    const scan = await post('periods');
+    const moves = scan.moves || [], cells = (scan.cells || []).filter(c => !c.blocked);
+    const blocked = (scan.cells || []).filter(c => c.blocked);
+
+    const lines = [`Read ${scan.invoices} invoice${scan.invoices === 1 ? '' : 's'} across ${scan.vendors} vendor folders.`];
+    if (scan.parsed) lines.push(`${scan.parsed} of them were opened for the first time this run.`);
+    if (scan.unread) lines.push(`\n${scan.unread} invoice${scan.unread === 1 ? ' has' : 's have'} not been read yet — run this again to finish the archive.`);
+
+    if (!moves.length) {
+      lines.push('\nEvery invoice that states a billing period is already filed under the month it covers. Nothing to move.');
+      if ((scan.errors || []).length) lines.push(`\nErrors:\n  ${scan.errors.slice(0, 5).join('\n  ')}`);
+      alert(lines.join('\n'));
+      return;
+    }
+
+    lines.push(`\n${moves.length} invoice${moves.length === 1 ? '' : 's'} would move to the month ${moves.length === 1 ? 'it bills' : 'they bill'} for:`);
+    moves.slice(0, 15).forEach(m => lines.push(
+      `  · ${m.app || m.vendorFolder}  ${m.file}: ${m.fromMonth} → ${m.toMonth}   (period ${m.periodStart} → ${m.periodEnd})`));
+    if (moves.length > 15) lines.push(`  … and ${moves.length - 15} more`);
+
+    if (cells.length) {
+      lines.push(`\nand ${cells.length} sheet cell${cells.length === 1 ? '' : 's'} would change:`);
+      cells.slice(0, 15).forEach(c => lines.push(
+        `  · ${c.app} ${c.month}: ${c.current === null ? '(empty)' : money(c.current)} → ${money(c.value)}`));
+      if (cells.length > 15) lines.push(`  … and ${cells.length - 15} more`);
+    }
+    if (blocked.length) {
+      lines.push(`\n${blocked.length} month${blocked.length === 1 ? '' : 's'} left for you — ${blocked.slice(0, 5).map(b => `${b.app} ${b.month} (${b.blocked})`).join('; ')}`);
+    }
+    if ((scan.skipped || []).length) lines.push(`\n${scan.skipped.length} invoice${scan.skipped.length === 1 ? ' was' : 's were'} skipped (unreadable, or not in a plain month folder).`);
+    if ((scan.errors || []).length) lines.push(`\nErrors:\n  ${scan.errors.slice(0, 5).join('\n  ')}`);
+
+    lines.push('\nMove the files and update the sheet?');
+    if (!confirm(lines.join('\n'))) return;
+
+    btn.textContent = 'Re-filing…';
+    const done = await post('periods-apply', { moves, cells });
+
+    const out = [`Moved ${(done.moved || []).length} invoice${(done.moved || []).length === 1 ? '' : 's'}.`];
+    (done.cellsWritten || []).forEach(c => out.push(
+      `  · ${c.app} ${c.month}: ${c.previous === null || c.previous === undefined ? '(empty)' : money(c.previous)} → ${money(c.value)}`));
+    if ((done.failed || []).length) {
+      out.push(`\n${done.failed.length} could not be moved:`);
+      done.failed.slice(0, 8).forEach(f => out.push(`  · ${f.file}: ${f.error}`));
+    }
+    if ((done.cellsSkipped || []).length) {
+      out.push(`\n${done.cellsSkipped.length} cell${done.cellsSkipped.length === 1 ? ' was' : 's were'} left alone:`);
+      done.cellsSkipped.slice(0, 8).forEach(c => out.push(`  · ${c.app} ${c.month} — ${c.why}`));
+    }
+    if (done.timedOut) out.push('\nRan out of time part-way — run it again to finish the rest.');
+    if ((done.errors || []).length) out.push(`\nErrors:\n  ${done.errors.slice(0, 5).join('\n  ')}`);
+    alert(out.join('\n'));
+
+    loadInventory(true);
+    syncFromApi(true);
+  } catch (err) {
+    alert('Period re-check failed: ' + err.message);
+  } finally {
+    btn.textContent = orig; btn.disabled = false;
+  }
+};
 
 /* The Total row's SUM ranges go stale as apps are added to the sheet, so some
    months quietly leave rows out. This shows what is wrong before changing
