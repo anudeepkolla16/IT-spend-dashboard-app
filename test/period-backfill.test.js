@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { planMove, predictCells } = require('../lib/invoices/period-backfill');
+const { planMove, predictCells, decideCell } = require('../lib/invoices/period-backfill');
 
 // The archive is one folder, located at run time (lib/graph.js). These paths
 // are built from whatever root the caller resolved, so the fixture names one.
@@ -190,13 +190,77 @@ test('a vendor\'s loose files are not counted into a month a file moves into', (
   const movedOut = new Map([['Cumul||2026-08', [moving]]]);
   const movedIn = new Map([['Cumul||2026-09', [moving]]]);
 
-  const cells = predictCells(sheetWith(557.28, null), folders, movedOut, movedIn, () => 'Cumul(Luzmo)');
+  const cells = predictCells(sheetWith(557.28, null), folders, movedOut, movedIn, () => 'Cumul(Luzmo)', {});
   const sep = cells.find(c => c.month === '2026-09');
   const aug = cells.find(c => c.month === '2026-08');
 
   assert.strictEqual(sep.value, 557.28, 'September gets the invoice that moved, and only that');
   assert.strictEqual(aug.value, 0, 'August is left holding nothing');
   assert.strictEqual(aug.direction, 'down');
+});
+
+// --- Which cells may be rewritten -----------------------------------------
+//
+// A live run offered "Cumul(Luzmo) 2026-08: 14,081.00 → 0.00". The August folder
+// held one 557.28 invoice; moving it out left the folder empty, and the rule as
+// written replaced the cell with the empty folder's total. 14,081.00 is a
+// statement or hand-entered figure and the backfill has no idea what it is made
+// of — only that it is not the invoices.
+
+test('a figure the invoices do not account for is never replaced', () => {
+  const v = decideCell({ current: 14081, before: 557.28, after: 0 });
+  assert.strictEqual(v.write, false);
+  assert.match(v.blocked, /14,081\.00, which is not what the invoices in that month come to/);
+  assert.match(v.blocked, /557\.28 before this change/);
+});
+
+test('a cell that IS the invoice total follows the invoices out', () => {
+  // The legitimate lowering case, and the whole point of the feature: the cell
+  // holds exactly what the folder held, so when an invoice leaves, it leaves.
+  const v = decideCell({ current: 557.28, before: 557.28, after: 0 });
+  assert.strictEqual(v.write, true);
+  assert.strictEqual(v.value, 0);
+});
+
+test('an empty cell takes the folder total', () => {
+  assert.deepStrictEqual(decideCell({ current: null, before: 0, after: 557.28 }), { write: true, value: 557.28 });
+  assert.deepStrictEqual(decideCell({ current: 0, before: 0, after: 557.28 }), { write: true, value: 557.28 });
+});
+
+test('a figure this app wrote itself may be corrected', () => {
+  // Not equal to the folder total any more, but on record as ours — so it is
+  // this app's own stale figure, not somebody's number.
+  const v = decideCell({ current: 400, before: 900, after: 557.28, ourLastWrite: 400 });
+  assert.strictEqual(v.write, true);
+  assert.strictEqual(v.value, 557.28);
+});
+
+test('a cell already holding the right figure is left untouched', () => {
+  assert.strictEqual(decideCell({ current: 557.28, before: 557.28, after: 557.28 }).write, false);
+  assert.strictEqual(decideCell({ current: 557.28, before: 557.28, after: 557.28 }).blocked, undefined);
+});
+
+test('the run that started this now proposes one cell, not two', () => {
+  // Luzmo moving Aug → Sep, with August holding 14,081.00 that is not the
+  // invoices'. September fills; August is reported and left alone.
+  const moving = { ...luzmoFile(), path: `${BASE}/Cumul/Aug-26/20260826_20260258.pdf` };
+  const folders = new Map([
+    ['Cumul||Aug-26', {
+      app: 'Cumul(Luzmo)', vendorFolder: 'Cumul', monthFolder: 'Aug-26', month: '2026-08',
+      monthFolderNames: ['Aug-26'], files: [moving],
+    }],
+  ]);
+  const cells = predictCells(
+    sheetWith(14081, null), folders,
+    new Map([['Cumul||2026-08', [moving]]]), new Map([['Cumul||2026-09', [moving]]]),
+    () => 'Cumul(Luzmo)', {}
+  );
+
+  const sep = cells.find(c => c.month === '2026-09');
+  const aug = cells.find(c => c.month === '2026-08');
+  assert.strictEqual(sep.value, 557.28, 'September still fills from the invoice that arrived');
+  assert.ok(aug.blocked, 'August is reported, not proposed');
+  assert.strictEqual(aug.address, undefined, 'and carries no address to write to');
 });
 
 // --- Wiring ---------------------------------------------------------------
@@ -233,8 +297,12 @@ test('the scan writes nothing and the apply only touches what was approved', () 
   assert.ok(!/writeCells\(/.test(scan), 'the scan must never write to the sheet');
 
   // The apply writes a month only if the caller ticked it.
-  assert.match(src, /approved\.has\(`\$\{app\}\|\|\$\{month\}`\)/,
-    'a cell must be written only when it was approved');
+  assert.match(src, /approved\.get\(`\$\{app\}\|\|\$\{month\}`\)/,
+    'a cell must be considered only when it was approved');
+  // Approval says which months to look at. Whether a cell may be replaced is
+  // decided again, at write time, against the sheet as it then stands.
+  assert.match(src, /const verdict = decideCell\(\{ current, before: t\.before/,
+    'the apply must re-apply the guard, not trust the scan');
   // And the figure written is re-derived from the folder, not taken on trust.
   assert.match(src, /sumFolderInvoices\(token, driveId, folder, cache, budget\)/,
     'the value written must be totalled from the folder after the moves');
