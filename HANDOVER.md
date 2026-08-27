@@ -243,11 +243,32 @@ matches app, department or file name.
 
 **Where the numbers come from.** The grid is a join, not a single source:
 
-- the **archive** — `{archive}/{App}/{Month}/`, located by `resolveArchiveRoot` — says which PDFs exist;
+- the **archive** — `{archive}/{Vendor}/{Month}/`, located by `resolveArchiveRoot` — says which PDFs exist;
 - the **spend sheet** (already loaded by the dashboard) says which app-months were charged;
 - `{archive}/_invoice-index.json` supplies the per-file totals, joined **by file name** rather than by
   path, so a total survives the file being moved or the archive being renamed. A file name that carries
   two conflicting totals is shown with no total rather than a guessed one.
+
+**Vendor folders are matched to sheet rows before joining.** The archive's folders carry *vendor*
+names and the sheet's rows carry *app* names, and the two often disagree — `Bubble` is
+`Bubble Starter`, `Luzmo` is `Cumul(Luzmo)`, `Claude Api` is `Anthropic(Api Console)`. Joining on the
+raw name reports invoices the archive is holding as missing, which is the very thing this tab exists
+to catch. Each folder is resolved in this order:
+
+1. the folder→app mapping saved in `{archive}/_sync-config.json` (written by **Import Invoices**);
+2. an exact match after normalising case and punctuation;
+3. one-sided containment, **only when exactly one row matches** — `Cursor` is unambiguously
+   `Cursor pro`, but `Claude Ai` must not sweep up `Claude Ai Max 6 Accounts`, which is why the exact
+   test comes first and an ambiguous folder is left unresolved rather than guessed.
+
+A folder that resolves to nothing gets its own row marked *not in sheet*, and the count of such
+folders is shown as a pill — a wrong tick is worse than a visible gap. When a row's invoices live
+under a differently-named folder, that folder name is shown on the row as a chip, so the join is
+visible rather than magic.
+
+> **If lots of folders show as "not matched to a sheet row"**, `_sync-config.json` is missing or
+> stale. Run **📥 Import Invoices** once against the archive folder and confirm the dropdowns; that
+> saves the mapping permanently.
 
 **Coverage only counts months already billed.** Including the sheet's budgeted future months would
 report a shortfall that no amount of filing could ever close.
