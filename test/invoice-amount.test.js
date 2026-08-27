@@ -422,3 +422,68 @@ test('falls back to the amount threshold only when the wording says nothing', ()
 test('leaves non-Anthropic invoices alone', () => {
   assert.strictEqual(refineAnthropic(BUBBLE, ANTHROPIC_ROWS), null);
 });
+
+/* ---------------- the top-up model, stated ---------------- *
+ *
+ * What a cell should hold when the sheet is AHEAD of the invoices on file.
+ * The rule the owner chose: a higher figure means invoices are still to come
+ * and it already covers them, so a newly arrived invoice is ABSORBED by that
+ * excess rather than added on top of it. The cell only grows once the folder
+ * total passes the sheet figure.
+ *
+ * That is what `max(cell, folderTotal)` computes — the two are the same
+ * arithmetic — but it had only ever been written as "leave a lower total
+ * alone", which reads like caution rather than a decision. These pin the model
+ * itself, using the reconciliation it came from: Bubble's cell held 524.27
+ * against eight invoices totalling 492.27, and the ninth, for 32.00, was still
+ * pending. 492.27 + 32 = 524.27 — the sheet was never wrong, just early.
+ */
+
+const bubble = (total) => planAmountCells(
+  { 'Bubble Starter': { '2026-06': total } }, grid(), USED, cellValue
+);
+
+test('top-up: an invoice the sheet already anticipated does not raise the cell', () => {
+  // Eight of nine invoices on file. The sheet is 32.00 ahead — the ninth.
+  const eight = bubble(492.27);
+  assert.strictEqual(eight.write.length, 0);
+  assert.strictEqual(eight.updated.length, 0);
+  assert.strictEqual(eight.skippedFilled.length, 1);
+  assert.strictEqual(eight.skippedFilled[0].current, 751.96);
+
+  // The ninth lands. Adding it on top would give 783.96; absorbing it leaves
+  // the figure that was right all along.
+  const nine = bubble(751.96);
+  assert.strictEqual(nine.write.length, 0, 'the cell is already correct');
+  assert.strictEqual(nine.updated.length, 0, 'and must not be written again');
+  assert.strictEqual(nine.skippedFilled.length, 0, 'nor reported as a shortfall');
+});
+
+test('top-up: an invoice beyond what the sheet anticipated does raise it', () => {
+  // Once the folder passes the sheet figure, the excess is spent and the extra
+  // is real spend the sheet has not caught up with.
+  const { updated, write, skippedFilled } = bubble(800);
+  assert.strictEqual(write.length, 0);
+  assert.strictEqual(skippedFilled.length, 0);
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].previous, 751.96);
+  assert.strictEqual(updated[0].value, 800);
+});
+
+test('top-up: re-running changes nothing, so the daily cron cannot inflate a cell', () => {
+  // The one property an additive rule could not have had. The folder total is
+  // the whole figure, so running the sync twice writes the same number twice —
+  // never 751.96 + 751.96.
+  const first = bubble(900);
+  assert.strictEqual(first.updated[0].value, 900);
+
+  // Second run, same folder, but the cell now holds what the first run wrote.
+  const AFTER = { values: VALUES.map(r => [...r]), start: { col: 0, row: 0 } };
+  AFTER.values[3][8] = 900;
+  const second = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 900 } }, grid(), AFTER, cellValue
+  );
+  assert.strictEqual(second.write.length, 0);
+  assert.strictEqual(second.updated.length, 0);
+  assert.strictEqual(second.skippedFilled.length, 0);
+});
