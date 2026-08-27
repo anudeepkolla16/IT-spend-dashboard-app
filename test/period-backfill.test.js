@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { planMove } = require('../lib/invoices/period-backfill');
+const { planMove, predictCells } = require('../lib/invoices/period-backfill');
 
 // The archive is one folder, located at run time (lib/graph.js). These paths
 // are built from whatever root the caller resolved, so the fixture names one.
@@ -153,6 +153,50 @@ test('an invoice whose total could not be used still moves, without an amount', 
   const v = planMove(luzmoFile({ usable: false, currency: 'INR', amount: 150591.6 }), luzmoFolder(), BASE);
   assert.ok(v.move);
   assert.strictEqual(v.move.amount, null);
+});
+
+// --- What the moves would do to the sheet ---------------------------------
+
+// A sheet with one row (Cumul(Luzmo)) and two month columns, holding 557.28 in
+// August and nothing in September.
+const sheetWith = (aug, sep) => ({
+  grid: { apps: [{ name: 'Cumul(Luzmo)', rowIdx: 0 }], monthCols: { '2026-08': 0, '2026-09': 1 } },
+  values: [[aug, sep]],
+  start: { row: 1, col: 0 },
+});
+
+const usable = (name, amount, nameMonth) => ({
+  name, path: `${BASE}/Cumul/${name}`, relPath: '', read: true,
+  amount, currency: 'USD', usable: true, nameMonth, folderMonth: null, currentMonth: nameMonth,
+});
+
+test('a vendor\'s loose files are not counted into a month a file moves into', () => {
+  // Cumul keeps three invoices loose in its folder whose names read as September,
+  // and one in Aug-26 that bills September. Both would key on "Cumul||2026-09".
+  // Counting the loose ones there would propose 857.28 for a month that holds
+  // one 557.28 invoice — and the sheet's month figures have never included
+  // files outside a month folder, because the total is the sum of the folder.
+  const moving = { ...luzmoFile(), path: `${BASE}/Cumul/Aug-26/20260826_20260258.pdf` };
+  const folders = new Map([
+    ['Cumul||Aug-26', {
+      app: 'Cumul(Luzmo)', vendorFolder: 'Cumul', monthFolder: 'Aug-26', month: '2026-08',
+      monthFolderNames: ['Aug-26'], files: [moving],
+    }],
+    ['Cumul||', {
+      app: 'Cumul(Luzmo)', vendorFolder: 'Cumul', monthFolder: '', month: null,
+      monthFolderNames: [], files: [usable('Sep 2026.pdf', 100, '2026-09'), usable('sep-26.pdf', 200, '2026-09')],
+    }],
+  ]);
+  const movedOut = new Map([['Cumul||2026-08', [moving]]]);
+  const movedIn = new Map([['Cumul||2026-09', [moving]]]);
+
+  const cells = predictCells(sheetWith(557.28, null), folders, movedOut, movedIn, () => 'Cumul(Luzmo)');
+  const sep = cells.find(c => c.month === '2026-09');
+  const aug = cells.find(c => c.month === '2026-08');
+
+  assert.strictEqual(sep.value, 557.28, 'September gets the invoice that moved, and only that');
+  assert.strictEqual(aug.value, 0, 'August is left holding nothing');
+  assert.strictEqual(aug.direction, 'down');
 });
 
 // --- Wiring ---------------------------------------------------------------
