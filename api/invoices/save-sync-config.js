@@ -1,7 +1,7 @@
-const { getGraphToken, resolveDriveId, writeJsonFile } = require('../../lib/graph');
+const { getGraphToken, resolveDriveId, writeJsonFile, resolveArchiveRoot, archiveFile } = require('../../lib/graph');
 
 // Persists the folder->app mapping (confirmed by the user in the import review UI)
-// to Invoices/_sync-config.json, so the daily cron can mirror new invoices
+// to _sync-config.json in the invoice archive, so the daily cron can mirror new invoices
 // automatically without a human re-confirming the mapping each time.
 module.exports = async (req, res) => {
   try {
@@ -20,8 +20,9 @@ module.exports = async (req, res) => {
 
     const token = await getGraphToken();
     const driveId = await resolveDriveId(token, upn);
+    const root = await resolveArchiveRoot(token, driveId);
 
-    await writeJsonFile(token, driveId, 'Invoices/_sync-config.json', {
+    await writeJsonFile(token, driveId, archiveFile(root, '_sync-config.json'), {
       sourceUrl,
       mapping, // { [sourceFolderName]: appName }
       savedAt: new Date().toISOString(),

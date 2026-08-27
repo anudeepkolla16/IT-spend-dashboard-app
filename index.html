@@ -1212,6 +1212,20 @@ function drawInvoices(){
     return;
   }
 
+  // An archive that could not be located looks exactly like an empty one once
+  // it is drawn as a grid — every month an amber "no invoice found". That is
+  // what happened when these paths were hardcoded, so say it outright instead.
+  if (!invData.root){
+    $('#invSummary').innerHTML = '<span class="amt-pill unmapped">Invoice archive not found</span>';
+    $('#invCount').textContent = '';
+    $('#invChecklist').innerHTML = '';
+    $('#invFiles').innerHTML = '';
+    statusEl.innerHTML = `<span style="color:var(--danger)">Couldn't find the invoice folder on OneDrive, so nothing below would be true. Looked for: ${
+      (invData.triedPaths||[]).map(p=>`<code>${p}</code>`).join(', ') || '—'
+    }. If the folder has been renamed or moved, set <code>INVOICE_ARCHIVE_PATH</code> in Vercel to its path (relative to the OneDrive root).</span>`;
+    return;
+  }
+
   const todayKey = realMonthKey(0);
   const months = invMonths();
   const allRows = invBuildRows();
@@ -1240,7 +1254,7 @@ function drawInvoices(){
   ].filter(Boolean).join('');
 
   statusEl.innerHTML = [
-    `Archive scanned ${new Date(invData.scannedAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}.`,
+    `Archive <b>${invData.root||'—'}</b> scanned ${new Date(invData.scannedAt).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}.`,
     invData.truncated ? ' <b style="color:var(--warn)">The scan ran out of time and this is a partial picture — press “Rescan archive”.</b>' : '',
     (invData.errors && invData.errors.length) ? ` ${invData.errors.length} folder(s) could not be read: ${invData.errors.slice(0,3).join('; ')}` : '',
   ].join('');

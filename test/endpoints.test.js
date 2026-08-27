@@ -17,6 +17,11 @@ process.env.SESSION_SECRET = 'test-secret';
 const graph = require('../lib/graph');
 graph.getGraphToken = async () => 'test-token';
 graph.resolveDriveId = async () => 'drive-1';
+// Where the invoice archive lives is probed against the live drive; these tests
+// have no drive, so pin it. The alias map and audit log hang off this path.
+graph.resolveArchiveRoot = async () => ({
+  path: 'Test/Invoices', itemId: 'arch-1', candidates: ['Test/Invoices'], resolved: true, expiresAt: Infinity,
+});
 
 let aliasStore = {};
 let logStore = null;
