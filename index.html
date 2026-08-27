@@ -1948,7 +1948,9 @@ $('#periodsBtn').onclick = async () => {
       if (cells.length > 15) lines.push(`  … and ${cells.length - 15} more`);
     }
     if (blocked.length) {
-      lines.push(`\n${blocked.length} month${blocked.length === 1 ? '' : 's'} left for you — ${blocked.slice(0, 5).map(b => `${b.app} ${b.month} (${b.blocked})`).join('; ')}`);
+      lines.push(`\n${blocked.length} month${blocked.length === 1 ? ' is' : 's are'} yours to adjust — nothing will be written to ${blocked.length === 1 ? 'it' : 'them'}:`);
+      blocked.slice(0, 8).forEach(b => lines.push(
+        `  · ${b.app} ${b.month}: ${b.blocked}${b.would === undefined ? '' : `   (the invoices there now come to ${money(b.would)})`}`));
     }
     if ((scan.skipped || []).length) lines.push(`\n${scan.skipped.length} invoice${scan.skipped.length === 1 ? ' was' : 's were'} skipped (unreadable, or not in a plain month folder).`);
     if ((scan.errors || []).length) lines.push(`\nErrors:\n  ${scan.errors.slice(0, 5).join('\n  ')}`);

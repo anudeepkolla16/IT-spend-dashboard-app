@@ -180,9 +180,17 @@ to it, so putting one back is just a move the other way, and every cell written 
 log in `_amount-log.json` with what it held before.
 
 **This one lowers a cell**, which the invoice sync never does. That is the point: an invoice that
-has moved out of a month is not a missing invoice, it is one that was never that month's. A month
-holding any invoice that could not be read, or read as a USD total, is reported and left alone
-rather than written short.
+has moved out of a month is not a missing invoice, it is one that was never that month's.
+
+**But only a cell the invoices demonstrably account for.** A cell is rewritten when it is empty, when
+it matches what its folder totalled before the moves, or when it matches what this app last wrote
+there. Anything else is reported with both figures and left alone. The first live run showed why:
+Cumul(Luzmo)'s August cell held `14,081.00` while its August folder held one `557.28` invoice, and
+the earlier rule offered to replace 14,081.00 with `0.00` once that invoice moved out. A statement or
+hand-entered figure is not the invoices' to overwrite, and the backfill cannot know what it is made
+of. The same test runs again at write time against the live sheet — approval says which months to
+consider, never that a cell may be replaced. A month holding any invoice that could not be read as a
+USD total is likewise reported and left alone rather than written short.
 
 Left alone as a matter of course: invoices that state no period (most of them — their arrival month
 is the best thing known about them), a period more than two months from where the file sits (a
