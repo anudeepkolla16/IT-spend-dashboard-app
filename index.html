@@ -1631,6 +1631,17 @@ async function runMailSync(rescan){
       lines.push(`\nFiled by invoice contents rather than sender (same vendor, different rows):`);
       rerouted.slice(0,8).forEach(r => lines.push(`  · ${r.file}: ${r.from} → ${r.to}`));
     }
+    const byPeriod = json.reroutedByPeriod || [];
+    if (byPeriod.length){
+      lines.push(`\nFiled by the billing period on the invoice rather than the month the mail arrived:`);
+      byPeriod.slice(0,8).forEach(r => lines.push(
+        `  · ${r.file}: ${r.from} → ${r.to}${r.periodStart ? `   (period ${r.periodStart} → ${r.periodEnd})` : ''}`));
+      const leftovers = byPeriod.filter(r => r.alsoStillAt);
+      if (leftovers.length){
+        lines.push(`  ${leftovers.length===1?'A copy of one of these is':'Copies of '+leftovers.length+' of these are'} still filed under the old month — delete ${leftovers.length===1?'it':'them'} or that month is counted twice:`);
+        leftovers.slice(0,8).forEach(r => lines.push(`    · ${r.alsoStillAt}/${r.file}`));
+      }
+    }
     const folderTotals = json.folderTotals || [];
     if (folderTotals.length){
       lines.push(`\nInvoice totals by folder:`);

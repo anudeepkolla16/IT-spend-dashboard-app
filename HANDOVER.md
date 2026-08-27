@@ -112,6 +112,27 @@ second half of the daily invoice cron (2 AM UTC), and from **📧 Fetch Invoices
    folder beside it. Only when no month folder exists is one created, named `Aug-26`.
 4. Ticks that app's month in the **Invoices tracker** sheet (the TRUE/FALSE grid).
 
+**Which month an invoice belongs to.** The invoice's own **billing period** decides it, not the
+day the mail arrived: an invoice is filed under the month holding **most of the period it pays
+for**. Luzmo's invoice of Aug 26 reads *"period from 2026-08-26 until 2026-09-26"* — six days of
+that fall in August and twenty-five in September, and the charge falls due on Sep 09 — so it is
+September's, and the folder, the tracker tick and the amount all follow it there. A period inside
+one calendar month (`01-JUN-2026 to 30-JUN-2026`) resolves to that month exactly as before, and a
+quarterly or annual period, which has no majority month, stays in the month it starts.
+
+Only a **labelled** period moves anything — "period", "billing period", "service term". Two things
+on an ordinary invoice look just like a date range and are not one: the invoice date beside the due
+date, and a line item's own dates (`Starter Web Plan 8/12/26 - 9/12/26`, of which Bubble sends nine
+a month on separate cycles). An invoice that names no period, or whose PDF can't be read, is filed
+by the mail's date as it always was. Anything moved is listed in the run summary, and a period more
+than two months from the mail is treated as a misread and ignored.
+
+**Invoices already filed under the old rule stay where they are.** A re-read (**📧 Fetch Invoices** →
+*Re-read the last 60 days*) files them again under the right month, but the copy the earlier run put
+in the mail's month is not deleted — nothing here deletes from the archive. Both folders would then
+be totalled and the charge would count in two months, so the run summary names any leftover copy and
+its full path; delete it in SharePoint, and clear the old month's cell if it was written from it.
+
 Invoices are filed where they have always been filed by hand, so there is **one archive, not
 two**. The folder mirror then copies them on to `Invoices/{App}/` for the dashboard — and
 because the mailbox pass runs *first* in the cron, an invoice that arrives by mail reaches the
@@ -363,6 +384,7 @@ lib/
   mail.js                      Graph mail helpers — invoice detection, forwarded-sender parsing
   mail-sync.js                 Files invoice PDFs from the shared mailbox, ticks the tracker, fills empty amounts
   invoice-amount.js            Reads the payable total + currency out of an invoice PDF
+  invoice-period.js            Reads the billing period, and picks the month it mostly covers
   invoices/inventory.js        Crawls the invoice archive for the checklist tab (month folders, per-file totals)
   amounts/{preview,apply,log}.js  The amount-import handlers, behind api/amounts.js
 api/
