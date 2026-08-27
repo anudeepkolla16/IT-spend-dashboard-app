@@ -156,11 +156,19 @@ It runs in two steps, and **nothing moves until you have read the list and confi
 1. **The scan** opens every PDF in `{archive}/{vendor}/{month}/`, reads the billing period and the
    total, and reports which invoices belong in another month and what that would do to the sheet.
    It writes nothing except a cache of what it read, so re-running it is cheap — only PDFs it has
-   never opened cost a download. A run reads 25 of them; if the archive is bigger, the summary says
-   how many are left and you run it again.
+   never opened cost a download. Reads run six at a time and stop on the run's own clock rather than
+   at a fixed count, and the dashboard keeps going until nothing is left unread, so an archive of a
+   few hundred is one click rather than a dozen. A round that makes no progress stops the loop.
 2. **The apply** moves the files you confirmed, then totals each affected month **from the folder as
    it now stands** and writes those cells. The figure written is never the previewed one: a file
    that failed to move cannot leave behind a total that assumes it did.
+
+**Invoices filed loose are reported, never re-filed.** Most of the archive keeps its invoices flat in
+the app folder with the month in the name (`jan 26.pdf`, `Aug 2026.pdf`), which is how the checklist
+dates them. There is no month folder to move such a file out of, and renaming somebody's files to
+impose one is a different job — so when a loose invoice's billing period disagrees with the month
+its name reads as, the scan says so and leaves it alone. Whether to rename it or file it under a
+month folder is yours to decide.
 
 Both halves work off the archive root `resolveArchiveRoot` finds, never a hardcoded path, so a
 rename moves the backfill with it. A vendor folder is matched to its sheet row through the saved

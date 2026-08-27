@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { planMove } = require('../lib/invoices/period-backfill');
+const { planMove, predictCells } = require('../lib/invoices/period-backfill');
 
 // The archive is one folder, located at run time (lib/graph.js). These paths
 // are built from whatever root the caller resolved, so the fixture names one.
@@ -26,6 +26,8 @@ const luzmoFile = (extra) => ({
   path: `${BASE}/Cumul/Aug-26/20260826_20260258.pdf`,
   relPath: 'Aug-26',
   currentMonth: '2026-08',
+  folderMonth: '2026-08',   // it sits in a month folder
+  nameMonth: null,
   read: true,
   periodStart: '2026-08-26',
   periodEnd: '2026-09-26',
@@ -94,9 +96,36 @@ test('a PDF nobody could read is reported, never moved', () => {
   assert.ok(!v.move);
 });
 
-test('a file not in a month folder has nothing to be moved from', () => {
-  const file = luzmoFile({ relPath: '', currentMonth: null });
+test('a file not in a month folder, with nothing in its name, is left alone', () => {
+  const file = luzmoFile({ relPath: '', currentMonth: null, folderMonth: null, nameMonth: null });
   assert.strictEqual(planMove(file, luzmoFolder(), BASE), null);
+});
+
+// Much of the archive keeps invoices flat in the app folder with the month in
+// the name — "jan 26.pdf", "Aug 2026.pdf" — which is how the checklist dates
+// them. There is no month folder to move such a file out of, and renaming
+// somebody's files to impose one is a different job from this one.
+
+test('a loose invoice whose name agrees with its period is left alone', () => {
+  const file = luzmoFile({
+    name: 'Aug 2026.pdf', relPath: '', currentMonth: '2026-08',
+    folderMonth: null, nameMonth: '2026-08',
+    periodStart: '2026-08-01', periodEnd: '2026-08-31',
+  });
+  assert.strictEqual(planMove(file, luzmoFolder(), BASE), null);
+});
+
+test('a loose invoice whose period disagrees with its name is reported, not moved', () => {
+  // The checklist dates this one August from the name; it bills September. That
+  // is worth knowing, and it is the owner's call whether to rename or re-file.
+  const file = luzmoFile({
+    name: 'Aug 2026.pdf', relPath: '', currentMonth: '2026-08',
+    folderMonth: null, nameMonth: '2026-08',
+  });
+  const v = planMove(file, luzmoFolder(), BASE);
+  assert.ok(v.skip, 'expected it to be reported');
+  assert.ok(!v.move, 'a loose file is never moved');
+  assert.match(v.skip, /name reads as 2026-08, but it bills 2026-09/);
 });
 
 test('a file nested deeper than {vendor}/{month} is left for a human', () => {
@@ -126,7 +155,72 @@ test('an invoice whose total could not be used still moves, without an amount', 
   assert.strictEqual(v.move.amount, null);
 });
 
+// --- What the moves would do to the sheet ---------------------------------
+
+// A sheet with one row (Cumul(Luzmo)) and two month columns, holding 557.28 in
+// August and nothing in September.
+const sheetWith = (aug, sep) => ({
+  grid: { apps: [{ name: 'Cumul(Luzmo)', rowIdx: 0 }], monthCols: { '2026-08': 0, '2026-09': 1 } },
+  values: [[aug, sep]],
+  start: { row: 1, col: 0 },
+});
+
+const usable = (name, amount, nameMonth) => ({
+  name, path: `${BASE}/Cumul/${name}`, relPath: '', read: true,
+  amount, currency: 'USD', usable: true, nameMonth, folderMonth: null, currentMonth: nameMonth,
+});
+
+test('a vendor\'s loose files are not counted into a month a file moves into', () => {
+  // Cumul keeps three invoices loose in its folder whose names read as September,
+  // and one in Aug-26 that bills September. Both would key on "Cumul||2026-09".
+  // Counting the loose ones there would propose 857.28 for a month that holds
+  // one 557.28 invoice — and the sheet's month figures have never included
+  // files outside a month folder, because the total is the sum of the folder.
+  const moving = { ...luzmoFile(), path: `${BASE}/Cumul/Aug-26/20260826_20260258.pdf` };
+  const folders = new Map([
+    ['Cumul||Aug-26', {
+      app: 'Cumul(Luzmo)', vendorFolder: 'Cumul', monthFolder: 'Aug-26', month: '2026-08',
+      monthFolderNames: ['Aug-26'], files: [moving],
+    }],
+    ['Cumul||', {
+      app: 'Cumul(Luzmo)', vendorFolder: 'Cumul', monthFolder: '', month: null,
+      monthFolderNames: [], files: [usable('Sep 2026.pdf', 100, '2026-09'), usable('sep-26.pdf', 200, '2026-09')],
+    }],
+  ]);
+  const movedOut = new Map([['Cumul||2026-08', [moving]]]);
+  const movedIn = new Map([['Cumul||2026-09', [moving]]]);
+
+  const cells = predictCells(sheetWith(557.28, null), folders, movedOut, movedIn, () => 'Cumul(Luzmo)');
+  const sep = cells.find(c => c.month === '2026-09');
+  const aug = cells.find(c => c.month === '2026-08');
+
+  assert.strictEqual(sep.value, 557.28, 'September gets the invoice that moved, and only that');
+  assert.strictEqual(aug.value, 0, 'August is left holding nothing');
+  assert.strictEqual(aug.direction, 'down');
+});
+
 // --- Wiring ---------------------------------------------------------------
+
+test('a file the run had no time to read is not judged', () => {
+  // Pending is not "unreadable": the next run reads it. Reporting it either way
+  // would put a guess in front of somebody about to move their files.
+  const file = luzmoFile({ pending: true, read: false, periodStart: null, periodEnd: null });
+  assert.strictEqual(planMove(file, luzmoFolder(), BASE), null);
+});
+
+test('reading is bounded by the run clock, not a fixed count', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'invoices', 'period-backfill.js'), 'utf8');
+  // 460 invoices at 25 a run is eighteen clicks. Reads go through a pool and
+  // stop on the deadline, with time in hand to total and cache what was read.
+  assert.match(src, /READ_POOL/, 'PDFs must be read in parallel');
+  assert.match(src, /deadline - READ_RESERVE_MS/, 'reading must stop with time left to finish the run');
+
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(ui, /scan\.unread > 0/, 'the dashboard must keep going until the archive is read');
+  assert.match(ui, /next\.unread >= scan\.unread/, 'and must stop when a round makes no progress');
+});
 
 test('the scan writes nothing and the apply only touches what was approved', () => {
   const fs = require('node:fs');
@@ -150,4 +244,8 @@ test('the scan writes nothing and the apply only touches what was approved', () 
   assert.match(ui, /post\('periods-apply', \{ moves, cells \}\)/,
     'and must send back the very moves and cells the scan proposed');
   assert.match(ui, /Move the files and update the sheet\?/, 'nothing moves without a confirmation');
+  // A reply without a `periods` payload is not this feature answering, and
+  // rendering it printed "Read undefined invoices across undefined folders".
+  assert.match(ui, /if \(!json\.periods\) throw new Error\(/,
+    'a reply from an older deployment must be named, not rendered as undefined');
 });
