@@ -1,4 +1,5 @@
 const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, uploadFileContent, resolveArchiveRoot, graphFetch } = require('../../lib/graph');
+const { planTidy, applyTidy } = require('../../lib/invoices/organize');
 
 // Graph's "resolve a sharing URL" trick: base64url-encode the URL, prefix with "u!".
 // https://learn.microsoft.com/en-us/graph/api/shares-get
@@ -66,16 +67,30 @@ module.exports = async (req, res) => {
       res.status(405).json({ error: 'Method not allowed' });
       return;
     }
-    const { sourceUrl, mode, mapping, appNames, folderId, targetApp: commitApp, offset } = req.body || {};
-    if (!sourceUrl) {
-      res.status(400).json({ error: 'Missing sourceUrl' });
-      return;
-    }
+    const { sourceUrl, mode, mapping, appNames, folderId, targetApp: commitApp, offset, moves } = req.body || {};
 
     const upn = (process.env.TARGET_USER_UPN || '').trim();
     if (!upn) throw new Error('Missing TARGET_USER_UPN env var');
 
     const token = await getGraphToken();
+
+    // Tidying works on the archive itself, so it needs no source link. It shares
+    // this route because each file under api/ counts against the Hobby plan's
+    // 12-Serverless-Function limit and the deployment is at it.
+    if (mode === 'tidy-plan' || mode === 'tidy-apply') {
+      const driveId = await resolveDriveId(token, upn);
+      if (mode === 'tidy-plan') {
+        res.status(200).json(await planTidy(token, driveId, { deadline: Date.now() + 40 * 1000 }));
+      } else {
+        res.status(200).json(await applyTidy(token, driveId, moves));
+      }
+      return;
+    }
+
+    if (!sourceUrl) {
+      res.status(400).json({ error: 'Missing sourceUrl' });
+      return;
+    }
 
     const shareToken = encodeShareUrl(sourceUrl);
     const rootItem = await graphGet(
@@ -120,7 +135,7 @@ module.exports = async (req, res) => {
     }
 
     if (mode !== 'commit') {
-      res.status(400).json({ error: `Unknown mode "${mode}" — expected "preview" or "commit". If you're not sure why you're seeing this, hard-refresh the dashboard page and try again (this can happen if your browser is running an older cached version of the page).` });
+      res.status(400).json({ error: `Unknown mode "${mode}" — expected "preview", "commit", "tidy-plan" or "tidy-apply". If you're not sure why you're seeing this, hard-refresh the dashboard page and try again (this can happen if your browser is running an older cached version of the page).` });
       return;
     }
     // commit mode processes ONE source folder per request, in a bounded batch of
