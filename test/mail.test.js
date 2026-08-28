@@ -132,6 +132,37 @@ test('routes an app back to the vendor folder it is archived under', () => {
   assert.strictEqual(byApp['Sentry.io'], undefined);
 });
 
+test('a vendor folder that exists beats one the mapping names but is gone', () => {
+  // "Bubble" was renamed to "Bubble Starter" in the archive, but the saved
+  // mapping still lists both and "Bubble" comes first. Filing there would have
+  // recreated the old name and split the vendor across two folders, only one of
+  // which is ever totalled — the same shape as the Luzmo / Cumul(Luzmo) split.
+  const mapping = { Bubble: 'Bubble Starter', 'Bubble Starter': 'Bubble Starter' };
+  assert.strictEqual(appToSourceFolder(mapping)['Bubble Starter'], 'Bubble',
+    'with nothing to check against, the old first-wins rule still stands');
+  assert.strictEqual(
+    appToSourceFolder(mapping, ['Adobe', 'Bubble Starter'])['Bubble Starter'], 'Bubble Starter');
+});
+
+test('a folder still present is not swapped for a later one', () => {
+  // Only ever trade up. Both exist here, so the first stays chosen rather than
+  // the last listed quietly winning.
+  const mapping = { 'Cumul(Luzmo)': 'Cumul(Luzmo)', Luzmo: 'Cumul(Luzmo)' };
+  assert.strictEqual(
+    appToSourceFolder(mapping, ['Cumul(Luzmo)', 'Luzmo'])['Cumul(Luzmo)'], 'Cumul(Luzmo)');
+});
+
+test('when no mapped folder exists, the first is still used so filing has a home', () => {
+  const mapping = { Bubble: 'Bubble Starter', 'Bubble Starter': 'Bubble Starter' };
+  assert.strictEqual(appToSourceFolder(mapping, ['Adobe'])['Bubble Starter'], 'Bubble');
+});
+
+test('folder matching ignores case, as SharePoint does', () => {
+  // The archive holds "apollo"; the mapping says "Apollo".
+  const mapping = { Apollo: 'Apollo', 'apollo old': 'Apollo' };
+  assert.strictEqual(appToSourceFolder(mapping, ['apollo'])['Apollo'], 'Apollo');
+});
+
 test('reuses an existing month subfolder rather than adding one beside it', () => {
   // Bubble already has "Aug"; Cursor already has "July". Neither should gain a
   // second folder for the same month.
