@@ -1843,6 +1843,12 @@ async function runMailSync(rescan){
       unreadable.slice(0,8).forEach(f => lines.push(
         `  · ${f.app} ${f.month}: sheet has ${Number(f.current).toLocaleString('en-US',{minimumFractionDigits:2})}, invoices that parsed ${Number(f.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})} — fix or re-save the unreadable PDFs listed below, then run this again`));
     }
+    const dupes = json.duplicateInvoices || [];
+    if (dupes.length){
+      lines.push(`\n${dupes.length} document${dupes.length===1?' was':'s were'} counted once — an invoice and its own payment receipt are one charge:`);
+      dupes.slice(0,8).forEach(d => lines.push(
+        `  · ${d.app} ${d.month}: ${d.file} (${Number(d.amount).toLocaleString('en-US',{minimumFractionDigits:2})}) is the same invoice ${d.ref} as ${d.of}`));
+    }
     const review = json.amountsNeedingReview || [];
     if (review.length){
       lines.push(`\n${review.length} invoice${review.length===1?'':'s'} could not be used as an amount:`);

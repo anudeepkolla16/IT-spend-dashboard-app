@@ -541,3 +541,45 @@ test('a complete total is not flagged as partial', () => {
   );
   assert.strictEqual(write[0].partial, false);
 });
+
+/* -------- an invoice and its receipt are one charge, not two -------- */
+
+const { extractInvoiceRef } = require('../lib/invoice-amount');
+
+// Verbatim from Apollo's August folder. Both documents were filed, both total
+// $85.00, and the receipt is the payment FOR that invoice. Summing every PDF in
+// the folder makes Apollo's August 170.00 — double the truth. Only one of the
+// two parsed, so the live run happened to report 85.00 and hid it.
+const APOLLO_INVOICE = `Page 1 of 1  Invoice  Invoice number   A0589F17   0017  Date of issue   August 27, 2026 Date due   August 27, 2026  ZenLeads Inc. (dba Apollo.io)  Bill to  Saras Analytics INC  $85.00 USD due August 27, 2026  Subtotal   $85.00 Total   $85.00  Amount due   $85.00 USD`;
+const APOLLO_RECEIPT = `Page 1 of 1  Receipt  Invoice number   A0589F17   0017  Receipt number   2601   5895 Date paid   August 27, 2026  ZenLeads Inc. (dba Apollo.io)  $85.00 paid on August 27, 2026  Subtotal   $85.00 Total   $85.00  Amount paid   $85.00`;
+
+test('an invoice and its receipt resolve to the same reference', () => {
+  assert.strictEqual(extractInvoiceRef(APOLLO_INVOICE), 'A0589F170017');
+  assert.strictEqual(extractInvoiceRef(APOLLO_RECEIPT), 'A0589F170017',
+    'the receipt carries the invoice number too, which is what pairs them');
+});
+
+test("a receipt's own receipt number is never used as the reference", () => {
+  // "Receipt number 2601 5895" sits right after the invoice number on the page.
+  // Capturing it would give the two documents different keys and defeat the
+  // whole thing.
+  assert.ok(!extractInvoiceRef(APOLLO_RECEIPT).includes('2601'));
+});
+
+test('both documents still read the same total, so either one is correct alone', () => {
+  assert.strictEqual(extractInvoiceTotal(APOLLO_INVOICE).amount, 85);
+  assert.strictEqual(extractInvoiceTotal(APOLLO_RECEIPT).amount, 85);
+});
+
+test('a reference is only used when one was really read', () => {
+  // Without a reference, two files sharing an amount are two charges — a vendor
+  // billing the same figure twice in a month is ordinary.
+  assert.strictEqual(extractInvoiceRef('Receipt for your payment. Total $85.00'), null);
+  assert.strictEqual(extractInvoiceRef('Invoice # 7'), null, 'too short to be a reference');
+  assert.strictEqual(extractInvoiceRef(''), null);
+});
+
+test('common invoice-number formats are read', () => {
+  assert.strictEqual(extractInvoiceRef('Invoice No: INV-2026-0042  Date: 1 Aug'), 'INV20260042');
+  assert.strictEqual(extractInvoiceRef('Invoice Number: 38639008'), '38639008');
+});
