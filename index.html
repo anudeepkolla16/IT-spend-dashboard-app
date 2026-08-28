@@ -1843,6 +1843,11 @@ async function runMailSync(rescan){
       unreadable.slice(0,8).forEach(f => lines.push(
         `  · ${f.app} ${f.month}: sheet has ${Number(f.current).toLocaleString('en-US',{minimumFractionDigits:2})}, invoices that parsed ${Number(f.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})} — fix or re-save the unreadable PDFs listed below, then run this again`));
     }
+    const loose = json.looseIncluded || [];
+    if (loose.length){
+      lines.push(`\nCounted invoices filed loose in the vendor folder, dated by their file name:`);
+      loose.slice(0,8).forEach(l => lines.push(`  · ${l.app} ${l.month}: ${l.files.join(', ')}`));
+    }
     const dupes = json.duplicateInvoices || [];
     if (dupes.length){
       lines.push(`\n${dupes.length} document${dupes.length===1?' was':'s were'} counted once — an invoice and its own payment receipt are one charge:`);

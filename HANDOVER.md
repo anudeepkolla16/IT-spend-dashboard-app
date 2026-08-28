@@ -433,6 +433,17 @@ Written out that is `remainder_after + folderTotal_after`, which is exactly `max
 So the cell never moves until the folder total passes it. That also makes the write **idempotent**,
 which no additive rule could be — the daily cron would grow the figure on every run.
 
+**A month's invoices are not all inside that month's folder.** Vendors get filed both ways: Apollo's
+`Aug-26/` folder holds only the 27 August invoice, while the 4 August one sits loose in the vendor
+folder as `Invoice-A0589F17-0016-Aug 2026.pdf`. Totalling the month folder alone gave `85.00` for a
+month that really cost `138.12` — and being higher than the `53.12` already in the cell, it
+overwrote and **lost the 4 August charge**.
+
+A month's total is now the month folder **plus** any invoice sitting loose in the vendor folder whose
+file name dates it to that month — dated by exactly the rule the checklist uses, so the two always
+agree on which month an invoice belongs to. Loose invoices counted this way are named in the run
+summary.
+
 **An invoice and its own payment receipt are one charge.** Stripe-billed vendors send both, and a
 folder holding both would be totalled twice. Apollo's August folder is exactly that:
 `Invoice-A0589F17-0017.pdf` and `Receipt-2601-5895.pdf`, both `$85.00`, the receipt being the payment
