@@ -583,3 +583,53 @@ test('common invoice-number formats are read', () => {
   assert.strictEqual(extractInvoiceRef('Invoice No: INV-2026-0042  Date: 1 Aug'), 'INV20260042');
   assert.strictEqual(extractInvoiceRef('Invoice Number: 38639008'), '38639008');
 });
+
+/* ---- a month's invoices are not all inside that month's folder ---- */
+
+const { monthFromFileName, detectDayFirst } = require('../lib/invoices/inventory');
+
+// Apollo's real August, from their billing page: two paid invoices,
+// in_0U0dee5… for 53.12 on 4 Aug and in_0U91fV5… for 85.00 on 27 Aug — 138.12.
+// On disk, only the 27th's invoice is in Aug-26/. The 4th's sits loose in the
+// vendor folder as "Invoice-A0589F17-0016-Aug 2026.pdf". Totalling the month
+// folder alone gave 85.00, which looked bigger than the 53.12 in the cell and
+// overwrote it — losing the 4 August charge outright.
+test('a loose invoice is dated to the month its name states', () => {
+  const created = '2026-08-27T10:00:00Z';
+  assert.strictEqual(
+    monthFromFileName('Invoice-A0589F17-0016-Aug 2026.pdf', created, null), '2026-08');
+  // The July one in the same folder must not be pulled into August.
+  assert.strictEqual(
+    monthFromFileName('Invoice-A0589F17-0015-july 2026.pdf', created, null), '2026-07');
+});
+
+test("the vendor folder's own date order settles its loose names", () => {
+  // Apollo's names carry an explicit month word, so no numeric order is needed
+  // and none is inferred — detectDayFirst has nothing unambiguous to go on.
+  const names = ['Invoice-A0589F17-0015-july 2026.pdf', 'Invoice-A0589F17-0016-Aug 2026.pdf'];
+  assert.strictEqual(detectDayFirst(names), null);
+  assert.strictEqual(monthFromFileName(names[1], '2026-08-27T10:00:00Z', null), '2026-08');
+});
+
+test('the two Apollo invoices are distinct charges, not a duplicate pair', () => {
+  // 0016 and 0017 are different invoice numbers, so the receipt-pairing rule
+  // must not collapse them: August really is 53.12 + 85.00.
+  const inv16 = 'Invoice  Invoice number   A0589F17   0016  Date of issue   August 4, 2026  Total   $53.12  Amount due   $53.12 USD';
+  const inv17 = 'Invoice  Invoice number   A0589F17   0017  Date of issue   August 27, 2026  Total   $85.00  Amount due   $85.00 USD';
+  assert.notStrictEqual(extractInvoiceRef(inv16), extractInvoiceRef(inv17));
+  assert.strictEqual(extractInvoiceTotal(inv16).amount, 53.12);
+  assert.strictEqual(extractInvoiceTotal(inv17).amount, 85);
+  assert.strictEqual(
+    Math.round((extractInvoiceTotal(inv16).amount + extractInvoiceTotal(inv17).amount) * 100) / 100,
+    138.12, "Apollo's real August total");
+});
+
+test('the totaller accepts invoices from outside the month folder', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'mail-sync.js'), 'utf8');
+  assert.match(src, /async function looseFilesForMonth\(/,
+    'loose invoices have to be found before they can be totalled');
+  assert.match(src, /sumFolderInvoices\(token, driveId, folder, cache, budget, loose\)/,
+    'and passed to the totaller, or the month is short by whatever sits loose');
+});
