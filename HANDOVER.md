@@ -433,6 +433,21 @@ Written out that is `remainder_after + folderTotal_after`, which is exactly `max
 So the cell never moves until the folder total passes it. That also makes the write **idempotent**,
 which no additive rule could be — the daily cron would grow the figure on every run.
 
+**Several folders can map to one app, and the sync files into only one of them.** `Luzmo` and
+`Cumul(Luzmo)` both mean `Cumul(Luzmo)`; `Bubble` and `Bubble Starter` both mean `Bubble Starter`;
+`Laptop procurment`, `Laptop Repair` and `Laptops sold` all mean `Laptops Procurement`. Whichever
+folder the mapping lists first is where invoices are filed and the only one totalled, so months whose
+invoices live in the other folder are missed entirely.
+
+**A folder that exists now beats one the mapping names but which is gone.** `Bubble` had been renamed
+to `Bubble Starter`, and filing into the stale name would have recreated it and split the vendor in
+two. The sync lists the archive once per run and prefers a mapped folder that is really there; it
+only ever trades up, so a folder still present is never swapped for a later one, and if none of the
+mapped folders exists the first is still used so filing has a home.
+
+> Where one app genuinely has invoices in two folders, nothing merges them — that is a filing
+> decision. Move them together, or drop the extra folder from `_sync-config.json`.
+
 **A month's invoices are not all inside that month's folder.** Vendors get filed both ways: Apollo's
 `Aug-26/` folder holds only the 27 August invoice, while the 4 August one sits loose in the vendor
 folder as `Invoice-A0589F17-0016-Aug 2026.pdf`. Totalling the month folder alone gave `85.00` for a
