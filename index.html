@@ -192,6 +192,7 @@
     <button class="btn ghost" id="amountsBtn">💰 Update Amounts</button>
     <input type="file" id="amountsFile" accept=".xlsx,.xlsm,.xls,.csv" class="hidden" />
     <button class="btn ghost" id="importBtn">📥 Import Invoices</button>
+    <button class="btn ghost" id="tidyBtn">🧹 Tidy Archive</button>
     <button class="btn ghost" id="refreshBtn">↻ Refresh now</button>
   </div>
 </header>
@@ -701,6 +702,75 @@ $('#importModalConfirm').onclick = async () => {
     $('#importModalStatus').textContent = `Copy interrupted: ${err.message}. Auto-sync mapping is already saved${autoSyncNote.includes('ON')?' ✓':''} — you can safely re-run; already-copied files are skipped.`;
   }finally{
     btn.disabled = false; cancelBtn.disabled = false;
+  }
+};
+
+/* ---------------- tidy the archive's shape ---------------- *
+ *
+ * Filing drifts: a whole vendor folder gets dragged inside another and its
+ * month folders end up a level too deep, where the sync — which totals
+ * {vendor}/{month}/ and nothing below it — cannot see them. Luzmo's July
+ * invoices sat at Cumul(Luzmo)/Luzmo/July/ and counted towards no month.
+ *
+ * Nothing moves until the list has been read and confirmed, and the apply sends
+ * back the very moves the plan proposed. It never deletes and never overwrites.
+ * ------------------------------------------------------------------ */
+$('#tidyBtn').onclick = async () => {
+  const btn = $('#tidyBtn'), orig = btn.textContent;
+  btn.textContent = 'Scanning…'; btn.disabled = true;
+  const post = async (body) => {
+    const res = await fetch('/api/invoices/import', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    const raw = await res.text();
+    let json;
+    try { json = JSON.parse(raw); }
+    catch { throw new Error(`HTTP ${res.status}: ${raw.slice(0,300) || 'empty response'}`); }
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    return json;
+  };
+  try{
+    const plan = await post({ mode:'tidy-plan' });
+    if (!plan.root) throw new Error(`Couldn't find the invoice archive. Looked for: ${(plan.triedPaths||[]).join(', ')}`);
+
+    const lines = [`Archive: ${plan.root}`];
+    if (plan.moves.length){
+      lines.push(`\n${plan.moves.length} thing${plan.moves.length===1?'':'s'} to lift into the month folder the sync actually reads:`);
+      plan.moves.slice(0,20).forEach(m => lines.push(
+        `  · ${m.from}  →  ${m.to}${m.kind==='folder' ? `   (${m.files.length} invoice${m.files.length===1?'':'s'})` : ''}`));
+      if (plan.moves.length > 20) lines.push(`  … and ${plan.moves.length-20} more`);
+    }
+    // Two copies of one invoice is a filing decision, not a mechanical one:
+    // lifting the second would put the same charge in a second month.
+    if (plan.duplicates.length){
+      lines.push(`\n${plan.duplicates.length} left alone — the same file name is already filed elsewhere under that vendor, so moving it up would count the charge twice:`);
+      plan.duplicates.slice(0,10).forEach(d => lines.push(
+        `  · ${d.from}: ${d.files.join(', ')} — already at ${[...new Set(d.alreadyAt)].join(', ')}`));
+    }
+    if (plan.empties.length) lines.push(`\n${plan.empties.length} empty folder(s) left in place.`);
+    if (plan.notes.length) lines.push(`\nNotes:\n  ${plan.notes.slice(0,5).join('\n  ')}`);
+
+    if (!plan.moves.length){
+      alert(lines.join('\n') + '\n\nNothing to move — every month folder is where the sync looks for it.');
+      return;
+    }
+    if (!confirm(lines.join('\n') + '\n\nMove them? Nothing is deleted or overwritten.')) return;
+
+    btn.textContent = 'Moving…';
+    const out = await post({ mode:'tidy-apply', moves: plan.moves });
+    const after = [`Moved ${out.moved.length} of ${plan.moves.length}.`];
+    out.moved.slice(0,20).forEach(m => after.push(`  · ${m.from} → ${m.to}`));
+    if (out.failed.length){
+      after.push(`\n${out.failed.length} could not be moved:`);
+      out.failed.slice(0,10).forEach(f => after.push(`  · ${(f.move&&f.move.from)||'?'}: ${f.error}`));
+    }
+    after.push('\nRun 📧 Fetch Invoices to re-total the months that changed.');
+    alert(after.join('\n'));
+    loadInventory(true);
+  }catch(err){
+    alert('Tidy failed: ' + err.message);
+  }finally{
+    btn.textContent = orig; btn.disabled = false;
   }
 };
 

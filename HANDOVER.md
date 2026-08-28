@@ -485,6 +485,40 @@ replace a figure somebody else put in. The run reports those separately from the
 
 ---
 
+## 🧹 Tidy Archive
+
+Filing drifts. A whole vendor folder gets dragged inside another and its month
+folders end up a level too deep — `Luzmo` inside `Cumul(Luzmo)` left three July invoices at
+`Cumul(Luzmo)/Luzmo/July/`. The sync totals `{vendor}/{month}/` and **nothing below it**, so those
+invoices counted towards no month at all.
+
+**Tidy Archive** fixes exactly that one thing: a month folder buried deeper than `{vendor}/{month}`
+is lifted up to where the sync looks. Nothing moves until you have read the list and confirmed, and
+the apply executes only the moves the plan proposed.
+
+It is deliberately narrow:
+
+- **It never deletes.** Empty folders left behind are reported and left in place.
+- **It never overwrites.** A name already at the destination fails that one move and no other.
+- **It never lifts a copy of an invoice already filed under that vendor.** `20260826_20260258.pdf`
+  is in `Cumul(Luzmo)/Aug-26/` *and* in the stranded `Sep-26/`; lifting the second would put the
+  identical charge in two months. Those are reported for a human — which of two copies is the real
+  one is a filing decision, not a mechanical one.
+- **It ignores subfolders that are not months.** `Quotations/` under `Laptop procurment` holds dated
+  folders that are not months, and `Claude Ai/Max accounts/` is a different app's invoices. Neither
+  is this job's business.
+- **Every destination is re-resolved server-side**, and path traversal is rejected on the segments
+  rather than by a prefix test — `…/Invoices/../elsewhere` starts with the archive path and still
+  escapes it, so a prefix check alone would wave it through. The plan is echoed back by the browser,
+  so an edited payload must not be able to move an invoice off somewhere else on the drive.
+
+After tidying, run **📧 Fetch Invoices** so the months that changed are re-totalled.
+
+**Endpoint:** `POST /api/invoices/import` with `mode: 'tidy-plan'` then `mode: 'tidy-apply'` plus the
+plan's `moves`. It shares that route for the same reason everything else does — the function limit.
+
+---
+
 ## Environment variables (set in Vercel → Settings → Environment Variables)
 
 Secrets live only in Vercel, never in the repo. Names and purpose:
