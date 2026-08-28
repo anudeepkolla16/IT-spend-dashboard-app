@@ -433,6 +433,18 @@ Written out that is `remainder_after + folderTotal_after`, which is exactly `max
 So the cell never moves until the folder total passes it. That also makes the write **idempotent**,
 which no additive rule could be — the daily cron would grow the figure on every run.
 
+**A partial folder total never overwrites a filled cell.** When some PDF in an app-month folder
+cannot be read, the figure the sync has is not the folder's total — it is everything that happened to
+parse, and the real one is at least that and probably more. `max(cell, folderTotal)` asks "has the
+folder grown past the sheet?", and a lower bound cannot answer it.
+
+The case it comes from: Apollo's August folder held two invoices and one would not parse. The 85.00
+that did parse looked bigger than the 53.12 already in the cell, so the run raised the cell to 85.00,
+replacing a figure it had never written with one missing an invoice. A partial total may still fill
+an **empty** cell — something beats nothing there, and the write is flagged — but it may never
+replace a figure somebody else put in. The run reports those separately from the ordinary
+"invoices still to come" case, and lists the PDFs to fix.
+
 **Non-USD totals are never written**, whatever the comparison says.
 
 ---

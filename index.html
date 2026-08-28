@@ -1824,13 +1824,24 @@ async function runMailSync(rescan){
         `  · ${u.app} ${u.month}: ${fmt(u.previous)} → ${fmt(u.amount)}${u.wasOurs ? '' : '   (replaced a figure this sync did not write)'}`));
     }
     const filled = json.amountsSkippedFilled || [];
-    if (filled.length){
-      lines.push(`\n${filled.length===1?'1 cell was':filled.length+' cells were'} left alone — the invoice total is lower than the sheet, which usually means invoices are still to come:`);
-      filled.slice(0,8).forEach(f => {
+    // Two different reasons a cell was left alone, and they need different
+    // wording: the folder is behind the sheet (normal, invoices still to come),
+    // or the folder could not be fully read, so its total is not a total at all
+    // and no comparison against it means anything.
+    const behind = filled.filter(f => f.reason !== 'folder-total-incomplete');
+    const unreadable = filled.filter(f => f.reason === 'folder-total-incomplete');
+    if (behind.length){
+      lines.push(`\n${behind.length===1?'1 cell was':behind.length+' cells were'} left alone — the invoice total is lower than the sheet, which usually means invoices are still to come:`);
+      behind.slice(0,8).forEach(f => {
         const sheet = Number(f.current), inv = Number(f.invoiceTotal);
         const gap = (sheet - inv).toLocaleString('en-US',{minimumFractionDigits:2});
         lines.push(`  · ${f.app} ${f.month}: sheet has ${sheet.toLocaleString('en-US',{minimumFractionDigits:2})}, invoices so far ${inv.toLocaleString('en-US',{minimumFractionDigits:2})} — ${gap} not yet invoiced`);
       });
+    }
+    if (unreadable.length){
+      lines.push(`\n${unreadable.length===1?'1 cell was':unreadable.length+' cells were'} left alone — some invoices in the folder could not be read, so the total below is only what parsed, not the folder's real total:`);
+      unreadable.slice(0,8).forEach(f => lines.push(
+        `  · ${f.app} ${f.month}: sheet has ${Number(f.current).toLocaleString('en-US',{minimumFractionDigits:2})}, invoices that parsed ${Number(f.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})} — fix or re-save the unreadable PDFs listed below, then run this again`));
     }
     const review = json.amountsNeedingReview || [];
     if (review.length){
