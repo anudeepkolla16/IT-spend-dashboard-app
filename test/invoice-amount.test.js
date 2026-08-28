@@ -487,3 +487,57 @@ test('top-up: re-running changes nothing, so the daily cron cannot inflate a cel
   assert.strictEqual(second.updated.length, 0);
   assert.strictEqual(second.skippedFilled.length, 0);
 });
+
+/* ---------------- a partial folder total is not a total ---------------- *
+ *
+ * Apollo's August folder held two invoices and one of them would not parse.
+ * The 85.00 that did parse looked bigger than the 53.12 already in the cell, so
+ * the sync raised the cell to 85.00 — replacing a figure it had never written
+ * with one that is missing an invoice. "Has the folder grown past the sheet?"
+ * is not a question a lower bound can answer.
+ */
+
+const apolloGrid = () => grid();
+const PARTIAL = { 'Adobe||2026-06': true };
+
+test('a partial folder total never overwrites a figure already in the cell', () => {
+  // Adobe's Jun-26 cell holds 37.16. A half-read folder totalling 85.00 is
+  // higher, but that proves nothing.
+  const { write, updated, skippedFilled } = planAmountCells(
+    { 'Adobe': { '2026-06': 85 } }, apolloGrid(), USED, cellValue, {}, PARTIAL
+  );
+  assert.strictEqual(write.length, 0);
+  assert.strictEqual(updated.length, 0, 'the cell must not be raised from a lower bound');
+  assert.strictEqual(skippedFilled.length, 1);
+  assert.strictEqual(skippedFilled[0].reason, 'folder-total-incomplete');
+  assert.strictEqual(skippedFilled[0].current, 37.16);
+  assert.strictEqual(skippedFilled[0].invoiceTotal, 85);
+});
+
+test('the same total DOES apply once every invoice in the folder has been read', () => {
+  // Nothing about the number changed — only whether it is the whole folder.
+  const { updated } = planAmountCells(
+    { 'Adobe': { '2026-06': 85 } }, apolloGrid(), USED, cellValue, {}, {}
+  );
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].previous, 37.16);
+  assert.strictEqual(updated[0].value, 85);
+});
+
+test('a partial total may still fill an empty cell, and says that it is partial', () => {
+  // Something beats nothing when the cell is blank, and the run reports it.
+  const { write, skippedFilled } = planAmountCells(
+    { 'Adobe': { '2026-08': 85 } }, apolloGrid(), USED, cellValue, {}, { 'Adobe||2026-08': true }
+  );
+  assert.strictEqual(skippedFilled.length, 0);
+  assert.strictEqual(write.length, 1);
+  assert.strictEqual(write[0].value, 85);
+  assert.strictEqual(write[0].partial, true, 'the write has to carry that it is a lower bound');
+});
+
+test('a complete total is not flagged as partial', () => {
+  const { write } = planAmountCells(
+    { 'Adobe': { '2026-08': 85 } }, apolloGrid(), USED, cellValue, {}, {}
+  );
+  assert.strictEqual(write[0].partial, false);
+});
