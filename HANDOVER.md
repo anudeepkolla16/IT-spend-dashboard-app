@@ -433,6 +433,16 @@ Written out that is `remainder_after + folderTotal_after`, which is exactly `max
 So the cell never moves until the folder total passes it. That also makes the write **idempotent**,
 which no additive rule could be — the daily cron would grow the figure on every run.
 
+**An invoice and its own payment receipt are one charge.** Stripe-billed vendors send both, and a
+folder holding both would be totalled twice. Apollo's August folder is exactly that:
+`Invoice-A0589F17-0017.pdf` and `Receipt-2601-5895.pdf`, both `$85.00`, the receipt being the payment
+for that invoice — summing every PDF gives `170.00`. They are paired by the **invoice** number, which
+the receipt carries too; the receipt's own *receipt* number is deliberately not matched, since that
+would give the two documents different keys. Only a reference actually read out of the PDF counts:
+without one, two files that merely share an amount are two charges, because a vendor billing the same
+figure twice in a month is ordinary. A duplicate is reported and does **not** count as an unread PDF
+— it is accounted for, not missing, so it must not make the folder look partially read.
+
 **A partial folder total never overwrites a filled cell.** When some PDF in an app-month folder
 cannot be read, the figure the sync has is not the folder's total — it is everything that happened to
 parse, and the real one is at least that and probably more. `max(cell, folderTotal)` asks "has the
