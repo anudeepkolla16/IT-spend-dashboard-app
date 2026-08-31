@@ -163,6 +163,46 @@ test('folder matching ignores case, as SharePoint does', () => {
   assert.strictEqual(appToSourceFolder(mapping, ['apollo'])['Apollo'], 'Apollo');
 });
 
+test('a folder renamed to match the sheet beats the stale mapping entry', () => {
+  // The archive was renamed folder-by-folder to match the sheet. The saved
+  // mapping is a snapshot from before that, so it still points at names that no
+  // longer exist: filing by "click up invoices" would recreate that folder
+  // beside the real "Mango technology(Clickup)" and total only one of them.
+  const folders = ['Anthropic(Api Console)', 'Mango technology(Clickup)', 'Cursor pro', 'Adobe'];
+  const appNames = ['Anthropic(Api Console)', 'Mango technology(Clickup)', 'Cursor pro', 'Adobe'];
+  const byApp = appToSourceFolder(SAVED_MAPPING, folders, appNames);
+  assert.strictEqual(byApp['Anthropic(Api Console)'], 'Anthropic(Api Console)');
+  assert.strictEqual(byApp['Mango technology(Clickup)'], 'Mango technology(Clickup)');
+  assert.strictEqual(byApp['Cursor pro'], 'Cursor pro');
+});
+
+test('the app-named folder is used with the spelling the archive gives it', () => {
+  // The sheet says "Apollo" and "Google cloud"; the archive says "apollo" and
+  // "Google Cloud". Same folder either way, so match on the normalized form and
+  // file under the name that is actually there.
+  const byApp = appToSourceFolder({}, ['apollo', 'Google Cloud'], ['Apollo', 'Google cloud']);
+  assert.strictEqual(byApp['Apollo'], 'apollo');
+  assert.strictEqual(byApp['Google cloud'], 'Google Cloud');
+});
+
+test('an app with no folder of its own keeps its mapped folder', () => {
+  // "Laptops Procurement" is spelled "Laptop procurment" in the archive and
+  // always has been. Nothing carries the sheet's spelling, so the mapping — the
+  // only thing that knows the two are the same vendor — has to stand.
+  const byApp = appToSourceFolder(SAVED_MAPPING, ['Laptop procurment', 'Adobe'],
+    ['Laptops Procurement', 'Adobe']);
+  assert.strictEqual(byApp['Laptops Procurement'], 'Laptop procurment');
+});
+
+test('an app name matching no folder adds no entry', () => {
+  // Every app in the sheet is offered, most of which have no folder. None of
+  // them may invent one, or filing would stop reporting a new folder at all.
+  const byApp = appToSourceFolder({}, ['Adobe'], ['Adobe', 'Sentry.io', 'Keepa']);
+  assert.strictEqual(byApp['Adobe'], 'Adobe');
+  assert.strictEqual(byApp['Sentry.io'], undefined);
+  assert.strictEqual(byApp['Keepa'], undefined);
+});
+
 test('reuses an existing month subfolder rather than adding one beside it', () => {
   // Bubble already has "Aug"; Cursor already has "July". Neither should gain a
   // second folder for the same month.
