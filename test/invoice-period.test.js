@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { extractBillingPeriod, monthOfPeriod, invoiceMonth } = require('../lib/invoice-period');
+const { extractBillingPeriod, extractInvoiceDate, monthOfPeriod, invoiceMonth } = require('../lib/invoice-period');
 
 // Invoices/Cumul(Luzmo)/20260826_20260258.pdf. Dated Aug 26, due Sep 09, and the
 // line item states the cycle it pays for: six days of it fall in August and
@@ -181,4 +181,53 @@ test('a copy left in the old month folder is reported, not silently doubled', ()
   const ui = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   assert.match(ui, /reroutedByPeriod/, 'the run summary must show what moved month');
   assert.match(ui, /alsoStillAt/, 'and must name the leftover copy to delete');
+});
+
+
+/* ---------------- the date an invoice was issued ---------------- */
+//
+// For an invoice with no month in its name and no month folder, and which
+// states no billing period, the issue date is the only thing that says which
+// month it belongs to. It is read narrowly on purpose: the neighbouring due
+// date is a different month on Net 30 terms, and a line item's term can span a
+// year. A wrong month is worse than no month, so an unrecognised shape yields
+// null and the file is left where it is.
+
+test('the invoice date is read, and the due date beside it is not', () => {
+  assert.strictEqual(extractInvoiceDate('Invoice date: August 26, 2026  Due date: September 9, 2026').month, '2026-08');
+  assert.strictEqual(extractInvoiceDate('Invoice date: 5/31/2025 Due date: 6/30/2025').month, '2025-05');
+  assert.strictEqual(extractInvoiceDate('Date paid September 2, 2025').month, '2025-09');
+});
+
+test('a due date on its own is never taken as the invoice date', () => {
+  assert.strictEqual(extractInvoiceDate('Due date: 6/30/2025'), null);
+  assert.strictEqual(extractInvoiceDate('Payment due 6/30/2025 Net 30'), null);
+});
+
+test("a line item's own term is not the invoice's date", () => {
+  // ClickUp's annual plan runs 5/26/2025 to 5/17/2026. Reading either end as
+  // the invoice date would file a May bill under the wrong year.
+  assert.strictEqual(extractInvoiceDate('Product name Term start Term end 5/26/2025 5/17/2026'), null);
+});
+
+test('a date with no year cannot be placed and is refused', () => {
+  // A period borrows the missing year from the other end of its range; a single
+  // date has no other end.
+  assert.strictEqual(extractInvoiceDate('Invoice date: Aug 26'), null);
+});
+
+test('a flattened invoice table is refused rather than guessed at', () => {
+  // Real text from the archive's ClickUp invoices: the PDF's table collapses to
+  // a run of labels followed by a run of values, so the date next to "Invoice
+  // date" belongs to a different column. Nothing here says which value is
+  // which, so it stays undated and gets reported for filing by hand.
+  const flattened = 'Invoice number:   Purchase order:   Invoice date:   Due date:   Terms:   Amount due:  '
+    + 'INV50264   5/31/2025   6/30/2025   Net 30   USD $0.00';
+  assert.strictEqual(extractInvoiceDate(flattened), null);
+});
+
+test('an invoice with no date at all yields nothing', () => {
+  assert.strictEqual(extractInvoiceDate('Thanks for your business. Total 42.00'), null);
+  assert.strictEqual(extractInvoiceDate(''), null);
+  assert.strictEqual(extractInvoiceDate(null), null);
 });

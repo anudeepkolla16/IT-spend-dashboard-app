@@ -96,9 +96,65 @@ test('a PDF nobody could read is reported, never moved', () => {
   assert.ok(!v.move);
 });
 
-test('a file not in a month folder, with nothing in its name, is left alone', () => {
-  const file = luzmoFile({ relPath: '', currentMonth: null, folderMonth: null, nameMonth: null });
-  assert.strictEqual(planMove(file, luzmoFolder(), BASE), null);
+// An invoice with no month anywhere — not in a folder, not in its name — counts
+// towards no month at all, so the app reads as a gap for a month whose invoice
+// is sitting right there. Nothing contradicts a move, so the PDF decides.
+
+const undated = (extra) => luzmoFile({
+  name: 'INV50264.pdf', path: `${BASE}/Cumul/INV50264.pdf`,
+  relPath: '', currentMonth: null, folderMonth: null, nameMonth: null,
+  periodStart: null, periodEnd: null, invoiceDate: null, invoiceMonth: null,
+  ...(extra || {}),
+});
+
+test('an invoice with no month anywhere is filed by the period it states', () => {
+  const v = planMove(undated({ periodStart: '2026-08-26', periodEnd: '2026-09-26' }), luzmoFolder(), BASE);
+  assert.ok(v && v.move, 'expected a move');
+  assert.strictEqual(v.move.fromMonth, null, 'it belonged to no month, which is the point');
+  assert.strictEqual(v.move.toMonth, '2026-09');
+  assert.strictEqual(v.move.via, 'period');
+  assert.strictEqual(v.move.undated, true);
+});
+
+test('with no period stated, the date the invoice was issued decides', () => {
+  // ClickUp's are the case in hand: a bare invoice number for a name, no month
+  // folder, no period — only "Invoice date: 5/31/2025".
+  const v = planMove(undated({ invoiceDate: '2025-05-31', invoiceMonth: '2025-05' }), luzmoFolder(), BASE);
+  assert.ok(v && v.move);
+  assert.strictEqual(v.move.toMonth, '2025-05');
+  assert.strictEqual(v.move.via, 'invoice-date');
+  assert.strictEqual(v.move.toFolderPath, `${BASE}/Cumul/May-25`,
+    'no folder for that month yet, so one in the style the archive already uses');
+});
+
+test('a stated period beats the issue date, which is only the fallback', () => {
+  const v = planMove(
+    undated({ periodStart: '2026-08-01', periodEnd: '2026-08-31', invoiceDate: '2026-09-04', invoiceMonth: '2026-09' }),
+    luzmoFolder(), BASE);
+  assert.strictEqual(v.move.toMonth, '2026-08');
+  assert.strictEqual(v.move.via, 'period');
+});
+
+test('an undated invoice moves into the folder name the vendor already uses', () => {
+  const v = planMove(undated({ invoiceDate: '2026-08-04', invoiceMonth: '2026-08' }), luzmoFolder(), BASE);
+  assert.strictEqual(v.move.toFolderPath, `${BASE}/Cumul/Aug-26`, 'never a second folder beside Aug-26');
+});
+
+test('an undated invoice the PDF cannot date is reported, not moved and not dropped', () => {
+  // Silently returning null is how these went unnoticed in the first place.
+  const v = planMove(undated(), luzmoFolder(), BASE);
+  assert.ok(v && v.skip, 'expected a skip note');
+  assert.match(v.skip, /no month in its name and none stated inside/);
+  assert.ok(!v.move);
+});
+
+test('a month in the file name still stops a move, however the PDF reads', () => {
+  // The name is a deliberate signal and the checklist dates by it. Contradicting
+  // it is reported, never acted on.
+  const v = planMove(
+    undated({ name: 'Aug 2026.pdf', nameMonth: '2026-08', currentMonth: '2026-08', invoiceMonth: '2025-05', invoiceDate: '2025-05-31' }),
+    luzmoFolder(), BASE);
+  assert.strictEqual(v, null, 'no period stated, so nothing to report and nothing to do');
 });
 
 // Much of the archive keeps invoices flat in the app folder with the month in
