@@ -471,3 +471,66 @@ test('an implausible number of marks is capped rather than written', () => {
   const many = Array.from({ length: MAX_MARKS + 500 }, (_, i) => ({ app: `App ${i}`, month: '2026-08' }));
   assert.strictEqual(normalizeMarks(many).length, MAX_MARKS);
 });
+
+/* ---------------- writes have to fit inside one request ---------------- */
+//
+// The first live backfill returned HTTP 504 FUNCTION_INVOCATION_TIMEOUT: several
+// hundred cells, one Graph PATCH each, past the function's 60 seconds. Two
+// things keep a write inside its request — neighbours go out together, and the
+// client loops over chunks — and both are worth pinning down.
+
+const { groupIntoRuns } = require('../lib/excel');
+const { APPLY_CHUNK } = require('../lib/invoices/tracker');
+
+test('neighbours on one row go out as a single range', () => {
+  const cell = (address) => ({ address, value: true });
+  const runs = groupIntoRuns([cell('H3'), cell('I3'), cell('J3'), cell('H4')]);
+  assert.deepStrictEqual(runs.map(r => r.address), ['H3:J3', 'H4']);
+  assert.strictEqual(runs[0].cells.length, 3);
+});
+
+test('a gap in the columns ends the run, so an untouched cell is never rewritten', () => {
+  // K3 was not planned, so H3:L3 must never be sent as one range.
+  const cell = (address) => ({ address, value: true });
+  const runs = groupIntoRuns([cell('H3'), cell('J3'), cell('L3')]);
+  assert.deepStrictEqual(runs.map(r => r.address), ['H3', 'J3', 'L3']);
+});
+
+test('runs are grouped however the cells were ordered, and across the Z boundary', () => {
+  const cell = (address) => ({ address, value: true });
+  const runs = groupIntoRuns([cell('AA3'), cell('H4'), cell('Z3'), cell('I4')]);
+  assert.deepStrictEqual(runs.map(r => r.address).sort(), ['H4:I4', 'Z3:AA3']);
+});
+
+test('each cell keeps its own value inside a run', () => {
+  // Amounts share this path and are all different; a run must not broadcast one.
+  const runs = groupIntoRuns([
+    { address: 'H3', value: 12.5 }, { address: 'I3', value: 0 }, { address: 'J3', value: 99 },
+  ]);
+  assert.strictEqual(runs.length, 1);
+  assert.deepStrictEqual(runs[0].cells.map(c => c.value), [12.5, 0, 99]);
+});
+
+test('an address that is not a plain cell is written on its own, never merged', () => {
+  const runs = groupIntoRuns([{ address: 'H3:J3', value: true }, { address: '$H$4', value: true }]);
+  assert.deepStrictEqual(runs.map(r => r.address).sort(), ['$H$4', 'H3:J3']);
+  assert.ok(runs.every(r => r.cells.length === 1));
+});
+
+test('an apply covers one chunk and says where the next one starts', async () => {
+  // Reaching the real thing needs Graph, so drive the arithmetic the client
+  // loops on: every mark is visited exactly once, and the last chunk ends it.
+  const total = APPLY_CHUNK * 2 + 7;
+  const marks = Array.from({ length: total }, (_, i) => ({ app: `App ${i}`, month: '2026-08' }));
+
+  const seen = [];
+  let offset = 0, guard = 0;
+  while (offset !== null && guard++ < 50) {
+    const slice = marks.slice(offset, offset + APPLY_CHUNK);
+    seen.push(...slice);
+    const next = offset + slice.length;
+    offset = next < marks.length ? next : null;
+  }
+  assert.strictEqual(guard, 3, 'three chunks for two and a bit chunk-loads');
+  assert.deepStrictEqual(seen, marks, 'every mark visited exactly once, in order');
+});

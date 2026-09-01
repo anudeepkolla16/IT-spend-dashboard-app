@@ -839,9 +839,19 @@ $('#invTrackBtn').onclick = async () => {
     if (plan.cells.length > 25) lines.push(`  … and ${plan.cells.length-25} more`);
     if (!confirm(lines.join('\n') + '\n\nTick them? Nothing is ever unticked.')) return;
 
-    btn.textContent = 'Writing…';
-    const out = await post({ mode:'tracker-apply', marks });
-    alert(`Ticked ${out.marked} cell${out.marked===1?'':'s'} on "${out.sheet}".`);
+    // One request per chunk. A backfill of a year's archive is several hundred
+    // cells, and writing them all in one call outran the function's timeout.
+    // Marks are re-sent whole each time and sliced server-side, so the offsets
+    // stay put; re-ticking a cell is a no-op, so a retry costs nothing.
+    let offset = 0, marked = 0, sheet = '', guard = 0;
+    while (offset !== null && guard++ < 200){
+      btn.textContent = `Writing… ${Math.min(offset + 1, marks.length)}/${marks.length}`;
+      const out = await post({ mode:'tracker-apply', marks, offset });
+      marked += out.marked || 0;
+      sheet = out.sheet || sheet;
+      offset = out.nextOffset;
+    }
+    alert(`Ticked ${marked} cell${marked===1?'':'s'} on "${sheet}".`);
   }catch(err){
     alert('Tracker update failed: ' + err.message);
   }finally{
