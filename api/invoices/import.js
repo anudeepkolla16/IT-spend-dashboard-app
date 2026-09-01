@@ -85,7 +85,7 @@ module.exports = async (req, res) => {
     if (mode === 'tracker-plan' || mode === 'tracker-apply') {
       res.status(200).json(mode === 'tracker-plan'
         ? await planBackfill(token, marks)
-        : await applyBackfill(token, marks));
+        : await applyBackfill(token, marks, { offset }));
       return;
     }
 
