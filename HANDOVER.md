@@ -307,6 +307,13 @@ we were charged, do we actually have the invoice? It has two views, switched by 
 
   Clicking a row opens that app's drill-down, which lists the invoice files themselves.
 
+**"not in sheet" and "no spend recorded" are different things.** A folder whose name no row matched is
+the first; a folder that resolved to a real row which simply has no amounts entered yet is the
+second. Posthog was in the sheet with four invoices on file and nothing charged, and the checklist
+called it "not in sheet" because it joined against the pivot — which only carries rows with money in
+them. `/api/spend-data` returns every app row it reads (`apps`) alongside the records, and the join
+uses both.
+
 - **All invoices** — every PDF in the archive, flat, with the app, the month, a link to the file, and
   the total that was read out of it. A non-USD total is shown greyed with its currency (e.g.
   `INR 150,591.60`) because it is not comparable to the sheet, which is USD throughout.

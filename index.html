@@ -553,6 +553,10 @@ async function syncFromApi(manual){
       cat:r.cycle||'Monthly', cycle:r.cycle||'Monthly', cur:r.cur||'USD', amt:Number(r.amt)||0,
       status:'Active', poc:r.poc||'', renewalDate:r.renewalDate||''
     }));
+    // Every app row the sheet carries, including ones with no amounts yet. The
+    // pivot only ever sees rows with money in them, so without this a row that
+    // exists but has not been charged is indistinguishable from no row at all.
+    window.SHEET_APPS = json.apps || [];
     lastSyncedAt = json.syncedAt ? new Date(json.syncedAt) : new Date();
     $('#syncDot').classList.remove('err');
     $('#syncLabel').textContent = `Synced from SharePoint · ${lastSyncedAt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})} (${appRows.length} records)`;
@@ -1357,7 +1361,13 @@ function invBuildRows(){
   const pivoted = window.PIVOTED || [];
   const mapping = (invData && invData.mapping) || {};
   const aliases = (invData && invData.aliases) || {};
+  // Resolve against every row the sheet holds, not only the ones with spend in
+  // them: "Posthog" is in the sheet with four invoices on file and nothing
+  // charged yet, and joining on the pivot alone reported it as not in the sheet.
   const sheetIndex = new Map(pivoted.map(g => [invNorm(g.name), g.name]));
+  for (const name of (window.SHEET_APPS || [])) {
+    if (!sheetIndex.has(invNorm(name))) sheetIndex.set(invNorm(name), name);
+  }
 
   // Rows and folders deliberately left out of the checklist. The crawl already
   // skips the folders; the sheet's own rows have to be dropped here, or a row
@@ -1380,7 +1390,13 @@ function invBuildRows(){
       // Invoices with no row in the sheet still belong on the list — that is
       // either spend the sheet doesn't know about, or a folder whose name the
       // join couldn't place. Both are worth seeing; neither is a silent drop.
-      rows.set(key, row = { name: appName || f.app, dept:'—', sheet:null, folders:[], files:new Map(), undated:[], fileCount:0 });
+      rows.set(key, row = {
+        name: appName || f.app, dept:'—', sheet:null, folders:[], files:new Map(), undated:[], fileCount:0,
+        // Resolved to a row the sheet holds, it just has no amounts in it yet —
+        // a different thing from a folder no row matched, and it should not be
+        // labelled as one.
+        inSheetUncharged: !!appName,
+      });
       if (!appName && !window.INV_UNRESOLVED.includes(f.app)) window.INV_UNRESOLVED.push(f.app);
     }
     if (!row.folders.includes(f.app)) row.folders.push(f.app);
@@ -1585,13 +1601,20 @@ function drawInvoiceGrid(rows, months, todayKey){
     // exists in the archive has nothing to open. Leave it unclickable rather
     // than offering a click that silently does nothing.
     const openable = !!row.sheet;
+    // "not in sheet" means the join found no row. A row that IS in the sheet
+    // and simply has no amounts yet gets its own label — saying it is not there
+    // when the sheet is plainly holding it is how this tab loses trust.
+    const badge = row.sheet ? ''
+      : row.inSheetUncharged
+        ? ' <span class="chip" title="this app has a row in the spend sheet, but no amounts have been entered for it yet">no spend recorded</span>'
+        : ' <span class="chip" title="invoices on file, but no row in the spend sheet matched this folder">not in sheet</span>';
     // The folder an app's invoices actually live under, when it is not just the
     // app's own name — otherwise the join looks like magic and a wrong one is
     // impossible to spot.
     const via = (row.folders||[]).filter(f => invNorm(f) !== invNorm(row.name));
     const viaChip = via.length ? ` <span class="chip" title="filed under ${via.join(', ').replace(/"/g,'&quot;')}">${via.join(', ')}</span>` : '';
     return `<tr${openable?` data-name="${encodeURIComponent(row.name)}"`:' style="cursor:default"'}>
-      <td class="stickycol">${row.name}${openable?'':' <span class="chip" title="invoices on file, but no row in the spend sheet matched this folder">not in sheet</span>'}${viaChip}${undated}</td>
+      <td class="stickycol">${row.name}${badge}${viaChip}${undated}</td>
       ${cells}
       <td class="num total">${row.fileCount||''}</td>
       <td class="fill"></td>

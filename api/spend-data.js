@@ -81,6 +81,7 @@ function parseWorkbook(buffer) {
   const monthCols = headers.map((h, idx) => ({ idx, month: normMonthHeader(h) })).filter(x => x.month);
 
   const records = [];
+  const apps = [];
   for (let i = headerRowIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     const name = String(row[nameCol] || '').trim();
@@ -98,6 +99,13 @@ function parseWorkbook(buffer) {
     // (e.g. row ~41, "Laptops Procurement") rather than in a separate source.
     const kind = /laptop/i.test(name) ? 'Laptops' : 'Apps';
 
+    // Every app row the sheet carries, whether or not it has any amounts in it.
+    // A record is only produced for a month with money in it, so a row that has
+    // been added but not yet charged produces none at all — and the invoice
+    // checklist, which joins on the rows it can see, reported such a row as "not
+    // in sheet" while the sheet was plainly holding it.
+    if (!apps.includes(name)) apps.push(name);
+
     for (const { idx, month } of monthCols) {
       const raw = row[idx];
       const amt = typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/[^0-9.\-]/g, ''));
@@ -105,7 +113,7 @@ function parseWorkbook(buffer) {
       records.push({ name, dept, poc, renewalDate, cycle, cur, month, amt, paymentMethod, kind });
     }
   }
-  return records;
+  return { records, apps };
 }
 
 // Best-effort in-memory cache. Serverless instances are ephemeral (cold starts
@@ -126,8 +134,8 @@ module.exports = async (req, res) => {
     }
     const token = await getGraphToken();
     const buffer = await downloadWorkbook(token);
-    const rows = parseWorkbook(buffer);
-    const payload = { syncedAt: new Date().toISOString(), source: 'sharepoint', rowCount: rows.length, rows };
+    const { records: rows, apps } = parseWorkbook(buffer);
+    const payload = { syncedAt: new Date().toISOString(), source: 'sharepoint', rowCount: rows.length, rows, apps };
     cache = { data: payload, expiresAt: now + CACHE_TTL_MS };
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Cache', 'MISS');
