@@ -1274,13 +1274,20 @@ function invBuildRows(){
   const aliases = (invData && invData.aliases) || {};
   const sheetIndex = new Map(pivoted.map(g => [invNorm(g.name), g.name]));
 
+  // Rows and folders deliberately left out of the checklist. The crawl already
+  // skips the folders; the sheet's own rows have to be dropped here, or a row
+  // nobody files invoices for reports a gap every month it was charged.
+  const ignored = new Set(((invData && invData.ignored) || []).map(invNorm));
+
   const rows = new Map();
   for (const g of pivoted){
+    if (ignored.has(invNorm(g.name))) continue;
     rows.set(invNorm(g.name), { name:g.name, dept:g.dept, sheet:g, folders:[], files:new Map(), undated:[], fileCount:0 });
   }
 
   window.INV_UNRESOLVED = [];
   for (const f of (invData && invData.files) || []){
+    if (ignored.has(invNorm(f.app))) continue;
     const appName = invResolveFolder(f.app, sheetIndex, mapping, aliases);
     const key = appName ? invNorm(appName) : invNorm(f.app);
     let row = rows.get(key);
