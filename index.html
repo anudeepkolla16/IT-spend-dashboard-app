@@ -270,6 +270,7 @@
         <div class="grow"></div>
         <span class="chip" id="invCount" style="align-self:center"></span>
         <button class="btn ghost" id="invRefresh">↻ Rescan archive</button>
+        <button class="btn ghost" id="invTrackBtn" title="Tick the workbook's Invoices tracker sheet for every month this list shows an invoice for">✓ Update Excel tracker</button>
       </div>
       <div class="inv-summary" id="invSummary"></div>
       <div class="inv-focusnote hidden" id="invFocusNote"></div>
@@ -769,6 +770,80 @@ $('#tidyBtn').onclick = async () => {
     loadInventory(true);
   }catch(err){
     alert('Tidy failed: ' + err.message);
+  }finally{
+    btn.textContent = orig; btn.disabled = false;
+  }
+};
+
+/* ------------------------------------------------------------------
+ * Update Excel tracker — carry this list into the workbook.
+ *
+ * The "Invoices tracker" sheet is a TRUE/FALSE grid of the same apps and
+ * months. It only ever knew about invoices this app filed itself, so the
+ * hundreds archived by hand before any of that read FALSE while sitting in the
+ * archive all along.
+ *
+ * The join from an archive folder to a sheet row is worked out here and nowhere
+ * else, so the pairs are sent from here rather than recomputed server-side
+ * where the two would drift. Every pair is re-checked against the live sheet
+ * before anything is written; nothing is ever unticked.
+ * ------------------------------------------------------------------ */
+function invTrackerMarks(){
+  const marks = [];
+  for (const row of invBuildRows()){
+    // A row the sheet does not carry has no tracker row either. It is reported
+    // by the plan rather than dropped here, so a folder nobody has mapped shows
+    // up instead of vanishing.
+    for (const [month, files] of row.files){
+      if (files && files.length) marks.push({ app: row.name, month });
+    }
+  }
+  return marks;
+}
+
+$('#invTrackBtn').onclick = async () => {
+  const btn = $('#invTrackBtn'), orig = btn.textContent;
+  const post = async (body) => {
+    const res = await fetch('/api/invoices/import', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    const raw = await res.text();
+    let json;
+    try { json = JSON.parse(raw); }
+    catch { throw new Error(`HTTP ${res.status}: ${raw.slice(0,300) || 'empty response'}`); }
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    return json;
+  };
+  try{
+    if (!invData || !invData.files){ alert('Scan the archive first — press ↻ Rescan archive.'); return; }
+    const marks = invTrackerMarks();
+    if (!marks.length){ alert('No invoices on file, so there is nothing to tick.'); return; }
+
+    btn.textContent = 'Checking…'; btn.disabled = true;
+    const plan = await post({ mode:'tracker-plan', marks });
+    if (!plan.sheet) throw new Error('The workbook has no "Invoices tracker" sheet to tick.');
+
+    const lines = [`Sheet: ${plan.sheet}`, `${marks.length} app-month${marks.length===1?'':'s'} with an invoice on file.`];
+    if (plan.alreadyTicked.length) lines.push(`${plan.alreadyTicked.length} already ticked — left alone.`);
+    if (plan.offGrid.length){
+      lines.push(`\n${plan.offGrid.length} have no cell in the tracker (no such row, or a month it does not cover):`);
+      plan.offGrid.slice(0,10).forEach(m => lines.push(`  · ${m.app} — ${m.month}`));
+      if (plan.offGrid.length > 10) lines.push(`  … and ${plan.offGrid.length-10} more`);
+    }
+    if (!plan.cells.length){
+      alert(lines.join('\n') + '\n\nNothing to tick — the tracker already matches the archive.');
+      return;
+    }
+    lines.push(`\n${plan.cells.length} cell${plan.cells.length===1?'':'s'} to tick TRUE:`);
+    plan.cells.slice(0,25).forEach(c => lines.push(`  · ${c.app} — ${c.month}  (${c.address})`));
+    if (plan.cells.length > 25) lines.push(`  … and ${plan.cells.length-25} more`);
+    if (!confirm(lines.join('\n') + '\n\nTick them? Nothing is ever unticked.')) return;
+
+    btn.textContent = 'Writing…';
+    const out = await post({ mode:'tracker-apply', marks });
+    alert(`Ticked ${out.marked} cell${out.marked===1?'':'s'} on "${out.sheet}".`);
+  }catch(err){
+    alert('Tracker update failed: ' + err.message);
   }finally{
     btn.textContent = orig; btn.disabled = false;
   }

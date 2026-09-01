@@ -404,3 +404,70 @@ test('the source really does branch on rescan, not just the helper above', () =>
   assert.match(src, /const since = opts\.rescan \?/,
     'runMailSync must pick the window based on opts.rescan');
 });
+
+/* ---------------- backfilling the tracker from the archive ---------------- */
+//
+// The tracker only ever knew about invoices this app filed itself, so the
+// hundreds archived by hand read FALSE while sitting in the archive all along.
+// The backfill carries the checklist into the sheet: same write, same rules,
+// driven by what the archive holds rather than by what one run just filed.
+
+const { normalizeMarks, trackerRowIndex, MAX_MARKS } = require('../lib/invoices/tracker');
+
+test('the tracker row is found even when it is spelled differently from the spend sheet', () => {
+  // The two sheets are maintained by hand and disagree: "Tmobile" against
+  // "TMobile", "Render " against "Render". Matching exactly leaves those rows
+  // FALSE forever while the run reports success.
+  const values = [
+    ['APPLICATION / SW / LICENSE', 'Department', 'POC', 'Renewal data', 'Recurring/Onetime', 'FREQUENCY', 46023],
+    ['TMobile', '', '', '', 'Recurring', 'Monthly', false],
+    ['Render', 'Product', 'Venky', '', 'Recurring', 'Monthly', false],
+  ];
+  const text = values.map((row, i) => row.map((c, j) =>
+    (i === 0 && j >= 6) ? 'Jan-26' : (typeof c === 'boolean' ? (c ? 'TRUE' : 'FALSE') : String(c == null ? '' : c))));
+  const rowFor = trackerRowIndex(locateGrid(values, text));
+
+  assert.strictEqual(rowFor('TMobile'), 1, 'the exact name still wins');
+  assert.strictEqual(rowFor('Tmobile'), 1, "the spend sheet's casing reaches the tracker's row");
+  assert.strictEqual(rowFor('Render '), 2, 'a trailing space in the spend sheet is not a different app');
+  assert.strictEqual(rowFor('Nothing At All'), undefined);
+});
+
+test('a name two tracker rows share resolves to neither', () => {
+  // Ticking the wrong row is worse than reporting the pair as having no cell.
+  const values = [
+    ['APPLICATION / SW / LICENSE', 'Department', 'POC', 'Renewal data', 'Recurring/Onetime', 'FREQUENCY', 46023],
+    ['Linkedin', '', '', '', 'Recurring', 'Monthly', false],
+    ['LinkedIn', '', '', '', 'Recurring', 'Monthly', false],
+    ['Adobe', '', '', '', 'Recurring', 'Monthly', false],
+  ];
+  const text = values.map((row, i) => row.map((c, j) =>
+    (i === 0 && j >= 6) ? 'Jan-26' : (typeof c === 'boolean' ? (c ? 'TRUE' : 'FALSE') : String(c == null ? '' : c))));
+  const rowFor = trackerRowIndex(locateGrid(values, text));
+
+  assert.strictEqual(rowFor('Linkedin'), 1, 'an exact hit is still unambiguous');
+  assert.strictEqual(rowFor('LINKEDIN'), undefined, 'but a loose one that fits both is refused');
+  assert.strictEqual(rowFor('Adobe'), 3);
+});
+
+test('marks from the page are a request, not truth', () => {
+  // The page computes the folder->app join, so these arrive over HTTP. Anything
+  // malformed is dropped before it can reach a cell address.
+  const marks = normalizeMarks([
+    { app: 'Adobe', month: '2026-08' },
+    { app: '  Github  ', month: ' 2026-01 ' },   // trimmed
+    { app: 'Adobe', month: '2026-08' },          // duplicate
+    { app: 'Adobe', month: 'August' },           // not a month key
+    { app: 'Adobe', month: '2026-8' },           // not zero-padded
+    { app: '', month: '2026-08' },
+    { app: 'Adobe' },
+    { month: '2026-08' },
+    null, 'Adobe', 42,
+  ]);
+  assert.deepStrictEqual(marks, [{ app: 'Adobe', month: '2026-08' }, { app: 'Github', month: '2026-01' }]);
+});
+
+test('an implausible number of marks is capped rather than written', () => {
+  const many = Array.from({ length: MAX_MARKS + 500 }, (_, i) => ({ app: `App ${i}`, month: '2026-08' }));
+  assert.strictEqual(normalizeMarks(many).length, MAX_MARKS);
+});
