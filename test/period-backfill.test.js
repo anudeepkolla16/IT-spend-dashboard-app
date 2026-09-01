@@ -443,3 +443,19 @@ test('the dashboard reads the fields the scan actually sends', () => {
   // The names it used to read, which silently produced a list of bare dashes.
   assert.ok(!/sk\.(path|note)\b/.test(renderer), 'the page is reading a field the scan does not send');
 });
+
+test('the folders the checklist ignores are not scanned either', () => {
+  // "Courier bills" and "Laptops sold" have no row in the sheet and never will.
+  // Every file in them came back as an invoice that could not be dated — a
+  // cancelled cheque from 2022 among them — which buried the real ones and
+  // spent the run's parse budget on files no month will ever hold.
+  const { isIgnored } = require('../lib/vendor-map');
+  assert.strictEqual(isIgnored('Courier bills'), true);
+  assert.strictEqual(isIgnored('Laptops sold'), true);
+  assert.strictEqual(isIgnored('Chargebee'), false);
+
+  const src = fs.readFileSync(pathMod.join(__dirname, '..', 'lib', 'invoices', 'period-backfill.js'), 'utf8');
+  const listing = src.slice(src.indexOf('vendorFolders = (await childrenOf'), src.indexOf('summary.vendors ='));
+  assert.match(listing, /!isIgnored\(c\.name\)/,
+    'the vendor listing must drop the ignored folders, the same ones the checklist drops');
+});
