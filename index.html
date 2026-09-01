@@ -2172,8 +2172,15 @@ $('#periodsBtn').onclick = async () => {
     }
     if (blocked.length) {
       lines.push(`\n${blocked.length} month${blocked.length === 1 ? ' is' : 's are'} yours to adjust — nothing will be written to ${blocked.length === 1 ? 'it' : 'them'}:`);
-      blocked.slice(0, 8).forEach(b => lines.push(
-        `  · ${b.app} ${b.month}: ${b.blocked}${b.would === undefined ? '' : `   (the invoices there now come to ${money(b.would)})`}`));
+      blocked.slice(0, 8).forEach(b => {
+        lines.push(`  · ${b.app} ${b.month}: ${b.blocked}${b.would === undefined ? '' : `   (the invoices there now come to ${money(b.would)})`}`);
+        // Naming them is the difference between a judgement call and a glance:
+        // a short archive and a stale sheet look identical as one number, and
+        // they want opposite answers.
+        (b.invoices || []).slice(0, 6).forEach(inv => lines.push(
+          `        ${inv.file} — ${inv.amount === null || inv.amount === undefined ? 'not readable' : money(inv.amount)}`));
+        if ((b.invoices || []).length > 6) lines.push(`        … and ${b.invoices.length - 6} more`);
+      });
     }
     // The skips are not noise: an invoice nothing could date is one to file by
     // hand, and naming it is the only way that ever happens.

@@ -459,3 +459,74 @@ test('the folders the checklist ignores are not scanned either', () => {
   assert.match(listing, /!isIgnored\(c\.name\)/,
     'the vendor listing must drop the ignored folders, the same ones the checklist drops');
 });
+
+/* ---------------- one month, two folders ---------------- */
+//
+// Luzmo has "Jul-26" and a "July" that Tidy lifts out of a nested "Luzmo/".
+// They share a vendor||month key, so setting it twice dropped whichever came
+// second and July was totalled from one of its three invoices — which then
+// disagreed with the sheet and blocked the cell, for no reason anyone could see.
+
+const folderAt = (monthFolder, files) => ({
+  app: 'Cumul(Luzmo)', vendorFolder: 'Cumul(Luzmo)', month: '2026-07',
+  monthFolder, monthFolderNames: ['Jul-26', 'July'], files,
+});
+const invoice = (name, amount) => ({
+  name, path: `${BASE}/Cumul(Luzmo)/${name}`, read: true, usable: true, amount,
+});
+
+const sheetFor = (current) => ({
+  grid: { apps: [{ name: 'Cumul(Luzmo)', rowIdx: 1 }], monthCols: { '2026-07': 7 } },
+  values: [[], ['Cumul(Luzmo)', '', '', '', '', '', '', current]],
+  start: { col: 0, row: 0 },
+});
+
+test('a month spread over two folders is totalled from both', () => {
+  const folders = new Map([
+    ['a', folderAt('Jul-26', [invoice('20260712_20260215.pdf', 585.15)])],
+    ['b', folderAt('July', [invoice('20260709_20260212.pdf', 557.28), invoice('July 26.pdf', 585.15)])],
+  ]);
+  // Something has to have moved for the month to be considered at all.
+  const movedIn = new Map([['Cumul(Luzmo)||2026-07', []]]);
+  // An empty cell, so a write is actually proposed and its figure can be read.
+  const cells = predictCells(sheetFor(''), folders, new Map(), movedIn, a => a, {});
+
+  const cell = cells.find(c => c.month === '2026-07');
+  assert.ok(cell, 'expected a cell for the month');
+  assert.ok(!cell.blocked, `expected no block, got: ${cell.blocked}`);
+  assert.strictEqual(Math.round(cell.value * 100) / 100, 1727.58,
+    'all three invoices, not just the folder that happened to be last');
+});
+
+test('a blocked cell names the invoices behind its figure', () => {
+  // One number cannot say whether the archive is short or the sheet is stale,
+  // and those want opposite answers. The file names and amounts settle it.
+  const folders = new Map([
+    ['a', folderAt('Jul-26', [invoice('20260712_20260215.pdf', 585.15)])],
+    ['b', folderAt('July', [invoice('July 26.pdf', 585.15)])],
+  ]);
+  const movedIn = new Map([['Cumul(Luzmo)||2026-07', []]]);
+  const cells = predictCells(sheetFor(13439), folders, new Map(), movedIn, a => a, {});
+
+  const cell = cells.find(c => c.month === '2026-07');
+  assert.ok(cell.blocked, 'a figure this far from the sheet must not be written');
+  assert.deepStrictEqual(
+    cell.invoices.map(i => `${i.file} ${i.amount}`).sort(),
+    ['20260712_20260215.pdf 585.15', 'July 26.pdf 585.15']);
+});
+
+test('an invoice nobody could read is named as unreadable, not as zero', () => {
+  const folders = new Map([
+    ['a', folderAt('Jul-26', [
+      invoice('good.pdf', 585.15),
+      { name: 'broken.pdf', path: `${BASE}/x/broken.pdf`, read: true, usable: false, amount: null },
+    ])],
+  ]);
+  const movedIn = new Map([['Cumul(Luzmo)||2026-07', []]]);
+  const cells = predictCells(sheetFor(13439), folders, new Map(), movedIn, a => a, {});
+  const cell = cells.find(c => c.month === '2026-07');
+  assert.ok(cell.blocked, 'an unreadable invoice blocks the month');
+  // That branch reports the block without a per-invoice list; the point is that
+  // it never silently counts the unreadable one as nothing.
+  assert.match(cell.blocked, /could not be read/);
+});
