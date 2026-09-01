@@ -2178,10 +2178,29 @@ $('#periodsBtn').onclick = async () => {
     // The skips are not noise: an invoice nothing could date is one to file by
     // hand, and naming it is the only way that ever happens.
     if ((scan.skipped || []).length){
+      // Grouped, because eighty individually-worded lines in an alert box say
+      // nothing about the shape of the problem. The counts say which one is
+      // worth an afternoon; two examples each say what it looks like.
+      const KIND_LABEL = {
+        'name-disagrees': 'filed loose, and the month in the name disagrees with the period the invoice bills',
+        undated: 'filed loose with no month in the name and none stated inside — needs a month folder',
+        unreadable: 'the PDF could not be read',
+        nested: 'sitting deeper than a plain month folder — try 🧹 Tidy Archive',
+        other: 'left alone for another reason',
+      };
+      const byKind = new Map();
+      for (const sk of scan.skipped){
+        const k = KIND_LABEL[sk.kind] ? sk.kind : 'other';
+        if (!byKind.has(k)) byKind.set(k, []);
+        byKind.get(k).push(sk);
+      }
       lines.push(`\n${scan.skipped.length} invoice${scan.skipped.length === 1 ? ' was' : 's were'} left alone:`);
-      scan.skipped.slice(0, 10).forEach(sk => lines.push(
-        `  · ${sk.folder ? sk.folder + '/' : ''}${sk.file || '(unnamed)'} — ${sk.why || 'could not be judged'}`));
-      if (scan.skipped.length > 10) lines.push(`  … and ${scan.skipped.length - 10} more`);
+      [...byKind.entries()].sort((a, b) => b[1].length - a[1].length).forEach(([kind, list]) => {
+        lines.push(`\n  ${list.length} × ${KIND_LABEL[kind]}`);
+        list.slice(0, 2).forEach(sk => lines.push(
+          `      ${sk.folder ? sk.folder + '/' : ''}${sk.file || '(unnamed)'}${sk.why ? ` — ${sk.why}` : ''}`));
+        if (list.length > 2) lines.push(`      … and ${list.length - 2} more like it`);
+      });
     }
     if ((scan.errors || []).length) lines.push(`\nErrors:\n  ${scan.errors.slice(0, 5).join('\n  ')}`);
 
