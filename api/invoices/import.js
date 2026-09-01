@@ -1,5 +1,6 @@
 const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, uploadFileContent, resolveArchiveRoot, graphFetch } = require('../../lib/graph');
 const { planTidy, applyTidy } = require('../../lib/invoices/organize');
+const { planBackfill, applyBackfill } = require('../../lib/invoices/tracker');
 
 // Graph's "resolve a sharing URL" trick: base64url-encode the URL, prefix with "u!".
 // https://learn.microsoft.com/en-us/graph/api/shares-get
@@ -67,7 +68,7 @@ module.exports = async (req, res) => {
       res.status(405).json({ error: 'Method not allowed' });
       return;
     }
-    const { sourceUrl, mode, mapping, appNames, folderId, targetApp: commitApp, offset, moves } = req.body || {};
+    const { sourceUrl, mode, mapping, appNames, folderId, targetApp: commitApp, offset, moves, marks } = req.body || {};
 
     const upn = (process.env.TARGET_USER_UPN || '').trim();
     if (!upn) throw new Error('Missing TARGET_USER_UPN env var');
@@ -77,6 +78,17 @@ module.exports = async (req, res) => {
     // Tidying works on the archive itself, so it needs no source link. It shares
     // this route because each file under api/ counts against the Hobby plan's
     // 12-Serverless-Function limit and the deployment is at it.
+    // Ticking the Invoices tracker from what the archive holds. The page is the
+    // only place the folder->app join is worked out, so it sends the app-month
+    // pairs; both modes re-check every one against the live sheet before
+    // writing, and neither can untick a cell or reach a row the tracker lacks.
+    if (mode === 'tracker-plan' || mode === 'tracker-apply') {
+      res.status(200).json(mode === 'tracker-plan'
+        ? await planBackfill(token, marks)
+        : await applyBackfill(token, marks));
+      return;
+    }
+
     if (mode === 'tidy-plan' || mode === 'tidy-apply') {
       const driveId = await resolveDriveId(token, upn);
       if (mode === 'tidy-plan') {
@@ -135,7 +147,7 @@ module.exports = async (req, res) => {
     }
 
     if (mode !== 'commit') {
-      res.status(400).json({ error: `Unknown mode "${mode}" — expected "preview", "commit", "tidy-plan" or "tidy-apply". If you're not sure why you're seeing this, hard-refresh the dashboard page and try again (this can happen if your browser is running an older cached version of the page).` });
+      res.status(400).json({ error: `Unknown mode "${mode}" — expected "preview", "commit", "tidy-plan", "tidy-apply", "tracker-plan" or "tracker-apply". If you're not sure why you're seeing this, hard-refresh the dashboard page and try again (this can happen if your browser is running an older cached version of the page).` });
       return;
     }
     // commit mode processes ONE source folder per request, in a bounded batch of
