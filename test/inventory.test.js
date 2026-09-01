@@ -330,6 +330,41 @@ test('the sync\'s own bookkeeping folders are not reported as applications', asy
   } finally { stub.restore(); }
 });
 
+test('a folder the checklist ignores is never listed, let alone crawled', async () => {
+  // "Courier bills" and "Laptops sold" have no row in the sheet and never will.
+  // Skipping them at the listing means their contents cost no Graph call, and
+  // the "not matched to a sheet row" count stays a list of real problems.
+  const stub = stubGraph({
+    children: {
+      'root-inv': [folder('f-a', 'Adobe'), folder('f-c', 'Courier bills'), folder('f-s', 'Laptops sold')],
+      'f-a': [file('x', 'a.pdf')],
+      'f-c': [file('y', 'courier.pdf')],
+      'f-s': [file('z', 'sold.pdf')],
+    },
+  });
+  try {
+    const inv = await buildInventory('tok', nextDrive());
+    assert.deepEqual(inv.apps, ['Adobe']);
+    assert.equal(inv.fileCount, 1);
+    assert.ok(!stub.calls.some(u => u.includes('f-c') || u.includes('f-s')),
+      'an ignored folder should not be listed at all');
+    // The page needs the same list to drop the ignored sheet rows.
+    assert.ok(inv.ignored.includes('Antivirus,MDM'));
+  } finally { stub.restore(); }
+});
+
+test('ignoring a name is not sensitive to how it is punctuated or cased', async () => {
+  // The sheet writes "Antivirus,MDM" and the archive might write "Antivirus MDM";
+  // both are the same thing, matched the way every other name here is matched.
+  const { isIgnored } = require('../lib/vendor-map');
+  assert.equal(isIgnored('Laptops sold'), true);
+  assert.equal(isIgnored('laptops  SOLD'), true);
+  assert.equal(isIgnored('Antivirus, MDM'), true);
+  assert.equal(isIgnored('Laptops Procurement'), false);
+  assert.equal(isIgnored('Laptop Repair'), false);
+  assert.equal(isIgnored(''), false);
+});
+
 test('a missing Invoices folder reports empty rather than failing', async () => {
   const original = global.fetch;
   global.fetch = async () => ({ ok: false, status: 404, text: async () => 'not found' });
