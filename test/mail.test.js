@@ -163,6 +163,27 @@ test('folder matching ignores case, as SharePoint does', () => {
   assert.strictEqual(appToSourceFolder(mapping, ['apollo'])['Apollo'], 'Apollo');
 });
 
+test('an alias survives the sheet renaming the row it points at', () => {
+  // The sheet renamed "Granola Business" to "Granola" and "windsurf pro" to
+  // "windsurf". A rule naming only the old spelling resolves to nothing, so the
+  // charge silently becomes an exception to map by hand. Both spellings are
+  // listed, so the rule keeps working whichever name the sheet is carrying.
+  const now = buildResolver({}, ['Granola', 'windsurf', 'Adobe']);
+  assert.strictEqual(now('Granola').app, 'Granola');
+  assert.strictEqual(now('', 'GRANOLA INC').app, 'Granola');
+  assert.strictEqual(now('', 'WINDSURF SUBSCRIPTION').app, 'windsurf');
+
+  const before = buildResolver({}, ['Granola Business', 'windsurf pro', 'Adobe']);
+  assert.strictEqual(before('Granola').app, 'Granola Business');
+  assert.strictEqual(before('', 'WINDSURF SUBSCRIPTION').app, 'windsurf pro');
+});
+
+test('a multi-spelling target still resolves to nothing when the sheet has neither', () => {
+  // Listing spellings must not make a rule match a row that is not there.
+  const r = buildResolver({}, ['Adobe']);
+  assert.strictEqual(r('', 'GRANOLA INC').app, null);
+});
+
 test('a folder renamed to match the sheet beats the stale mapping entry', () => {
   // The archive was renamed folder-by-folder to match the sheet. The saved
   // mapping is a snapshot from before that, so it still points at names that no
