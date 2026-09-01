@@ -557,6 +557,9 @@ async function syncFromApi(manual){
     // pivot only ever sees rows with money in them, so without this a row that
     // exists but has not been charged is indistinguishable from no row at all.
     window.SHEET_APPS = json.apps || [];
+    // The same rows with their department, POC and cycle, so one that has never
+    // been charged can still be listed rather than dropped for having no money.
+    window.SHEET_ROWS = json.appRows || [];
     lastSyncedAt = json.syncedAt ? new Date(json.syncedAt) : new Date();
     $('#syncDot').classList.remove('err');
     $('#syncLabel').textContent = `Synced from SharePoint · ${lastSyncedAt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})} (${appRows.length} records)`;
@@ -1140,8 +1143,24 @@ function draw(){
   let rows=all.filter(r=>(!t||r.kind===t)&&(!d||r.dept===d)&&
     (!q||(r.name+(r.poc||'')+r.cat).toLowerCase().includes(q)));
 
-  // pivot: one row per app name, spend broken out by month
+  // pivot: one row per app name, spend broken out by month.
+  //
+  // Seeded from every row the sheet holds, not only the ones with spend: an app
+  // that is set up but has never been charged — Zapier, Posthog, Sprinto and
+  // four others — has no records at all, and listing only what has money in it
+  // silently dropped seven of the sheet's seventy-one apps. They come through
+  // with empty months and a zero total, which is exactly what the sheet says
+  // about them, and is worth seeing: a monthly subscription with nothing ever
+  // charged against it is a question.
   const groups = {};
+  (window.SHEET_ROWS || []).forEach(a=>{
+    // The same filters the records obey, so a search or a department still
+    // narrows to what was asked for.
+    if (t && a.kind !== t) return;
+    if (d && a.dept !== d) return;
+    if (q && !((a.name+(a.poc||'')+(a.cycle||'')).toLowerCase().includes(q))) return;
+    groups[a.name] = { name:a.name, kind:a.kind, dept:a.dept, cat:a.cycle, cur:a.cur, poc:a.poc, renewalDate:a.renewalDate, total:0 };
+  });
   rows.forEach(r=>{
     if (!groups[r.name]) groups[r.name] = {name:r.name, kind:r.kind, dept:r.dept, cat:r.cat, cur:r.cur, poc:r.poc, renewalDate:r.renewalDate, total:0};
     const g = groups[r.name];

@@ -174,6 +174,34 @@ test('the API hands over every app row it read', () => {
   const api = fs.readFileSync(path.join(__dirname, '..', 'api', 'spend-data.js'), 'utf8');
   assert.match(api, /if \(!apps\.includes\(name\)\) apps\.push\(name\)/,
     'every row is collected before the amounts are looked at');
-  assert.match(api, /return \{ records, apps \}/);
-  assert.match(api, /rowCount: rows\.length, rows, apps/, 'and both reach the payload');
+  assert.match(api, /return \{ records, apps, appRows \}/);
+  assert.match(api, /rowCount: rows\.length, rows, apps, appRows/, 'and all of them reach the payload');
+});
+
+test('an app with no spend is still listed, with its own details', () => {
+  // Seven of the sheet's seventy-one rows have no figure in any month — Zapier,
+  // Posthog, Sprinto and four more. A record is produced per month with money in
+  // it, so those produced none and the table silently showed 64 apps.
+  const api = fs.readFileSync(path.join(__dirname, '..', 'api', 'spend-data.js'), 'utf8');
+  assert.match(api, /appRows\.push\(\{ name, dept, poc, renewalDate, cycle, cur, paymentMethod, kind \}\)/,
+    'the row carries enough to render it without any amounts');
+  // Collected before the month loop, so having no amounts cannot skip it.
+  assert.ok(api.indexOf('appRows.push(') < api.indexOf('for (const { idx, month } of monthCols)'),
+    'the row is recorded before the amounts are looked at, not inside that loop');
+
+  assert.match(html, /window\.SHEET_ROWS = json\.appRows \|\| \[\]/,
+    'the page keeps them');
+  assert.match(html, /\(window\.SHEET_ROWS \|\| \[\]\)\.forEach/,
+    'and seeds the pivot from them, so a row with no spend still appears');
+  // They must obey the same filters, or a department or a search would show
+  // apps it was not asked for.
+  // Search forward from the seed block: `rows.forEach(r=>{` also appears earlier
+  // in the file, and slicing to that one gives an empty range that asserts nothing.
+  const seedStart = html.indexOf('(window.SHEET_ROWS || []).forEach');
+  assert.ok(seedStart > -1, 'the pivot no longer seeds from the sheet rows — this test is stale');
+  const seed = html.slice(seedStart, html.indexOf('rows.forEach(r=>{', seedStart));
+  assert.ok(seed.length > 0 && seed.length < 2000, 'the seed block was not isolated');
+  for (const guard of ['a.kind !== t', 'a.dept !== d', 'a.poc']) {
+    assert.ok(seed.includes(guard), `the seeded rows must honour the ${guard} filter`);
+  }
 });
