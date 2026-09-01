@@ -2137,16 +2137,32 @@ $('#periodsBtn').onclick = async () => {
     if (scan.unread) lines.push(`\n${scan.unread} invoice${scan.unread === 1 ? ' has' : 's have'} still not been read — run this again to finish the archive.`);
 
     if (!moves.length) {
-      lines.push('\nEvery invoice that states a billing period is already filed under the month it covers. Nothing to move.');
+      lines.push('\nEvery invoice is already filed under the month it covers, and none is left without a month. Nothing to move.');
       if ((scan.errors || []).length) lines.push(`\nErrors:\n  ${scan.errors.slice(0, 5).join('\n  ')}`);
       alert(lines.join('\n'));
       return;
     }
 
-    lines.push(`\n${moves.length} invoice${moves.length === 1 ? '' : 's'} would move to the month ${moves.length === 1 ? 'it bills' : 'they bill'} for:`);
-    moves.slice(0, 15).forEach(m => lines.push(
-      `  · ${m.app || m.vendorFolder}  ${m.file}: ${m.fromMonth} → ${m.toMonth}   (period ${m.periodStart} → ${m.periodEnd})`));
-    if (moves.length > 15) lines.push(`  … and ${moves.length - 15} more`);
+    // Two kinds of move read differently. A misfiled invoice comes FROM a month;
+    // an undated one belonged to no month at all, which is the whole problem.
+    const why = (m) => (m.via === 'invoice-date'
+      ? `invoice dated ${m.invoiceDate}`
+      : `period ${m.periodStart} → ${m.periodEnd}`);
+    const undated = moves.filter(m => m.undated);
+    const misfiled = moves.filter(m => !m.undated);
+
+    if (misfiled.length){
+      lines.push(`\n${misfiled.length} invoice${misfiled.length === 1 ? '' : 's'} would move to the month ${misfiled.length === 1 ? 'it bills' : 'they bill'} for:`);
+      misfiled.slice(0, 15).forEach(m => lines.push(
+        `  · ${m.app || m.vendorFolder}  ${m.file}: ${m.fromMonth} → ${m.toMonth}   (${why(m)})`));
+      if (misfiled.length > 15) lines.push(`  … and ${misfiled.length - 15} more`);
+    }
+    if (undated.length){
+      lines.push(`\n${undated.length} invoice${undated.length === 1 ? '' : 's'} counted towards no month at all — nothing in the name, no month folder — and would be filed by what the PDF says:`);
+      undated.slice(0, 15).forEach(m => lines.push(
+        `  · ${m.app || m.vendorFolder}  ${m.file}: → ${m.toMonth}   (${why(m)})`));
+      if (undated.length > 15) lines.push(`  … and ${undated.length - 15} more`);
+    }
 
     if (cells.length) {
       lines.push(`\nand ${cells.length} sheet cell${cells.length === 1 ? '' : 's'} would change:`);
@@ -2159,7 +2175,14 @@ $('#periodsBtn').onclick = async () => {
       blocked.slice(0, 8).forEach(b => lines.push(
         `  · ${b.app} ${b.month}: ${b.blocked}${b.would === undefined ? '' : `   (the invoices there now come to ${money(b.would)})`}`));
     }
-    if ((scan.skipped || []).length) lines.push(`\n${scan.skipped.length} invoice${scan.skipped.length === 1 ? ' was' : 's were'} skipped (unreadable, or not in a plain month folder).`);
+    // The skips are not noise: an invoice nothing could date is one to file by
+    // hand, and naming it is the only way that ever happens.
+    if ((scan.skipped || []).length){
+      lines.push(`\n${scan.skipped.length} invoice${scan.skipped.length === 1 ? ' was' : 's were'} left alone:`);
+      scan.skipped.slice(0, 10).forEach(sk => lines.push(
+        `  · ${String(sk.path || '').split('/').pop()} — ${sk.note || 'could not be judged'}`));
+      if (scan.skipped.length > 10) lines.push(`  … and ${scan.skipped.length - 10} more`);
+    }
     if ((scan.errors || []).length) lines.push(`\nErrors:\n  ${scan.errors.slice(0, 5).join('\n  ')}`);
 
     lines.push('\nMove the files and update the sheet?');
