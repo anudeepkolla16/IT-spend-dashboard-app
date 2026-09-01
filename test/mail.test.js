@@ -534,3 +534,128 @@ test('an apply covers one chunk and says where the next one starts', async () =>
   assert.strictEqual(guard, 3, 'three chunks for two and a bit chunk-loads');
   assert.deepStrictEqual(seen, marks, 'every mark visited exactly once, in order');
 });
+
+/* ---------------- the archive sweep ---------------- */
+//
+// The mailbox pass only ever learns about an app-month because mail arrived for
+// it. An invoice dropped into a folder by hand was never totalled and never
+// ticked until unrelated mail happened to land on the same app-month, and
+// nothing said so — the sheet just stayed blank. Each run now sweeps the
+// archive's recent months as well.
+
+const { reconcileArchive, recentMonths } = require('../lib/mail-sync');
+
+test('the sweep window is the current month and the ones before it', () => {
+  assert.deepStrictEqual(recentMonths(3, '2026-09-01T00:00:00Z'), ['2026-09', '2026-08', '2026-07']);
+  // Across a year boundary, and on the last day of a long month reaching back
+  // into a short one — the naive date arithmetic for that lands on March.
+  assert.deepStrictEqual(recentMonths(3, '2026-01-15T00:00:00Z'), ['2026-01', '2025-12', '2025-11']);
+  assert.deepStrictEqual(recentMonths(2, '2026-03-31T00:00:00Z'), ['2026-03', '2026-02']);
+});
+
+function stubArchive(tree) {
+  const original = global.fetch;
+  const listed = [];
+  global.fetch = async (url) => {
+    const u = decodeURIComponent(String(url));
+    const m = u.match(/root:\/(.+?):\/children/);
+    if (!m) return { ok: false, status: 404, text: async () => 'not found' };
+    const path = m[1];
+    listed.push(path);
+    const names = tree[path];
+    if (!names) return { ok: false, status: 404, text: async () => 'itemNotFound' };
+    // A number stands for a failing status, the way a permission-denied folder
+    // answers on the live drive.
+    if (typeof names === 'number') return { ok: false, status: names, text: async () => 'accessDenied' };
+    return { ok: true, status: 200, json: async () => ({ value: names.map(n => ({ name: n, folder: {} })) }) };
+  };
+  return { listed, restore: () => { global.fetch = original; } };
+}
+
+const BASE = 'Desktop/Anudeep files/Invoices';
+
+test('a month folder holding invoices is found however the file got there', async () => {
+  const stub = stubArchive({
+    [`${BASE}/Adobe`]: ['Aug-26', 'Sep-26', 'Jan-26'],
+    [`${BASE}/Bubble Starter`]: ['July'],
+  });
+  try {
+    const out = await reconcileArchive('tok', 'drive', BASE, {
+      folders: ['Adobe', 'Bubble Starter'],
+      appFor: (f) => f,
+      now: '2026-09-01T00:00:00Z',
+    });
+    assert.deepStrictEqual(
+      out.found.map(f => `${f.app} ${f.month}`).sort(),
+      ['Adobe 2026-08', 'Adobe 2026-09', 'Bubble Starter 2026-07'],
+      'Jan-26 is outside the window and is left to the manual backfill');
+    assert.strictEqual(out.found.find(f => f.month === '2026-08').folder, `${BASE}/Adobe/Aug-26`);
+  } finally { stub.restore(); }
+});
+
+test('a folder with no row in the sheet is never listed, let alone guessed at', async () => {
+  // The checklist reports an unmatched folder. This must not invent a row for it,
+  // and must not spend a Graph call finding out.
+  const stub = stubArchive({ [`${BASE}/Adobe`]: ['Aug-26'] });
+  try {
+    const out = await reconcileArchive('tok', 'drive', BASE, {
+      folders: ['Adobe', 'Courier bills', '_Unmatched', '_temp'],
+      appFor: (f) => (f === 'Adobe' ? 'Adobe' : null),
+      now: '2026-09-01T00:00:00Z',
+    });
+    assert.deepStrictEqual(out.found.map(f => f.app), ['Adobe']);
+    assert.deepStrictEqual(stub.listed, [`${BASE}/Adobe`]);
+  } finally { stub.restore(); }
+});
+
+test('the folder name maps to the sheet row, not to itself', async () => {
+  const stub = stubArchive({ [`${BASE}/apollo`]: ['Aug-26'] });
+  try {
+    const out = await reconcileArchive('tok', 'drive', BASE, {
+      folders: ['apollo'],
+      appFor: (f) => (f === 'apollo' ? 'Apollo' : null),
+      now: '2026-09-01T00:00:00Z',
+    });
+    assert.deepStrictEqual(out.found, [{ app: 'Apollo', month: '2026-08', folder: `${BASE}/apollo/Aug-26` }]);
+  } finally { stub.restore(); }
+});
+
+test('a folder that cannot be listed is reported, and the sweep carries on', async () => {
+  const stub = stubArchive({ [`${BASE}/Locked`]: 403, [`${BASE}/Adobe`]: ['Aug-26'] });
+  try {
+    const out = await reconcileArchive('tok', 'drive', BASE, {
+      folders: ['Locked', 'Adobe'], appFor: (f) => f, pool: 1, now: '2026-09-01T00:00:00Z',
+    });
+    assert.deepStrictEqual(out.found.map(f => f.app), ['Adobe']);
+    assert.strictEqual(out.errors.length, 1);
+    assert.match(out.errors[0], /^Locked: /);
+  } finally { stub.restore(); }
+});
+
+test('a folder that is simply gone is skipped quietly, not called an error', async () => {
+  // A vendor folder renamed or deleted since the archive was listed is not a
+  // problem to report every night — it just holds nothing to total.
+  const stub = stubArchive({ [`${BASE}/Adobe`]: ['Aug-26'] });
+  try {
+    const out = await reconcileArchive('tok', 'drive', BASE, {
+      folders: ['Renamed Away', 'Adobe'], appFor: (f) => f, pool: 1, now: '2026-09-01T00:00:00Z',
+    });
+    assert.deepStrictEqual(out.found.map(f => f.app), ['Adobe']);
+    assert.deepStrictEqual(out.errors, []);
+  } finally { stub.restore(); }
+});
+
+test('the sweep stops at its deadline rather than running the request out', async () => {
+  // It shares one function timeout with the mailbox pass and the folder mirror.
+  // Stopping early loses nothing: the next run picks up what was missed.
+  const stub = stubArchive({ [`${BASE}/Adobe`]: ['Aug-26'] });
+  try {
+    const out = await reconcileArchive('tok', 'drive', BASE, {
+      folders: ['Adobe', 'Bitly', 'Github'], appFor: (f) => f,
+      deadline: Date.now() - 1, now: '2026-09-01T00:00:00Z',
+    });
+    assert.strictEqual(out.timedOut, true);
+    assert.deepStrictEqual(out.found, []);
+    assert.deepStrictEqual(stub.listed, [], 'no Graph call once the deadline has passed');
+  } finally { stub.restore(); }
+});
