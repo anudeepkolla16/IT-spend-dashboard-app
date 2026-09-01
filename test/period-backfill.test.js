@@ -384,24 +384,58 @@ test('the scan writes nothing and the apply only touches what was approved', () 
 
 const fs = require('node:fs');
 const pathMod = require('node:path');
-const { skipEntry } = require('../lib/invoices/period-backfill');
+const { skipEntry, SKIP_KINDS } = require('../lib/invoices/period-backfill');
 
-test('a skipped invoice carries the name, the folder and the reason', () => {
+test('a skipped invoice carries the name, the folder, the reason and its kind', () => {
   const entry = skipEntry(
     { name: 'INV04494.pdf' },
     { vendorFolder: 'Attention' },
-    'is filed loose in "Attention" with no month in its name and none stated inside');
-  assert.deepStrictEqual(Object.keys(entry).sort(), ['file', 'folder', 'why']);
+    'is filed loose in "Attention" with no month in its name and none stated inside',
+    'undated');
+  assert.deepStrictEqual(Object.keys(entry).sort(), ['file', 'folder', 'kind', 'why']);
   assert.strictEqual(entry.file, 'INV04494.pdf');
   assert.strictEqual(entry.folder, 'Attention');
+  assert.strictEqual(entry.kind, 'undated');
   assert.match(entry.why, /^is filed loose/);
+});
+
+test('an unrecognised kind falls into "other" rather than making a group of its own', () => {
+  // The page groups on this. A typo would otherwise print a heading with no
+  // label, which reads as a bug in the list rather than in the tag.
+  assert.strictEqual(skipEntry({ name: 'x' }, { vendorFolder: 'y' }, 'z', 'typo').kind, 'other');
+  assert.strictEqual(skipEntry({ name: 'x' }, { vendorFolder: 'y' }, 'z').kind, 'other');
+});
+
+test('every reason planMove can give is tagged with a kind the page knows', () => {
+  // A skip with no kind lands in "other", which tells the user nothing. Each of
+  // the four real cases should name itself.
+  const cases = [
+    ['unreadable', luzmoFile({ read: false, note: 'bad XRef entry' })],
+    ['undated', undated()],
+    ['name-disagrees', undated({
+      name: 'April 26.pdf', nameMonth: '2026-04', currentMonth: '2026-04',
+      periodStart: '2026-05-01', periodEnd: '2026-05-31',
+    })],
+    ['nested', luzmoFile({ relPath: 'Luzmo/July', folderMonth: '2026-07' })],
+  ];
+  for (const [kind, file] of cases) {
+    const v = planMove(file, luzmoFolder(), BASE);
+    assert.ok(v && v.skip, `expected a skip for ${kind}`);
+    assert.strictEqual(v.kind, kind);
+    assert.ok(SKIP_KINDS.includes(v.kind));
+  }
 });
 
 test('the dashboard reads the fields the scan actually sends', () => {
   const html = fs.readFileSync(pathMod.join(__dirname, '..', 'index.html'), 'utf8');
-  const start = html.indexOf('scan.skipped.slice(');
+  // Anchored on the whole block rather than one line of it: the renderer has
+  // been restructured once already, and an anchor that goes stale silently is
+  // worse than no test.
+  const start = html.indexOf('if ((scan.skipped || []).length){');
   assert.ok(start > -1, 'the skipped list is no longer rendered — this test is stale');
-  const renderer = html.slice(start, html.indexOf('\n', html.indexOf('`));', start)));
+  const end = html.indexOf('scan.errors', start);
+  assert.ok(end > start, 'could not find the end of the skipped block');
+  const renderer = html.slice(start, end);
 
   for (const key of Object.keys(skipEntry({ name: 'x' }, { vendorFolder: 'y' }, 'z'))) {
     assert.ok(renderer.includes(`sk.${key}`), `the page never reads sk.${key}`);
