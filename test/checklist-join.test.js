@@ -147,3 +147,33 @@ test('very short folder names do not match by containment', () => {
   assert.equal(invResolveFolder('ado', idx, {}), null);
   assert.equal(invResolveFolder('adobe', idx, {}), 'Adobe Creative Cloud');
 });
+
+// --- A row that exists but has not been charged ---------------------------
+//
+// Posthog sits in the spend sheet with four invoices on file and no amounts
+// entered yet. The pivot only carries rows with money in them, so the checklist
+// joined against the pivot alone and reported the row as "not in sheet" while
+// the sheet was plainly holding it.
+
+test('the sheet index is built from every row, not only the charged ones', () => {
+  // The pivot's rows plus the sheet's own list, which includes uncharged rows.
+  assert.match(html, /window\.SHEET_APPS = json\.apps \|\| \[\]/,
+    'the client must keep the full list of sheet rows');
+  assert.match(html, /for \(const name of \(window\.SHEET_APPS \|\| \[\]\)\)/,
+    'and resolve folders against it, not just the pivot');
+});
+
+test('an uncharged row is labelled as such, never as missing from the sheet', () => {
+  assert.match(html, /inSheetUncharged: !!appName/,
+    'a folder that resolved to a real row must be marked as one');
+  assert.match(html, /no spend recorded/,
+    'and shown with its own label rather than "not in sheet"');
+});
+
+test('the API hands over every app row it read', () => {
+  const api = fs.readFileSync(path.join(__dirname, '..', 'api', 'spend-data.js'), 'utf8');
+  assert.match(api, /if \(!apps\.includes\(name\)\) apps\.push\(name\)/,
+    'every row is collected before the amounts are looked at');
+  assert.match(api, /return \{ records, apps \}/);
+  assert.match(api, /rowCount: rows\.length, rows, apps/, 'and both reach the payload');
+});
