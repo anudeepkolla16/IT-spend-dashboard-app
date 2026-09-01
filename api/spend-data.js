@@ -82,6 +82,12 @@ function parseWorkbook(buffer) {
 
   const records = [];
   const apps = [];
+  // Every app row's own details, whether or not it has money in it. A record is
+  // produced per month with a figure, so an app set up but never charged — seven
+  // of them, Zapier and Posthog among others — produced none and vanished from a
+  // table that is meant to list the sheet's apps. Their identity comes from here
+  // instead, and their months stay empty because that is what the sheet says.
+  const appRows = [];
   for (let i = headerRowIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     const name = String(row[nameCol] || '').trim();
@@ -105,6 +111,9 @@ function parseWorkbook(buffer) {
     // checklist, which joins on the rows it can see, reported such a row as "not
     // in sheet" while the sheet was plainly holding it.
     if (!apps.includes(name)) apps.push(name);
+    if (!appRows.some(a => a.name === name)) {
+      appRows.push({ name, dept, poc, renewalDate, cycle, cur, paymentMethod, kind });
+    }
 
     for (const { idx, month } of monthCols) {
       const raw = row[idx];
@@ -113,7 +122,7 @@ function parseWorkbook(buffer) {
       records.push({ name, dept, poc, renewalDate, cycle, cur, month, amt, paymentMethod, kind });
     }
   }
-  return { records, apps };
+  return { records, apps, appRows };
 }
 
 // Best-effort in-memory cache. Serverless instances are ephemeral (cold starts
@@ -134,8 +143,8 @@ module.exports = async (req, res) => {
     }
     const token = await getGraphToken();
     const buffer = await downloadWorkbook(token);
-    const { records: rows, apps } = parseWorkbook(buffer);
-    const payload = { syncedAt: new Date().toISOString(), source: 'sharepoint', rowCount: rows.length, rows, apps };
+    const { records: rows, apps, appRows } = parseWorkbook(buffer);
+    const payload = { syncedAt: new Date().toISOString(), source: 'sharepoint', rowCount: rows.length, rows, apps, appRows };
     cache = { data: payload, expiresAt: now + CACHE_TTL_MS };
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Cache', 'MISS');
