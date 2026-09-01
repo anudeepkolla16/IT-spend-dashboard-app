@@ -2180,7 +2180,7 @@ $('#periodsBtn').onclick = async () => {
     if ((scan.skipped || []).length){
       lines.push(`\n${scan.skipped.length} invoice${scan.skipped.length === 1 ? ' was' : 's were'} left alone:`);
       scan.skipped.slice(0, 10).forEach(sk => lines.push(
-        `  · ${String(sk.path || '').split('/').pop()} — ${sk.note || 'could not be judged'}`));
+        `  · ${sk.folder ? sk.folder + '/' : ''}${sk.file || '(unnamed)'} — ${sk.why || 'could not be judged'}`));
       if (scan.skipped.length > 10) lines.push(`  … and ${scan.skipped.length - 10} more`);
     }
     if ((scan.errors || []).length) lines.push(`\nErrors:\n  ${scan.errors.slice(0, 5).join('\n  ')}`);

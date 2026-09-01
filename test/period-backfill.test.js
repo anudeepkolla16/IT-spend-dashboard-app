@@ -373,3 +373,39 @@ test('the scan writes nothing and the apply only touches what was approved', () 
   assert.match(ui, /if \(!json\.periods\) throw new Error\(/,
     'a reply from an older deployment must be named, not rendered as undefined');
 });
+
+/* ---------------- the plan has to be readable ---------------- */
+//
+// The skipped invoices are the ones needing a hand, so the dashboard prints
+// them by name. It printed "· — could not be judged" 84 times instead, because
+// the page read `path` and `note` while the scan sends `file`, `folder` and
+// `why`. Nothing failed; the list was just empty of everything that made it
+// useful. Both sides are pinned here so a rename on either breaks a test.
+
+const fs = require('node:fs');
+const pathMod = require('node:path');
+const { skipEntry } = require('../lib/invoices/period-backfill');
+
+test('a skipped invoice carries the name, the folder and the reason', () => {
+  const entry = skipEntry(
+    { name: 'INV04494.pdf' },
+    { vendorFolder: 'Attention' },
+    'is filed loose in "Attention" with no month in its name and none stated inside');
+  assert.deepStrictEqual(Object.keys(entry).sort(), ['file', 'folder', 'why']);
+  assert.strictEqual(entry.file, 'INV04494.pdf');
+  assert.strictEqual(entry.folder, 'Attention');
+  assert.match(entry.why, /^is filed loose/);
+});
+
+test('the dashboard reads the fields the scan actually sends', () => {
+  const html = fs.readFileSync(pathMod.join(__dirname, '..', 'index.html'), 'utf8');
+  const start = html.indexOf('scan.skipped.slice(');
+  assert.ok(start > -1, 'the skipped list is no longer rendered — this test is stale');
+  const renderer = html.slice(start, html.indexOf('\n', html.indexOf('`));', start)));
+
+  for (const key of Object.keys(skipEntry({ name: 'x' }, { vendorFolder: 'y' }, 'z'))) {
+    assert.ok(renderer.includes(`sk.${key}`), `the page never reads sk.${key}`);
+  }
+  // The names it used to read, which silently produced a list of bare dashes.
+  assert.ok(!/sk\.(path|note)\b/.test(renderer), 'the page is reading a field the scan does not send');
+});
