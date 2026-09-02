@@ -2022,30 +2022,23 @@ async function runMailSync(rescan){
     }
     const upd = json.amountsUpdated || [];
     if (upd.length){
-      lines.push(`\nUpdated ${upd.length} amount${upd.length===1?'':'s'} as later invoices arrived:`);
+      // The cell is the month's invoice total, so it moves either way. Say
+      // which way, and whose figure went: a lowering is the sign of a month
+      // whose invoices are missing from the archive.
       const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2});
+      lines.push(`\nSet ${upd.length} cell${upd.length===1?'':'s'} to the month's invoice total:`);
       upd.slice(0,10).forEach(u => lines.push(
-        `  · ${u.app} ${u.month}: ${fmt(u.previous)} → ${fmt(u.amount)}${u.wasOurs ? '' : '   (replaced a figure this sync did not write)'}`));
+        `  · ${u.app} ${u.month}: ${fmt(u.previous)} → ${fmt(u.amount)}${u.direction==='down' ? '   (lowered — check the month's invoices are all in the folder)' : ''}${u.wasOurs ? '' : '   (replaced a figure this sync did not write)'}`));
     }
     const filled = json.amountsSkippedFilled || [];
-    // Two different reasons a cell was left alone, and they need different
-    // wording: the folder is behind the sheet (normal, invoices still to come),
-    // or the folder could not be fully read, so its total is not a total at all
-    // and no comparison against it means anything.
-    const behind = filled.filter(f => f.reason !== 'folder-total-incomplete');
+    // A month with an invoice nobody could read has no total, only a lower
+    // bound, and a lower bound is never written: the month is held until the
+    // file reads.
     const unreadable = filled.filter(f => f.reason === 'folder-total-incomplete');
-    if (behind.length){
-      lines.push(`\n${behind.length===1?'1 cell was':behind.length+' cells were'} left alone — the invoice total is lower than the sheet, which usually means invoices are still to come:`);
-      behind.slice(0,8).forEach(f => {
-        const sheet = Number(f.current), inv = Number(f.invoiceTotal);
-        const gap = (sheet - inv).toLocaleString('en-US',{minimumFractionDigits:2});
-        lines.push(`  · ${f.app} ${f.month}: sheet has ${sheet.toLocaleString('en-US',{minimumFractionDigits:2})}, invoices so far ${inv.toLocaleString('en-US',{minimumFractionDigits:2})} — ${gap} not yet invoiced`);
-      });
-    }
     if (unreadable.length){
-      lines.push(`\n${unreadable.length===1?'1 cell was':unreadable.length+' cells were'} left alone — some invoices in the folder could not be read, so the total below is only what parsed, not the folder's real total:`);
+      lines.push(`\n${unreadable.length===1?'1 cell was':unreadable.length+' cells were'} held — an invoice in that month could not be read, so its total is not known yet:`);
       unreadable.slice(0,8).forEach(f => lines.push(
-        `  · ${f.app} ${f.month}: sheet has ${Number(f.current).toLocaleString('en-US',{minimumFractionDigits:2})}, invoices that parsed ${Number(f.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})} — fix or re-save the unreadable PDFs listed below, then run this again`));
+        `  · ${f.app} ${f.month}: sheet has ${f.current==null?'nothing':Number(f.current).toLocaleString('en-US',{minimumFractionDigits:2})}, invoices that read ${Number(f.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})} — fix or re-save the unreadable PDF listed below, then run this again`));
     }
     const loose = json.looseIncluded || [];
     if (loose.length){
@@ -2184,22 +2177,25 @@ $('#periodsBtn').onclick = async () => {
     }
 
     if (cells.length) {
-      lines.push(`\nand ${cells.length} sheet cell${cells.length === 1 ? '' : 's'} would change:`);
-      cells.slice(0, 15).forEach(c => lines.push(
-        `  · ${c.app} ${c.month}: ${c.current === null ? '(empty)' : money(c.current)} → ${money(c.value)}`));
+      lines.push(`\nand ${cells.length} sheet cell${cells.length === 1 ? '' : 's'} would be set to the month's invoice total:`);
+      cells.slice(0, 15).forEach(c => {
+        lines.push(`  · ${c.app} ${c.month}: ${c.current === null ? '(empty)' : money(c.current)} → ${money(c.value)}`);
+        // A cell holding a figure the invoices do not account for is still
+        // proposed — the cell is the invoice total — but it says so, and names
+        // the invoices: a short archive and a stale sheet look identical as
+        // one number, and they want opposite answers.
+        if (c.replaces) {
+          lines.push(`        replaces a figure that is not the invoices' — ${c.replaces}`);
+          (c.files || []).slice(0, 6).forEach(inv => lines.push(
+            `        ${inv.file} — ${inv.amount === null || inv.amount === undefined ? 'not readable' : money(inv.amount)}`));
+          if ((c.files || []).length > 6) lines.push(`        … and ${c.files.length - 6} more`);
+        }
+      });
       if (cells.length > 15) lines.push(`  … and ${cells.length - 15} more`);
     }
     if (blocked.length) {
-      lines.push(`\n${blocked.length} month${blocked.length === 1 ? ' is' : 's are'} yours to adjust — nothing will be written to ${blocked.length === 1 ? 'it' : 'them'}:`);
-      blocked.slice(0, 8).forEach(b => {
-        lines.push(`  · ${b.app} ${b.month}: ${b.blocked}${b.would === undefined ? '' : `   (the invoices there now come to ${money(b.would)})`}`);
-        // Naming them is the difference between a judgement call and a glance:
-        // a short archive and a stale sheet look identical as one number, and
-        // they want opposite answers.
-        (b.invoices || []).slice(0, 6).forEach(inv => lines.push(
-          `        ${inv.file} — ${inv.amount === null || inv.amount === undefined ? 'not readable' : money(inv.amount)}`));
-        if ((b.invoices || []).length > 6) lines.push(`        … and ${b.invoices.length - 6} more`);
-      });
+      lines.push(`\n${blocked.length} month${blocked.length === 1 ? '' : 's'} cannot be totalled yet — nothing will be written to ${blocked.length === 1 ? 'it' : 'them'}:`);
+      blocked.slice(0, 8).forEach(b => lines.push(`  · ${b.app} ${b.month}: ${b.blocked}`));
     }
     // The skips are not noise: an invoice nothing could date is one to file by
     // hand, and naming it is the only way that ever happens.

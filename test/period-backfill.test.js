@@ -12,21 +12,24 @@ const { planMove, predictCells, decideCell } = require('../lib/invoices/period-b
 // are built from whatever root the caller resolved, so the fixture names one.
 const BASE = 'Desktop/Anudeep files/Invoices';
 
-// The Cumul(Luzmo) folder as it stands: an Aug-26 folder, no Sep-26 folder yet.
+// The Cumul(Luzmo) folder as it stood: the invoice for the cycle starting 26
+// August arrived in September and was filed by its arrival date, into a Sep-26
+// folder. Under the owner's rule — a period belongs to the month it starts in —
+// it is August's, and the archive has no Aug-26 folder yet.
 const luzmoFolder = (extra) => ({
   app: 'Cumul(Luzmo)',
   vendorFolder: 'Cumul',
-  month: '2026-08',
-  monthFolderNames: ['Jul-26', 'Aug-26'],
+  month: '2026-09',
+  monthFolderNames: ['Jul-26', 'Sep-26'],
   ...(extra || {}),
 });
 
 const luzmoFile = (extra) => ({
   name: '20260826_20260258.pdf',
-  path: `${BASE}/Cumul/Aug-26/20260826_20260258.pdf`,
-  relPath: 'Aug-26',
-  currentMonth: '2026-08',
-  folderMonth: '2026-08',   // it sits in a month folder
+  path: `${BASE}/Cumul/Sep-26/20260826_20260258.pdf`,
+  relPath: 'Sep-26',
+  currentMonth: '2026-09',
+  folderMonth: '2026-09',   // it sits in a month folder
   nameMonth: null,
   read: true,
   periodStart: '2026-08-26',
@@ -40,9 +43,9 @@ const luzmoFile = (extra) => ({
 test('the invoice that started this moves to the month it bills for', () => {
   const v = planMove(luzmoFile(), luzmoFolder(), BASE);
   assert.ok(v && v.move, 'expected a move');
-  assert.strictEqual(v.move.fromMonth, '2026-08');
-  assert.strictEqual(v.move.toMonth, '2026-09');
-  assert.strictEqual(v.move.fromPath, `${BASE}/Cumul/Aug-26/20260826_20260258.pdf`);
+  assert.strictEqual(v.move.fromMonth, '2026-09');
+  assert.strictEqual(v.move.toMonth, '2026-08');
+  assert.strictEqual(v.move.fromPath, `${BASE}/Cumul/Sep-26/20260826_20260258.pdf`);
   assert.strictEqual(v.move.amount, 557.28);
 });
 
@@ -50,8 +53,8 @@ test('every path is built from the archive root it was given', () => {
   // The archive has been renamed once already, and hardcoding its old name is
   // what broke the checklist. A move must follow the root the caller resolved.
   const other = 'Some/Other/Archive';
-  const v = planMove(luzmoFile({ path: `${other}/Cumul/Aug-26/x.pdf` }), luzmoFolder(), other);
-  assert.strictEqual(v.move.toFolderPath, `${other}/Cumul/Sep-26`);
+  const v = planMove(luzmoFile({ path: `${other}/Cumul/Sep-26/x.pdf` }), luzmoFolder(), other);
+  assert.strictEqual(v.move.toFolderPath, `${other}/Cumul/Aug-26`);
 });
 
 test('a vendor folder with no app row still moves', () => {
@@ -62,24 +65,24 @@ test('a vendor folder with no app row still moves', () => {
 
 test('the destination reuses what this vendor already calls that month', () => {
   // Cursor's folders are spelled "July", "August" — the move must not drop a
-  // second "Sep-26" folder in beside "September".
+  // second "Aug-26" folder in beside "August".
   const v = planMove(
     luzmoFile(),
     luzmoFolder({ vendorFolder: 'Cursor', monthFolderNames: ['August', 'September'] }),
     BASE
   );
-  assert.strictEqual(v.move.toFolderPath, `${BASE}/Cursor/September`);
+  assert.strictEqual(v.move.toFolderPath, `${BASE}/Cursor/August`);
 });
 
 test('a month folder that does not exist yet is named in the house style', () => {
-  const v = planMove(luzmoFile(), luzmoFolder({ monthFolderNames: ['Aug-26'] }), BASE);
-  assert.strictEqual(v.move.toFolderPath, `${BASE}/Cumul/Sep-26`);
+  const v = planMove(luzmoFile(), luzmoFolder({ monthFolderNames: ['Sep-26'] }), BASE);
+  assert.strictEqual(v.move.toFolderPath, `${BASE}/Cumul/Aug-26`);
 });
 
 // --- What it refuses to touch ---------------------------------------------
 
 test('an invoice already in the right month is left alone', () => {
-  const file = luzmoFile({ relPath: 'Sep-26', currentMonth: '2026-09', path: `${BASE}/Cumul/Sep-26/x.pdf` });
+  const file = luzmoFile({ relPath: 'Aug-26', currentMonth: '2026-08', path: `${BASE}/Cumul/Aug-26/x.pdf` });
   assert.strictEqual(planMove(file, luzmoFolder(), BASE), null);
 });
 
@@ -111,7 +114,7 @@ test('an invoice with no month anywhere is filed by the period it states', () =>
   const v = planMove(undated({ periodStart: '2026-08-26', periodEnd: '2026-09-26' }), luzmoFolder(), BASE);
   assert.ok(v && v.move, 'expected a move');
   assert.strictEqual(v.move.fromMonth, null, 'it belonged to no month, which is the point');
-  assert.strictEqual(v.move.toMonth, '2026-09');
+  assert.strictEqual(v.move.toMonth, '2026-08');
   assert.strictEqual(v.move.via, 'period');
   assert.strictEqual(v.move.undated, true);
 });
@@ -172,16 +175,17 @@ test('a loose invoice whose name agrees with its period is left alone', () => {
 });
 
 test('a loose invoice whose period disagrees with its name is reported, not moved', () => {
-  // The checklist dates this one August from the name; it bills September. That
-  // is worth knowing, and it is the owner's call whether to rename or re-file.
+  // The checklist dates this one September from the name; its period starts in
+  // August. That is worth knowing, and it is the owner's call whether to rename
+  // or re-file.
   const file = luzmoFile({
-    name: 'Aug 2026.pdf', relPath: '', currentMonth: '2026-08',
-    folderMonth: null, nameMonth: '2026-08',
+    name: 'Sep 2026.pdf', relPath: '', currentMonth: '2026-09',
+    folderMonth: null, nameMonth: '2026-09',
   });
   const v = planMove(file, luzmoFolder(), BASE);
   assert.ok(v.skip, 'expected it to be reported');
   assert.ok(!v.move, 'a loose file is never moved');
-  assert.match(v.skip, /name reads as 2026-08, but it bills 2026-09/);
+  assert.match(v.skip, /name reads as 2026-09, but it bills 2026-08/);
 });
 
 test('a file nested deeper than {vendor}/{month} is left for a human', () => {
@@ -198,7 +202,7 @@ test('a period far from where the file sits is treated as a misread', () => {
 });
 
 test('an annual period keeps the invoice in the month it starts', () => {
-  const file = luzmoFile({ periodStart: '2026-08-01', periodEnd: '2027-07-31' });
+  const file = luzmoFile({ periodStart: '2026-09-01', periodEnd: '2027-08-31' });
   assert.strictEqual(planMove(file, luzmoFolder(), BASE), null);
 });
 
@@ -213,8 +217,7 @@ test('an invoice whose total could not be used still moves, without an amount', 
 
 // --- What the moves would do to the sheet ---------------------------------
 
-// A sheet with one row (Cumul(Luzmo)) and two month columns, holding 557.28 in
-// August and nothing in September.
+// A sheet with one row (Cumul(Luzmo)) and two month columns.
 const sheetWith = (aug, sep) => ({
   grid: { apps: [{ name: 'Cumul(Luzmo)', rowIdx: 0 }], monthCols: { '2026-08': 0, '2026-09': 1 } },
   values: [[aug, sep]],
@@ -227,47 +230,52 @@ const usable = (name, amount, nameMonth) => ({
 });
 
 test('a vendor\'s loose files are not counted into a month a file moves into', () => {
-  // Cumul keeps three invoices loose in its folder whose names read as September,
-  // and one in Aug-26 that bills September. Both would key on "Cumul||2026-09".
-  // Counting the loose ones there would propose 857.28 for a month that holds
-  // one 557.28 invoice — and the sheet's month figures have never included
-  // files outside a month folder, because the total is the sum of the folder.
-  const moving = { ...luzmoFile(), path: `${BASE}/Cumul/Aug-26/20260826_20260258.pdf` };
+  // Cumul keeps two invoices loose in its folder whose names read as August,
+  // and one in Sep-26 whose period starts in August. All would key on
+  // "Cumul||2026-08". Counting the loose ones there would propose 857.28 for a
+  // month that holds one 557.28 invoice — and the sheet's month figures have
+  // never included files outside a month folder, because the total is the sum
+  // of the folder.
+  const moving = { ...luzmoFile(), path: `${BASE}/Cumul/Sep-26/20260826_20260258.pdf` };
   const folders = new Map([
-    ['Cumul||Aug-26', {
-      app: 'Cumul(Luzmo)', vendorFolder: 'Cumul', monthFolder: 'Aug-26', month: '2026-08',
-      monthFolderNames: ['Aug-26'], files: [moving],
+    ['Cumul||Sep-26', {
+      app: 'Cumul(Luzmo)', vendorFolder: 'Cumul', monthFolder: 'Sep-26', month: '2026-09',
+      monthFolderNames: ['Sep-26'], files: [moving],
     }],
     ['Cumul||', {
       app: 'Cumul(Luzmo)', vendorFolder: 'Cumul', monthFolder: '', month: null,
-      monthFolderNames: [], files: [usable('Sep 2026.pdf', 100, '2026-09'), usable('sep-26.pdf', 200, '2026-09')],
+      monthFolderNames: [], files: [usable('Aug 2026.pdf', 100, '2026-08'), usable('aug-26.pdf', 200, '2026-08')],
     }],
   ]);
-  const movedOut = new Map([['Cumul||2026-08', [moving]]]);
-  const movedIn = new Map([['Cumul||2026-09', [moving]]]);
+  const movedOut = new Map([['Cumul||2026-09', [moving]]]);
+  const movedIn = new Map([['Cumul||2026-08', [moving]]]);
 
-  const cells = predictCells(sheetWith(557.28, null), folders, movedOut, movedIn, () => 'Cumul(Luzmo)', {});
+  const cells = predictCells(sheetWith(null, 557.28), folders, movedOut, movedIn, () => 'Cumul(Luzmo)', {});
   const sep = cells.find(c => c.month === '2026-09');
   const aug = cells.find(c => c.month === '2026-08');
 
-  assert.strictEqual(sep.value, 557.28, 'September gets the invoice that moved, and only that');
-  assert.strictEqual(aug.value, 0, 'August is left holding nothing');
-  assert.strictEqual(aug.direction, 'down');
+  assert.strictEqual(aug.value, 557.28, 'August gets the invoice that moved, and only that');
+  assert.strictEqual(sep.value, 0, 'September is left holding nothing');
+  assert.strictEqual(sep.direction, 'down');
 });
 
 // --- Which cells may be rewritten -----------------------------------------
 //
-// A live run offered "Cumul(Luzmo) 2026-08: 14,081.00 → 0.00". The August folder
-// held one 557.28 invoice; moving it out left the folder empty, and the rule as
-// written replaced the cell with the empty folder's total. 14,081.00 is a
+// A live run offered "Cumul(Luzmo): 14,081.00 → 0.00" for the month an invoice
+// was moving out of. That folder held one 557.28 invoice; moving it out left
+// the folder empty, and the rule as written replaced the cell with the empty
+// folder's total. 14,081.00 is a
 // statement or hand-entered figure and the backfill has no idea what it is made
 // of — only that it is not the invoices.
 
-test('a figure the invoices do not account for is never replaced', () => {
+test('a figure the invoices do not account for is replaced, and says so', () => {
+  // The cell is the month's invoice total; a figure that is not that is
+  // replaced once the user ticks it — and the confirmation names both numbers.
   const v = decideCell({ current: 14081, before: 557.28, after: 0 });
-  assert.strictEqual(v.write, false);
-  assert.match(v.blocked, /14,081\.00, which is not what the invoices in that month come to/);
-  assert.match(v.blocked, /557\.28 before this change/);
+  assert.strictEqual(v.write, true);
+  assert.strictEqual(v.value, 0);
+  assert.match(v.replaces, /14,081\.00, which is not what the invoices in that month come to/);
+  assert.match(v.replaces, /557\.28 before this change/);
 });
 
 test('a cell that IS the invoice total follows the invoices out', () => {
@@ -293,30 +301,33 @@ test('a figure this app wrote itself may be corrected', () => {
 
 test('a cell already holding the right figure is left untouched', () => {
   assert.strictEqual(decideCell({ current: 557.28, before: 557.28, after: 557.28 }).write, false);
-  assert.strictEqual(decideCell({ current: 557.28, before: 557.28, after: 557.28 }).blocked, undefined);
+  assert.strictEqual(decideCell({ current: 557.28, before: 557.28, after: 557.28 }).replaces, undefined);
 });
 
-test('the run that started this now proposes one cell, not two', () => {
-  // Luzmo moving Aug → Sep, with August holding 14,081.00 that is not the
-  // invoices'. September fills; August is reported and left alone.
-  const moving = { ...luzmoFile(), path: `${BASE}/Cumul/Aug-26/20260826_20260258.pdf` };
+test('the run that started this proposes both cells, and flags the one that is not the invoices\'', () => {
+  // Luzmo moving Sep → Aug, with September holding 14,081.00 that is not the
+  // invoices'. August fills; September is set to what is left (nothing), with
+  // the figure it replaces named and the invoices listed.
+  const moving = { ...luzmoFile(), path: `${BASE}/Cumul/Sep-26/20260826_20260258.pdf` };
   const folders = new Map([
-    ['Cumul||Aug-26', {
-      app: 'Cumul(Luzmo)', vendorFolder: 'Cumul', monthFolder: 'Aug-26', month: '2026-08',
-      monthFolderNames: ['Aug-26'], files: [moving],
+    ['Cumul||Sep-26', {
+      app: 'Cumul(Luzmo)', vendorFolder: 'Cumul', monthFolder: 'Sep-26', month: '2026-09',
+      monthFolderNames: ['Sep-26'], files: [moving],
     }],
   ]);
   const cells = predictCells(
-    sheetWith(14081, null), folders,
-    new Map([['Cumul||2026-08', [moving]]]), new Map([['Cumul||2026-09', [moving]]]),
+    sheetWith(null, 14081), folders,
+    new Map([['Cumul||2026-09', [moving]]]), new Map([['Cumul||2026-08', [moving]]]),
     () => 'Cumul(Luzmo)', {}
   );
 
   const sep = cells.find(c => c.month === '2026-09');
   const aug = cells.find(c => c.month === '2026-08');
-  assert.strictEqual(sep.value, 557.28, 'September still fills from the invoice that arrived');
-  assert.ok(aug.blocked, 'August is reported, not proposed');
-  assert.strictEqual(aug.address, undefined, 'and carries no address to write to');
+  assert.strictEqual(aug.value, 557.28, 'August still fills from the invoice that arrived');
+  assert.strictEqual(sep.value, 0);
+  assert.match(sep.replaces, /14,081\.00/, 'September says whose figure it replaces');
+  assert.ok(Array.isArray(sep.files), 'and lists the invoices it is built from');
+  assert.ok(sep.address, 'and is a real proposal, with a cell to write to');
 });
 
 // --- Wiring ---------------------------------------------------------------
@@ -498,7 +509,7 @@ test('a month spread over two folders is totalled from both', () => {
     'all three invoices, not just the folder that happened to be last');
 });
 
-test('a blocked cell names the invoices behind its figure', () => {
+test('a cell replacing a figure that is not the invoices\' names the invoices behind it', () => {
   // One number cannot say whether the archive is short or the sheet is stale,
   // and those want opposite answers. The file names and amounts settle it.
   const folders = new Map([
@@ -509,9 +520,11 @@ test('a blocked cell names the invoices behind its figure', () => {
   const cells = predictCells(sheetFor(13439), folders, new Map(), movedIn, a => a, {});
 
   const cell = cells.find(c => c.month === '2026-07');
-  assert.ok(cell.blocked, 'a figure this far from the sheet must not be written');
+  assert.ok(!cell.blocked, 'it is proposed, for the user to tick');
+  assert.strictEqual(cell.value, 1170.3);
+  assert.match(cell.replaces, /13,439\.00/, 'and says what it replaces');
   assert.deepStrictEqual(
-    cell.invoices.map(i => `${i.file} ${i.amount}`).sort(),
+    cell.files.map(i => `${i.file} ${i.amount}`).sort(),
     ['20260712_20260215.pdf 585.15', 'July 26.pdf 585.15']);
 });
 
