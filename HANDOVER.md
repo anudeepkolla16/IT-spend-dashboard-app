@@ -704,11 +704,19 @@ api/
 ## Notes / gotchas
 
 - **Amounts are USD.** The sheet's native currency; no conversion is applied.
+- **The page is a light, app-style layout** (September 2026): a fixed sidebar (search, section
+  navigation, the count of open questions, sync status), a page header with the actions, a KPI
+  strip (accent tile, two stat tiles, the annual-cost-by-department donut, two action tiles), one
+  large monthly chart with Spend / Apps vs Laptops / Forecast tabs, and the **Applications** table —
+  one row per app with annual cost (trailing 12 months), monthly run-rate, change against the
+  previous month, renewal date with weeks left, owner and stage (Active / Not charged lately /
+  Never charged / One-time). The old per-month pivot is the "Monthly breakdown" tab of that card.
+  Every action and modal from before is unchanged; `/` focuses the sidebar search.
 - **Chart colours are a validated set, not decoration.** `COLORS` in `index.html` is the eight-slot
-  categorical palette for the dark surface (adjacent pairs ≥ ΔE 8 under colour-vision deficiency,
-  ≥ 3:1 on the panel), assigned in order and never cycled; a single-series chart takes slot 1.
-  Grids are hairlines, bars are thin with a rounded data end, and the Apps-vs-Laptops split is two
-  numbers and a bar rather than a two-slice pie. Keep to that when adding a chart.
+  categorical palette for the light surface (adjacent pairs ≥ ΔE 8 under colour-vision deficiency);
+  slots 3–5 sit under 3:1 on white and so only appear beside a label (the donut legend). A
+  single-series chart takes slot 1. Grids are hairlines, bars are thin with a rounded data end.
+  Keep to that when adding a chart.
 - **Run-rate = trailing 3-month average per app, annualised** (smooths volatile cloud/API costs); future
   budgeted months already in the sheet are excluded from run-rate and "current month" figures.
 - **Invoice uploads handle any size** — files over 4 MB go via a Graph resumable upload session.

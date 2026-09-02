@@ -11,86 +11,147 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0e1118; --panel:#151a24; --panel2:#1b2130; --line:#242b3a; --line2:#2d3548;
-    --txt:#e9ecf4; --muted:#98a2b8; --faint:#6b7590;
-    /* Validated categorical palette for the dark surface (see dataviz palette,
-       adjacent-pair CVD ΔE ≥ 8, ≥ 3:1 on #151a24). One series = one color. */
-    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
-    --accent:var(--s1); --accent2:var(--s3); --warn:var(--s4); --danger:var(--s8); --chip:#222a3a;
-    --radius:14px; --shadow:0 1px 0 rgba(255,255,255,.035) inset, 0 12px 32px -24px rgba(0,0,0,.8);
+    --bg:#f3f4f7; --panel:#ffffff; --panel2:#f7f8fb; --line:#e7e9ef; --line2:#d8dbe4;
+    --txt:#151a24; --muted:#6b7385; --faint:#9aa1b3;
+    /* Validated categorical palette for the light surface (dataviz palette,
+       adjacent-pair CVD ΔE ≥ 8). Slots 3–5 sit under 3:1 on white, so they are
+       used only beside a visible label. One series = one colour (slot 1). */
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
+    --accent:var(--s1); --accent-ink:#1c5cab; --accent-soft:#e8f1fc; --good:#0f8a5f; --good-soft:#e3f6ee; --warn:#b26b00; --warn-soft:#fff2d9; --danger:#c8312f; --danger-soft:#fde8e7; --violet:#5b4bc4; --violet-soft:#ece9fb;
+    --chip:#eef0f5; --radius:14px; --shadow:0 1px 2px rgba(21,26,36,.04), 0 8px 24px -18px rgba(21,26,36,.18);
+    --side:236px;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
   body{margin:0;font-family:'Inter','Segoe UI',system-ui,-apple-system,Arial,sans-serif;background:var(--bg);color:var(--txt);font-size:13.5px;line-height:1.45;-webkit-font-smoothing:antialiased}
-  .num,.kpi .val,td.num,th.num,.renewal-cost,.amt-fig,.inv-file .amt{font-variant-numeric:tabular-nums}
-  header{position:sticky;top:0;z-index:20;padding:12px 26px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:rgba(14,17,24,.82);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
-  header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:-.01em}
-  header .sub{color:var(--muted);font-size:12px;margin-top:2px;display:flex;align-items:center;gap:6px}
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--accent2);display:inline-block;box-shadow:0 0 0 3px rgba(25,158,112,.18)}
-  .dot.err{background:var(--danger);box-shadow:0 0 0 3px rgba(230,103,103,.18)}
+  .num,.kpi .val,td.num,th.num,.renewal-cost,.amt-fig,.inv-file .amt,.ktile .val,.kmini .val,.ov td.num{font-variant-numeric:tabular-nums}
+  a{color:var(--accent)}
+
+  /* ---- shell: sidebar + content ---- */
+  .app{display:flex;min-height:100vh}
+  .side{width:var(--side);flex:0 0 var(--side);background:var(--panel);border-right:1px solid var(--line);position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:16px 12px;gap:6px}
+  .brand{display:flex;align-items:center;gap:9px;padding:4px 8px 12px;font-weight:700;font-size:14.5px;letter-spacing:-.01em}
+  .brand .mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--s1),var(--s7));color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:800}
+  .side-search{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 10px;color:var(--faint);font-size:12.5px;margin-bottom:8px}
+  .side-search input{border:0;background:transparent;outline:0;flex:1;font:inherit;color:var(--txt);min-width:0}
+  .side-search input::placeholder{color:var(--faint)}
+  .side-search kbd{font:600 10px 'Inter',system-ui;background:#fff;border:1px solid var(--line2);border-radius:5px;padding:1px 5px;color:var(--faint)}
+  .nav-sec{color:var(--faint);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 4px}
+  .nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;color:var(--muted);font-weight:500;font-size:13px;cursor:pointer;text-decoration:none;border:0;background:none;width:100%;text-align:left;font-family:inherit}
+  .nav-item:hover{background:var(--panel2);color:var(--txt)}
+  .nav-item.active{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+  .nav-item .ico{width:18px;text-align:center;opacity:.85}
+  .nav-item .badge{margin-left:auto;background:var(--warn-soft);color:var(--warn);border-radius:10px;padding:0 7px;font-size:11px;font-weight:700;min-width:20px;text-align:center}
+  .nav-item .badge.zero{background:var(--chip);color:var(--faint)}
+  .side-foot{margin-top:auto;border-top:1px solid var(--line);padding:12px 8px 2px;display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+  .side-foot .who{font-weight:600;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .side-foot .sub{display:flex;align-items:flex-start;gap:7px;line-height:1.35}
+  .side-foot .sub .dot{margin-top:5px;flex:0 0 7px}
+  .content{flex:1;min-width:0}
+  .topbar{position:sticky;top:0;z-index:20;background:rgba(243,244,247,.85);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:16px 28px 10px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .topbar h1{font-size:22px;margin:0;font-weight:700;letter-spacing:-.02em}
+  .topbar .sub{color:var(--muted);font-size:12.5px;margin-top:1px;display:flex;align-items:center;gap:6px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block;box-shadow:0 0 0 3px rgba(15,138,95,.14)}
+  .dot.err{background:var(--danger);box-shadow:0 0 0 3px rgba(200,49,47,.14)}
   .grow{flex:1}
   .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .btn{background:var(--accent);color:#fff;border:0;border-radius:9px;padding:8px 13px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:filter .12s,border-color .12s,background .12s}
-  .btn:hover{filter:brightness(1.1)}
+  .btn{background:var(--accent);color:#fff;border:1px solid transparent;border-radius:9px;padding:8px 13px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:filter .12s,border-color .12s,background .12s;white-space:nowrap}
+  .btn:hover{filter:brightness(1.06)}
   .btn:disabled{opacity:.6;cursor:default}
-  .btn.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line2)}
-  .btn.ghost:hover{border-color:var(--accent);filter:none;background:#202838}
-  .btn.primary{background:var(--accent);border:1px solid transparent}
-  main{padding:22px 26px 10px;max-width:1400px;margin:0 auto}
-  .banner{background:rgba(230,103,103,.1);border:1px solid rgba(230,103,103,.4);color:#ffb3b3;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:16px;display:none}
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:18px}
-  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px 14px;position:relative;overflow:hidden;box-shadow:var(--shadow)}
-  .kpi .lab{color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
-  .kpi .val{font-size:30px;font-weight:800;margin-top:8px;letter-spacing:-.02em;line-height:1.1}
-  .kpi .hint{font-size:11.5px;color:var(--muted);margin-top:7px}
-  .kpi .bar{position:absolute;left:0;top:0;height:3px;width:100%;opacity:.9}
+  .btn.ghost{background:var(--panel);color:var(--txt);border-color:var(--line2)}
+  .btn.ghost:hover{border-color:var(--accent);color:var(--accent-ink);filter:none}
+  .btn.primary{background:var(--accent)}
+  main{padding:8px 28px 10px;max-width:1440px}
+  .banner{background:var(--danger-soft);border:1px solid rgba(200,49,47,.35);color:#8f1f1e;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:16px;display:none}
+  #dash{display:flex;flex-direction:column}
+
+  /* ---- KPI strip ---- */
+  .kstrip{display:grid;grid-template-columns:1.15fr 1fr 1fr 1.7fr .9fr;gap:14px;margin-bottom:16px;order:1}
+  .ktile{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);display:flex;flex-direction:column;justify-content:space-between;gap:10px;min-height:150px}
+  .ktile.accent{background:linear-gradient(160deg,#3a86e6,#2a6fca);border-color:transparent;color:#fff}
+  .ktile .lab{font-size:11.5px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .ktile.accent .lab{color:rgba(255,255,255,.82)}
+  .ktile .val{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:3px;line-height:1.15}
+  .ktile .hint{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .ktile.accent .hint{color:rgba(255,255,255,.75)}
+  .kmini{padding:10px 12px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
+  .ktile.accent .kmini{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.18)}
+  .kmini .lab{font-size:11px}
+  .kmini .val{font-size:18px}
+  .ktile.donut{flex-direction:row;align-items:center;gap:16px}
+  .donutwrap{position:relative;width:118px;height:118px;flex:0 0 118px}
+  .donutwrap .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:10px;font-weight:700;color:var(--muted);line-height:1.2;pointer-events:none}
+  .donut-legend{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;font-size:12px}
+  .donut-legend div{display:flex;align-items:center;gap:8px}
+  .donut-legend .sw{width:9px;height:9px;border-radius:50%;flex:0 0 9px}
+  .donut-legend .nm{flex:1;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .donut-legend .v{font-weight:600;font-variant-numeric:tabular-nums}
+  .ktiles-actions{display:flex;flex-direction:column;gap:10px}
+  .atile{flex:1;border:0;border-radius:12px;color:#fff;font:600 12.5px 'Inter',system-ui;cursor:pointer;padding:12px;text-align:left;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;min-height:68px;box-shadow:var(--shadow);transition:filter .12s}
+  .atile:hover{filter:brightness(1.06)}
+  .atile .ic{font-size:16px}
+  .atile.fetch{background:linear-gradient(160deg,#f07a5a,#e35d3e)}
+  .atile.import{background:linear-gradient(160deg,#7a6be0,#5b4bc4)}
+
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  .grid3{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px;box-shadow:var(--shadow)}
   .card h3{margin:0 0 4px;font-size:15px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+  .card-head{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  .card-head h3{margin:0}
+  .card-head .cap{margin:0}
   .cap{color:var(--muted);font-size:12px}
   .card > .cap{margin-bottom:14px;max-width:960px}
   .chartwrap{position:relative;height:300px}
   .chartwrap.sm{height:260px}
-  .chart-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:12.5px}
-  /* Apps vs laptops: two numbers and one bar — a two-slice pie says less */
-  .split{display:flex;flex-direction:column;gap:14px;justify-content:center;height:260px}
-  .split-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .split-stat{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
-  .split-stat .lab{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11.5px;font-weight:600}
-  .split-stat .sw{width:10px;height:10px;border-radius:3px;display:inline-block}
-  .split-stat .val{font-size:24px;font-weight:800;margin-top:6px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-  .split-stat .pct{color:var(--muted);font-size:12px;margin-top:2px}
-  .split-bar{display:flex;gap:2px;height:14px;border-radius:7px;overflow:hidden;background:var(--panel2)}
-  .split-bar span{display:block;height:100%;min-width:2px}
-  .split-note{color:var(--faint);font-size:11.5px}
-  table{width:100%;border-collapse:collapse;font-size:11.5px;white-space:nowrap}
-  th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);line-height:1.3}
-  th{color:var(--muted);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:var(--panel);cursor:pointer;z-index:2;padding-top:8px;padding-bottom:8px}
+  .chartwrap.lg{height:320px}
+  .chart-tabs{display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px;margin-left:auto}
+  .chart-tabs button{border:0;background:transparent;color:var(--muted);font:600 12px 'Inter',system-ui;padding:5px 11px;border-radius:7px;cursor:pointer}
+  .chart-tabs button.active{background:#fff;color:var(--txt);box-shadow:0 1px 2px rgba(21,26,36,.12)}
+
+  table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);line-height:1.3}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:none;letter-spacing:0;position:sticky;top:0;background:var(--panel2);cursor:pointer;z-index:2;padding-top:9px;padding-bottom:9px}
   td.num,th.num{text-align:right}
   th.stickycol,td.stickycol{position:sticky;left:0;background:var(--panel);z-index:1}
-  th.stickycol{z-index:3}
+  th.stickycol{background:var(--panel2);z-index:3}
   td.total,th.total{border-left:2px solid var(--line2);font-weight:650}
-  tbody tr:nth-child(even) td{background:rgba(255,255,255,.015)}
   .tblwrap{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
-  .chip{display:inline-block;background:var(--chip);color:var(--muted);border-radius:14px;padding:2px 8px;font-size:10.5px;font-weight:600}
+  .chip{display:inline-block;background:var(--chip);color:var(--muted);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600}
   .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
-  select,.filters input,input[data-month],input[data-amount]{background:var(--bg);border:1px solid var(--line2);color:var(--txt);border-radius:8px;padding:7px 9px;font-size:12.5px;font-family:inherit}
-  select:focus,input:focus,textarea:focus{outline:2px solid rgba(57,135,229,.45);outline-offset:1px;border-color:var(--accent)}
+  select,.filters input,input[data-month],input[data-amount]{background:var(--panel);border:1px solid var(--line2);color:var(--txt);border-radius:8px;padding:7px 10px;font-size:12.5px;font-family:inherit}
+  select:focus,input:focus,textarea:focus{outline:2px solid rgba(42,120,214,.35);outline-offset:1px;border-color:var(--accent)}
   .hidden{display:none}
   .foot{color:var(--faint);font-size:11.5px;text-align:center;padding:26px 0 8px}
   .pill{font-size:11px;padding:2px 8px;border-radius:20px;white-space:nowrap;font-weight:600}
-  .pill.up{background:rgba(230,103,103,.15);color:#ff9b9b}
-  .pill.down{background:rgba(25,158,112,.16);color:#6fe0b4}
-  .pill.danger{background:rgba(230,103,103,.2);color:#ffb0b0}
-  .pill.warn{background:rgba(201,133,0,.18);color:#ffd28a}
-  .pill.ok{background:rgba(57,135,229,.16);color:#a9c8ff}
+  .pill.up{background:var(--danger-soft);color:var(--danger)}
+  .pill.down{background:var(--good-soft);color:var(--good)}
+  .pill.danger{background:var(--danger-soft);color:var(--danger)}
+  .pill.warn{background:var(--warn-soft);color:var(--warn)}
+  .pill.ok{background:var(--accent-soft);color:var(--accent-ink)}
   .skeleton{color:var(--muted);text-align:center;padding:60px 0}
+
+  /* ---- applications overview ---- */
+  .ov{overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .ov table{font-size:12.5px}
+  .ov td{padding:9px 10px;vertical-align:middle}
+  .ov tbody tr:hover td{background:var(--panel2)}
+  .appcell{display:flex;align-items:center;gap:10px;min-width:180px}
+  .avatar{width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;flex:0 0 30px}
+  .avatar.sm{width:24px;height:24px;border-radius:50%;font-size:10.5px;flex-basis:24px}
+  .appcell .nm{font-weight:600;color:var(--txt)}
+  .appcell .sub{color:var(--faint);font-size:11px;margin-top:1px}
+  .stage{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12px}
+  .stage::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor}
+  .stage.active{color:var(--good)} .stage.lapsed{color:var(--danger)} .stage.none{color:var(--faint)} .stage.once{color:var(--violet)}
+  .weeks{font-size:11px;font-weight:600;margin-top:1px}
+  .weeks.ok{color:var(--good)} .weeks.soon{color:var(--warn)} .weeks.over{color:var(--danger)} .weeks.mute{color:var(--faint)}
+  .ov th.sorted::after{content:' ↓';color:var(--accent)}
+  .ov th.sorted.asc::after{content:' ↑'}
 
   /* Upcoming renewals */
   .tabs{display:flex;gap:6px;margin-bottom:10px}
-  .tab-btn{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
-  .tab-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .tab-btn{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+  .tab-btn.active{background:var(--accent-soft);color:var(--accent-ink);border-color:transparent}
   .renewals{display:flex;flex-direction:column;gap:2px;max-height:260px;overflow:auto}
   .renewal-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 4px;border-bottom:1px solid var(--line);font-size:12.5px}
   .renewal-row:last-child{border-bottom:none}
@@ -99,62 +160,57 @@
   .renewal-cost{font-weight:650;min-width:64px;text-align:right}
   .renewal-when{display:flex;align-items:center;gap:8px;flex-shrink:0}
 
-  /* Cost-spike badge in table cells */
-  .spike{color:#ffb0b0;font-weight:700}
+  .spike{color:var(--danger);font-weight:700}
   .spike::after{content:' ▲';font-size:9px}
-
-  /* Row click affordance */
   tbody tr{cursor:pointer}
-  tbody tr:hover td{background:rgba(255,255,255,.03)}
+  tbody tr:hover td{background:var(--panel2)}
 
   /* Amount import review */
   .amt-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
   .amt-pill{border-radius:14px;padding:4px 11px;font-size:12px;font-weight:600;border:1px solid transparent}
-  .amt-pill.auto{background:rgba(61,220,151,.13);border-color:rgba(61,220,151,.4);color:#8ff0c4}
-  .amt-pill.review{background:rgba(255,176,32,.13);border-color:rgba(255,176,32,.4);color:#ffd489}
-  .amt-pill.unmapped{background:rgba(255,107,107,.12);border-color:rgba(255,107,107,.4);color:#ffb3b3}
+  .amt-pill.auto{background:var(--good-soft);border-color:rgba(15,138,95,.3);color:var(--good)}
+  .amt-pill.review{background:var(--warn-soft);border-color:rgba(178,107,0,.3);color:var(--warn)}
+  .amt-pill.unmapped{background:var(--danger-soft);border-color:rgba(200,49,47,.3);color:var(--danger)}
   .amt-pill.muted{background:var(--chip);color:var(--muted);border-color:var(--line)}
   .amt-section{margin-top:16px}
   .amt-section h4{margin:0 0 4px;font-size:13.5px}
   .amt-section .cap{margin-bottom:8px}
   .amt-row{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--panel2)}
-  .amt-row.flag{border-color:rgba(255,176,32,.45)}
+  .amt-row.flag{border-color:rgba(178,107,0,.45)}
   .amt-main{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .amt-app{font-weight:600;font-size:13.5px;flex:1;min-width:150px}
-  .amt-fig{font-variant-numeric:tabular-nums;font-size:13.5px;white-space:nowrap}
+  .amt-fig{font-size:13.5px;white-space:nowrap}
   .amt-fig .was{color:var(--muted);text-decoration:line-through;margin-right:6px}
   .amt-note{color:var(--warn);font-size:11.5px;flex-basis:100%;margin-top:3px}
   .amt-toggle{background:none;border:0;color:var(--accent);font-size:11.5px;cursor:pointer;padding:2px 0}
   .amt-txns{display:none;margin-top:8px;border-top:1px solid var(--line);padding-top:8px;max-height:190px;overflow:auto}
   .amt-txns.show{display:block}
   .amt-txns table{width:100%;border-collapse:collapse;font-size:11.5px}
-  .amt-txns td{padding:3px 6px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--muted)}
-  .amt-txns td.num{text-align:right;font-variant-numeric:tabular-nums;color:var(--txt);white-space:nowrap}
-  .amt-txns td.refund{color:var(--accent2)}
-  .amt-row select{background:var(--panel);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:5px 7px;font-size:12.5px;min-width:190px}
+  .amt-txns td{padding:3px 6px;border-bottom:1px solid var(--line);color:var(--muted)}
+  .amt-txns td.num{text-align:right;color:var(--txt);white-space:nowrap}
+  .amt-txns td.refund{color:var(--good)}
+  .amt-row select{min-width:190px}
   .amt-empty{color:var(--muted);font-size:12.5px;padding:10px 2px}
   .amt-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-  .amt-controls select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:12.5px}
+
   /* Invoice checklist */
   .inv-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
   .amt-pill.clickable{cursor:pointer;user-select:none}
-  .amt-pill.clickable:hover{filter:brightness(1.25)}
-  .amt-pill.clickable.on{box-shadow:0 0 0 2px var(--txt) inset;filter:brightness(1.3)}
+  .amt-pill.clickable:hover{filter:brightness(.97)}
+  .amt-pill.clickable.on{box-shadow:0 0 0 2px var(--txt) inset}
   .amt-pill.clickable.on::after{content:' ✕';opacity:.7}
   .inv-focusnote{color:var(--muted);font-size:12px;margin-bottom:10px}
   .inv-focusnote button{background:none;border:0;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
   .inv-grid{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
-  .inv-grid table{font-size:11px}
+  .inv-grid table{font-size:11.5px}
   .inv-grid td.mark{text-align:center;font-weight:700;cursor:pointer;width:34px}
-  /* Absorbs the slack so Application/months/On-file pack together at the left
-     rather than being stretched apart across the full table width. */
   .inv-grid th.fill,.inv-grid td.fill{width:100%;padding:0}
   .inv-grid td.mark span{display:inline-block;min-width:20px;border-radius:6px;padding:1px 4px}
-  .mark-have span{background:rgba(61,220,151,.16);color:#7ff0c2}
-  .mark-missing span{background:rgba(255,176,32,.2);color:#ffd28a}
-  .mark-extra span{background:rgba(108,140,255,.16);color:#a9bcff}
-  .mark-planned span{color:var(--muted);opacity:.6}
-  .mark-none span{color:var(--muted);opacity:.28}
+  .mark-have span{background:var(--good-soft);color:var(--good)}
+  .mark-missing span{background:var(--warn-soft);color:var(--warn)}
+  .mark-extra span{background:var(--accent-soft);color:var(--accent-ink)}
+  .mark-planned span{color:var(--muted);opacity:.7}
+  .mark-none span{color:var(--muted);opacity:.35}
   .inv-legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:11.5px;color:var(--muted)}
   .inv-legend b{font-weight:700;margin-right:4px}
   .inv-files{display:flex;flex-direction:column;gap:2px;max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px 10px}
@@ -164,23 +220,23 @@
   .inv-file .when{color:var(--muted);font-size:11px;min-width:64px}
   .inv-file a{color:var(--accent);text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .inv-file a:hover{text-decoration:underline}
-  .inv-file .amt{font-variant-numeric:tabular-nums;white-space:nowrap;min-width:76px;text-align:right}
+  .inv-file .amt{white-space:nowrap;min-width:76px;text-align:right}
   .inv-file .amt.soft{color:var(--muted)}
   @media(max-width:700px){.inv-file{flex-wrap:wrap}.inv-file .who{min-width:0}}
 
   /* Needs your answer */
   .pend-row{display:grid;grid-template-columns:1fr auto;gap:8px 16px;padding:12px 0;border-top:1px solid var(--line);align-items:start}
   .pend-row:first-child{border-top:0}
-  .pend-id{display:inline-block;background:rgba(201,133,0,.18);color:#ffd28a;border-radius:6px;padding:1px 7px;font-weight:700;font-size:11.5px;margin-right:6px}
+  .pend-id{display:inline-block;background:var(--warn-soft);color:var(--warn);border-radius:6px;padding:1px 7px;font-weight:700;font-size:11.5px;margin-right:6px}
   .pend-q{margin-top:5px;font-weight:500}
   .pend-side{display:flex;flex-direction:column;gap:6px;min-width:270px}
   .pend-side select{width:100%}
   @media(max-width:800px){.pend-row{grid-template-columns:1fr}.pend-side{min-width:0}}
 
   /* Drill-down modal */
-  .modal-overlay{position:fixed;inset:0;background:rgba(5,7,15,.7);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal-overlay{position:fixed;inset:0;background:rgba(21,26,36,.45);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
   .modal-overlay.show{display:flex}
-  .modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;max-width:640px;width:100%;max-height:85vh;overflow:auto}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;max-width:640px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 24px 60px -20px rgba(21,26,36,.45)}
   .modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px}
   .modal-head h3{margin:0;font-size:17px}
   .modal-close{background:none;border:0;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;padding:2px 6px}
@@ -205,30 +261,50 @@
   .appcard-nums{display:flex;gap:20px;margin-top:8px}
   .appcard-nums .cap{margin-bottom:2px;display:block}
 
-  @media(max-width:900px){.grid,.grid3{grid-template-columns:1fr}}
+  @media(max-width:1200px){.kstrip{grid-template-columns:1fr 1fr 1fr}.ktile.donut{grid-column:span 2}}
+  @media(max-width:1000px){.side{display:none}.grid{grid-template-columns:1fr}}
   @media(max-width:700px){
+    .kstrip{grid-template-columns:1fr 1fr}.ktile.donut{grid-column:span 2}
     .tblwrap{display:none}
-    .cardlist{display:flex;flex-direction:column;gap:8px}
+    .cardlist.on{display:flex;flex-direction:column;gap:8px}
+    main,.topbar{padding-left:14px;padding-right:14px}
   }
 </style>
 </head>
 <body>
-<header>
-  <div>
-    <h1>💻 Saras — App Spend Dashboard</h1>
+<div class="app">
+<aside class="side">
+  <div class="brand"><span class="mark">S</span>Saras IT Spend</div>
+  <label class="side-search">🔍 <input id="sideSearch" placeholder="Search for apps" /><kbd>/</kbd></label>
+  <div class="nav-sec">Discover</div>
+  <button class="nav-item active" data-goto="top"><span class="ico">▦</span>Overview</button>
+  <button class="nav-item" data-goto="appsCard"><span class="ico">▤</span>Applications</button>
+  <button class="nav-item" data-goto="renewalsCard"><span class="ico">📅</span>Renewals</button>
+  <button class="nav-item" data-goto="invoiceCard"><span class="ico">🧾</span>Invoices</button>
+  <div class="nav-sec">Manage</div>
+  <button class="nav-item" data-goto="pendingCard"><span class="ico">❓</span>Needs your answer<span class="badge zero" id="pendingBadge">0</span></button>
+  <button class="nav-item" id="navRules"><span class="ico">⚙</span>Filing rules</button>
+  <div class="side-foot">
+    <div class="who" id="whoami"></div>
     <div class="sub"><span class="dot" id="syncDot"></span><span id="syncLabel">Connecting to SharePoint…</span></div>
+  </div>
+</aside>
+<div class="content">
+<header class="topbar" id="top">
+  <div>
+    <h1>Expenses</h1>
+    <div class="sub">Apps, subscriptions and hardware · from the SharePoint sheet · all figures in $ (USD)</div>
   </div>
   <div class="grow"></div>
   <div class="toolbar">
-    <span class="cap" id="whoami"></span>
     <button class="btn ghost" id="fixTotalsBtn">🧮 Check Totals</button>
-    <button class="btn primary" id="mailSyncBtn">📧 Fetch Invoices</button>
     <button class="btn ghost" id="periodsBtn" title="Re-read every archived invoice's billing period and re-file the ones that were filed by their arrival date">🗓 Recheck Periods</button>
     <button class="btn ghost" id="amountsBtn">💰 Update Amounts</button>
     <input type="file" id="amountsFile" accept=".xlsx,.xlsm,.xls,.csv" class="hidden" />
     <button class="btn ghost" id="importBtn">📥 Import Invoices</button>
     <button class="btn ghost" id="tidyBtn">🧹 Tidy Archive</button>
     <button class="btn ghost" id="refreshBtn">↻ Refresh now</button>
+    <button class="btn primary" id="mailSyncBtn">📧 Fetch Invoices</button>
   </div>
 </header>
 
@@ -237,9 +313,9 @@
   <div id="loading" class="skeleton">Loading spend data from SharePoint…</div>
 
   <div id="dash" class="hidden">
-    <div class="kpis" id="kpis"></div>
+    <div class="kstrip" id="kpis"></div>
 
-    <div class="card" id="pendingCard">
+    <div class="card" id="pendingCard" style="order:4">
       <h3>❓ Needs your answer</h3>
       <div class="cap">Invoices the sync would not file without asking — no rule names the sender, the vendor bills several rows and nothing in the invoice picks one, or nothing says which month it bills. Answer here or in your Slack DM: the file moves into its folder, the month is totalled and ticked, and the answer is remembered as a rule.</div>
       <div id="pendingStatus" class="cap" style="margin:8px 0"></div>
@@ -260,7 +336,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="renewalsCard" style="order:5">
       <h3>📅 Upcoming Renewals</h3>
       <div class="cap">Yearly renewals in the next 6 months, and every monthly renewal in the current month, with expected cost (click a row for full detail)</div>
       <div class="tabs" id="renewalTabs">
@@ -270,46 +346,42 @@
       <div class="renewals" id="renewalsList"></div>
     </div>
 
-    <div class="grid3">
-      <div class="card">
-        <h3>Monthly Spend Trend &amp; Forecast</h3>
-        <div class="cap">Actual + planned monthly spend (the sheet includes budgeted future months) with a 6-month trend forecast (dashed) appended after the last data point</div>
-        <div class="chartwrap"><canvas id="trendChart"></canvas></div>
+    <div class="card" id="trendCard" style="order:2">
+      <div class="card-head">
+        <div>
+          <h3>Monthly IT expenses</h3>
+          <div class="cap" id="trendCap">Actual and planned monthly spend from the sheet, with a 6-month trend forecast</div>
+        </div>
+        <div class="chart-tabs" id="trendTabs">
+          <button data-mode="total" class="active">Spend</button>
+          <button data-mode="split">Apps vs Laptops</button>
+          <button data-mode="forecast">Forecast</button>
+        </div>
       </div>
-      <div class="card">
-        <h3>Apps vs Laptops</h3>
-        <div class="cap">Total spend split by category</div>
-        <div class="split" id="splitStats"></div>
-      </div>
+      <div class="chartwrap lg"><canvas id="trendChart"></canvas></div>
     </div>
 
-    <div class="grid">
-      <div class="card">
-        <h3>Spend by Department</h3>
-        <div class="cap">Which teams drive the cost</div>
-        <div class="chartwrap"><canvas id="deptChart"></canvas></div>
-      </div>
+    <div class="grid" style="order:6">
       <div class="card">
         <h3>Spend by Billing Cycle</h3>
         <div class="cap">Monthly / Quarterly / Annual / One-time mix</div>
         <div class="chartwrap"><canvas id="catChart"></canvas></div>
       </div>
+      <div class="card">
+        <h3>Top Apps by Spend</h3>
+        <div class="cap">Highest total spend per application (all-time, in $)</div>
+        <div class="chartwrap"><canvas id="topChart"></canvas></div>
+      </div>
     </div>
 
-    <div class="card">
-      <h3>Top Apps by Spend</h3>
-      <div class="cap">Highest total spend per application (all-time, in $)</div>
-      <div class="chartwrap"><canvas id="topChart"></canvas></div>
-    </div>
-
-    <div class="card">
+    <div class="card" style="order:7">
       <h3>🔮 Annual Run-Rate Projection</h3>
       <div class="cap">What each app costs per year at its current rate. Monthly apps use a trailing 3-month average (smooths volatile cloud/API metering); annual, half-yearly and quarterly charges are spread over their billing cycle rather than counted every month. One-time purchases and cancelled apps are excluded.</div>
       <div class="chartwrap sm"><canvas id="runrateChart"></canvas></div>
       <div id="runrateNote" class="cap" style="margin-top:10px"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="invoiceCard" style="order:8">
       <h3>🧾 Invoice Checklist</h3>
       <div class="cap">Which invoices are actually on file, per app and per month, set against the months the sheet records a charge for. Click a cell to open that app's invoices.</div>
       <div class="tabs" id="invTabs">
@@ -334,17 +406,25 @@
       <div id="invChecklist"></div>
       <div id="invFiles" class="hidden"></div>
       <div class="inv-legend" id="invLegend">
-        <span><b style="color:#7ff0c2">✓</b> invoice on file</span>
-        <span><b style="color:#ffd28a">!</b> charged, no invoice found</span>
-        <span><b style="color:#a9bcff">●</b> invoice on file, nothing charged in the sheet</span>
+        <span><b style="color:var(--good)">✓</b> invoice on file</span>
+        <span><b style="color:var(--warn)">!</b> charged, no invoice found</span>
+        <span><b style="color:var(--accent-ink)">●</b> invoice on file, nothing charged in the sheet</span>
         <span><b style="color:var(--muted)">·</b> nothing charged</span>
         <span><b style="color:var(--muted)">–</b> future month budgeted in the sheet, not yet billed</span>
       </div>
     </div>
 
-    <div class="card">
-      <h3>Line-Item Detail</h3>
-      <div class="cap">One row per app, spend broken out by month · all figures in $ (USD)</div>
+    <div class="card" id="appsCard" style="order:3">
+      <div class="card-head">
+        <div>
+          <h3>Applications</h3>
+          <div class="cap">Every app the sheet tracks: what it costs a year, its run-rate, the next renewal and whether it is still being charged. Click a row for its history and invoices.</div>
+        </div>
+        <div class="chart-tabs" id="appsTabs">
+          <button data-tab="overview" class="active">Overview</button>
+          <button data-tab="monthly">Monthly breakdown</button>
+        </div>
+      </div>
       <div class="filters">
         <select id="fType"><option value="">All records</option><option>Apps</option><option>Laptops</option></select>
         <select id="fDept"></select>
@@ -353,7 +433,8 @@
         <span class="chip" id="rowCount"></span>
         <button class="btn ghost" id="exportBtn">⬇ Export</button>
       </div>
-      <div class="tblwrap">
+      <div class="ov" id="appsOverview"></div>
+      <div class="tblwrap hidden">
         <table id="tbl"><thead></thead><tbody></tbody></table>
       </div>
       <div class="cardlist" id="tblCards"></div>
@@ -436,6 +517,8 @@
     Data auto-synced from SharePoint every 5 minutes · amounts shown in $ (USD), the sheet's native currency
   </div>
 </main>
+</div>
+</div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -454,10 +537,11 @@ const fmtCell = n => {
   if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(1).replace(/\.0$/,'') + 'K';
   return String(Math.round(n));
 };
-// The validated categorical order for the dark surface (dataviz palette):
+// The validated categorical order for the light surface (dataviz palette):
 // assigned in this order, never cycled, and a single series takes slot 1.
-const COLORS = ['#3987e5','#d95926','#199e70','#c98500','#d55181','#008300','#9085e9','#e66767'];
-const SERIES = { apps: COLORS[0], laptops: COLORS[1], forecast: '#98a2b8' };
+// Slots 3–5 sit under 3:1 on white, so they only ever appear beside a label.
+const COLORS = ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#008300','#4a3aa7','#e34948'];
+const SERIES = { apps: COLORS[0], laptops: COLORS[1], forecast: '#9aa1b3' };
 let charts = {};
 let appRows = [];      // from live API (always USD)
 let lastSyncedAt = null;
@@ -947,7 +1031,6 @@ function build(){
   renderKPIs(all);
   renderRenewals(all);
   renderTrend(all);
-  renderSplit(all);
   renderDept(all);
   renderCat(all);
   renderTop(all.filter(r=>r.kind==='Apps'));
@@ -1040,31 +1123,53 @@ function renderKPIs(all){
   const rr = monthlyRunRate(apps);
   const annual = rr*12;
   const activeApps = latestActualRowsPerApp(apps).length;
+  const tracked = (window.SHEET_ROWS || []).filter(a => a.kind !== 'Laptops').length || new Set(apps.map(a=>a.name)).size;
   const lapTotal = laps.reduce((s,r)=>s+r.usd,0);
+  const momPill = hasThisMonth && lastMonth
+    ? `<span class="pill ${mom>=0?'up':'down'}">${mom>=0?'▲':'▼'} ${Math.abs(mom).toFixed(0)}% vs ${monthLabel(prevKey)}</span>`
+    : (hasThisMonth ? 'this month' : 'not entered in the sheet yet');
 
-  const cards = [
-    {lab:'Total Spend (all-time)', val:fmtShort(totalAll), hint:`${months.length} month(s) of data`, c:COLORS[0]},
-    {lab:`Spend · ${monthLabel(thisKey)}`, val:fmtShort(thisMonth),
-       hint: hasThisMonth
-         ? (lastMonth ? `<span class="pill ${mom>=0?'up':'down'}">${mom>=0?'▲':'▼'} ${Math.abs(mom).toFixed(0)}% vs prev</span>` : 'this month')
-         : `not entered in sheet yet`, c:COLORS[3]},
-    {lab:'Monthly Run-Rate', val:fmtShort(rr), hint:`${activeApps} active subscriptions`, c:COLORS[2]},
-    {lab:'Projected Annual Run-Rate', val:fmtShort(annual), hint:'recurring apps × 12', c:COLORS[6]},
-    {lab:'Laptop / Hardware Spend', val:fmtShort(lapTotal), hint:`${laps.length} manual record(s)`, c:COLORS[1]},
-  ];
-  $('#kpis').innerHTML = cards.map(k=>`
-    <div class="kpi"><div class="bar" style="background:${k.c}"></div>
-      <div class="lab">${k.lab}</div><div class="val">${k.val}</div><div class="hint">${k.hint}</div></div>`).join('');
+  $('#kpis').innerHTML = `
+    <div class="ktile accent">
+      <div><div class="lab">Total spend · all-time</div><div class="val">${fmtUSD(totalAll)}</div><div class="hint">${months.length} month${months.length===1?'':'s'} of data · ${fmtUSD(lapTotal)} of it hardware</div></div>
+      <div class="kmini"><div class="lab">Monthly run-rate</div><div class="val">${fmtUSD(rr)}</div></div>
+    </div>
+    <div class="ktile">
+      <div><div class="lab">Active subscriptions</div><div class="val">${activeApps}</div><div class="hint">of ${tracked} apps tracked</div></div>
+      <div class="kmini"><div class="lab">Not charged recently</div><div class="val">${Math.max(0, tracked - activeApps)}</div></div>
+    </div>
+    <div class="ktile">
+      <div><div class="lab">Spend · ${monthLabel(thisKey)}</div><div class="val">${fmtUSD(thisMonth)}</div><div class="hint">${momPill}</div></div>
+      <div class="kmini"><div class="lab">Projected annual run-rate</div><div class="val">${fmtUSD(annual)}</div></div>
+    </div>
+    <div class="ktile donut">
+      <div class="donutwrap"><canvas id="deptChart"></canvas><div class="center">Annual<br>cost by<br>department</div></div>
+      <div class="donut-legend" id="deptLegend"></div>
+    </div>
+    <div class="ktiles-actions">
+      <button class="atile fetch" id="tileFetch"><span class="ic">📧</span>Fetch invoices from the mailbox</button>
+      <button class="atile import" id="tileImport"><span class="ic">📥</span>Import invoices from a folder</button>
+    </div>`;
+  $('#tileFetch').onclick = () => $('#mailSyncBtn').click();
+  $('#tileImport').onclick = () => $('#importBtn').click();
 }
 
 function destroy(id){ if(charts[id]){charts[id].destroy(); delete charts[id];} }
-Chart.defaults.color = '#98a2b8';
-Chart.defaults.borderColor = 'rgba(255,255,255,.06)';
+Chart.defaults.color = '#6b7385';
+Chart.defaults.borderColor = 'rgba(21,26,36,.08)';
 Chart.defaults.font.family = "'Inter','Segoe UI',system-ui,Arial";
 Chart.defaults.font.size = 11.5;
 // Recessive chrome, thin marks, one tooltip style everywhere.
-const GRID = { color: 'rgba(255,255,255,.06)', drawTicks: false };
-const TOOLTIP = { backgroundColor: '#1b2130', borderColor: '#2d3548', borderWidth: 1, titleColor: '#e9ecf4', bodyColor: '#98a2b8', padding: 10, cornerRadius: 8, displayColors: true, boxPadding: 4 };
+const GRID = { color: 'rgba(21,26,36,.06)', drawTicks: false };
+const TOOLTIP = { backgroundColor: '#ffffff', borderColor: '#e7e9ef', borderWidth: 1, titleColor: '#151a24', bodyColor: '#6b7385', padding: 10, cornerRadius: 8, displayColors: true, boxPadding: 4, titleFont: { weight: '700' } };
+// A vertical hairline through the hovered month, as on the reference design.
+const CROSSHAIR = { id: 'crosshair', afterDraw(chart) {
+  const act = chart.tooltip && chart.tooltip.getActiveElements ? chart.tooltip.getActiveElements() : [];
+  if (!act.length || chart.config.type !== 'line') return;
+  const x = act[0].element.x, { top, bottom } = chart.chartArea, ctx = chart.ctx;
+  ctx.save(); ctx.strokeStyle = 'rgba(42,120,214,.55)'; ctx.lineWidth = 1; ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); ctx.restore();
+} };
 const BAR = { borderRadius: 4, borderSkipped: 'start', maxBarThickness: 22, barPercentage: .72, categoryPercentage: .8 };
 const LEGEND = { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'circle', padding: 16 } };
 
@@ -1076,7 +1181,9 @@ function linreg(ys){
   return {a,b};
 }
 
-function renderTrend(all){
+let trendMode = 'total';
+function renderTrend(all, mode){
+  if (mode) trendMode = mode;
   destroy('trend');
   const appsM = monthTotals(all.filter(r=>r.kind==='Apps'));
   const lapsM = monthTotals(all.filter(r=>r.kind==='Laptops'));
@@ -1084,7 +1191,7 @@ function renderTrend(all){
   const totalSeries = months.map(m=>(appsM[m]||0)+(lapsM[m]||0));
   const reg = linreg(totalSeries);
   const fMonths=[], fVals=[];
-  if (reg && months.length>=2){
+  if (trendMode === 'forecast' && reg && months.length>=2){
     let [y,mo] = months[months.length-1].split('-').map(Number);
     for (let i=1;i<=6;i++){
       mo++; if(mo>12){mo=1;y++;}
@@ -1092,52 +1199,63 @@ function renderTrend(all){
       fVals.push(Math.max(0, reg.a + reg.b*(months.length-1+i)));
     }
   }
-  const labels = months.concat(fMonths).map(monthLabel);
+  const labels = months.concat(fMonths).map(m => monthLabel(m).replace(/ \d{4}$/, m.endsWith('-01') || m === months[0] ? ' ' + m.slice(0,4) : ''));
   const forecast = months.map(()=>null);
   if(fVals.length){ forecast[months.length-1]=totalSeries[totalSeries.length-1]; forecast.push(...fVals); }
+  const pad = fMonths.map(()=>null);
+  const line = (label, data, color, fill) => ({
+    label, data, borderColor: color, backgroundColor: fill, fill: true, tension: .35, borderWidth: 2,
+    pointRadius: 0, pointHitRadius: 16, pointHoverRadius: 5, pointHoverBackgroundColor: color, pointHoverBorderColor: '#ffffff', pointHoverBorderWidth: 2,
+  });
+  const datasets = trendMode === 'split'
+    ? [line('Apps', months.map(m=>appsM[m]||0), SERIES.apps, 'rgba(42,120,214,.10)'), line('Laptops', months.map(m=>lapsM[m]||0), SERIES.laptops, 'rgba(235,104,52,.08)')]
+    : [line('Total spend', totalSeries.concat(pad), SERIES.apps, 'rgba(42,120,214,.12)')];
+  if (trendMode === 'forecast') datasets.push({ label:'Forecast (trend)', data:forecast, borderColor:SERIES.forecast, borderDash:[5,5], borderWidth:1.5, pointRadius:0, pointHitRadius:16, pointHoverRadius:3, tension:.35 });
+  $('#trendCap').textContent = trendMode === 'split'
+    ? 'Apps and subscriptions against laptops and hardware, month by month'
+    : trendMode === 'forecast' ? 'Monthly spend with a 6-month straight-line trend appended after the last month in the sheet'
+    : 'Actual and planned monthly spend from the sheet — hover a month for the figure';
 
   charts.trend = new Chart($('#trendChart'),{
     type:'line',
-    data:{labels,datasets:[
-      {label:'Apps', data:months.map(m=>appsM[m]||0).concat(fMonths.map(()=>null)), borderColor:SERIES.apps, backgroundColor:'rgba(57,135,229,.10)', fill:true, tension:.3, borderWidth:2, pointRadius:0, pointHitRadius:14, pointHoverRadius:4, pointHoverBackgroundColor:SERIES.apps, pointHoverBorderColor:'#151a24', pointHoverBorderWidth:2},
-      {label:'Laptops', data:months.map(m=>lapsM[m]||0).concat(fMonths.map(()=>null)), borderColor:SERIES.laptops, backgroundColor:'rgba(217,89,38,.08)', fill:true, tension:.3, borderWidth:2, pointRadius:0, pointHitRadius:14, pointHoverRadius:4, pointHoverBackgroundColor:SERIES.laptops, pointHoverBorderColor:'#151a24', pointHoverBorderWidth:2},
-      {label:'Forecast (trend)', data:forecast, borderColor:SERIES.forecast, borderDash:[5,5], borderWidth:1.5, pointRadius:0, pointHitRadius:14, pointHoverRadius:3, tension:.3}
-    ]},
+    data:{labels,datasets},
+    plugins:[CROSSHAIR],
     options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-      plugins:{legend:LEGEND,
+      plugins:{legend:{...LEGEND, display: datasets.length > 1},
         tooltip:{...TOOLTIP,callbacks:{label:c=>' '+c.dataset.label+': '+(c.parsed.y==null?'—':fmtUSD(c.parsed.y))}}},
-      scales:{y:{ticks:{callback:v=>fmtShort(v),padding:6},grid:GRID,border:{display:false}},x:{grid:{display:false},border:{display:false},ticks:{maxRotation:0,autoSkipPadding:12}}}}
+      scales:{y:{ticks:{callback:v=>fmtShort(v),padding:8,maxTicksLimit:6},grid:GRID,border:{display:false},beginAtZero:true},x:{grid:{display:false},border:{display:false},ticks:{maxRotation:0,autoSkipPadding:14}}}}
   });
 }
-
-// Two numbers and one bar. A two-slice pie is the chart form for exactly
-// this, and it says less than the numbers do.
-function renderSplit(all){
-  const a = all.filter(r=>r.kind==='Apps').reduce((s,r)=>s+r.usd,0);
-  const l = all.filter(r=>r.kind==='Laptops').reduce((s,r)=>s+r.usd,0);
-  const t = a + l || 1;
-  const pa = a / t * 100, pl = l / t * 100;
-  $('#splitStats').innerHTML = `
-    <div class="split-row">
-      <div class="split-stat"><div class="lab"><span class="sw" style="background:${SERIES.apps}"></span>Apps / Software</div><div class="val">${fmtUSD(a)}</div><div class="pct">${pa.toFixed(0)}% of all spend</div></div>
-      <div class="split-stat"><div class="lab"><span class="sw" style="background:${SERIES.laptops}"></span>Laptops / Hardware</div><div class="val">${fmtUSD(l)}</div><div class="pct">${pl.toFixed(0)}% of all spend</div></div>
-    </div>
-    <div class="split-bar" title="Apps ${pa.toFixed(0)}% · Laptops ${pl.toFixed(0)}%"><span style="width:${pa}%;background:${SERIES.apps}"></span><span style="width:${pl}%;background:${SERIES.laptops}"></span></div>
-    <div class="split-note">All-time, in $ (USD), from the sheet's Apps and Laptops rows.</div>`;
-}
+$('#trendTabs').querySelectorAll('button').forEach(b => b.onclick = () => {
+  $('#trendTabs').querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+  renderTrend(window.MODEL || [], b.dataset.mode);
+});
 
 function groupSum(rows, key){
   const g={}; rows.forEach(r=>{const k=r[key]||'—'; g[k]=(g[k]||0)+r.usd;});
   return Object.entries(g).sort((a,b)=>b[1]-a[1]);
 }
+// Annual cost by department: the last twelve months, six departments and
+// "Others". A donut is the part-to-whole form for this few segments; every
+// segment is named in the legend beside it, with its figure, so no colour
+// carries meaning on its own.
 function renderDept(all){
   destroy('dept');
-  const g = groupSum(all,'dept');
+  const from = realMonthKey(-11), to = realMonthKey(0);
+  const g = groupSum(all.filter(r => r.month && r.month >= from && r.month <= to), 'dept');
+  const top = g.slice(0, 6);
+  const rest = g.slice(6).reduce((s, x) => s + x[1], 0);
+  if (rest > 0) top.push(['Others', rest]);
+  const total = top.reduce((s, x) => s + x[1], 0) || 1;
+  const cols = top.map((x, i) => x[0] === 'Others' ? '#c4c9d6' : COLORS[i]);
+  $('#deptLegend').innerHTML = top.map((x, i) =>
+    `<div><span class="sw" style="background:${cols[i]}"></span><span class="nm" title="${x[0]}">${x[0]}</span><span class="v">${fmtUSD(x[1])}</span></div>`).join('')
+    || '<div class="cap">No spend in the last 12 months</div>';
   charts.dept = new Chart($('#deptChart'),{
-    type:'bar',
-    data:{labels:g.map(x=>x[0]),datasets:[{data:g.map(x=>x[1]),backgroundColor:COLORS[0],...BAR}]},
-    options:{maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},tooltip:{...TOOLTIP,displayColors:false,callbacks:{label:c=>fmtUSD(c.parsed.x)+' · '+(c.parsed.x/(g.reduce((s,x)=>s+x[1],0)||1)*100).toFixed(0)+'%'}}},
-      scales:{x:{ticks:{callback:v=>fmtShort(v),padding:6},grid:GRID,border:{display:false}},y:{grid:{display:false},border:{display:false}}}}
+    type:'doughnut',
+    data:{labels:top.map(x=>x[0]),datasets:[{data:top.map(x=>x[1]),backgroundColor:cols,borderColor:'#ffffff',borderWidth:2,hoverOffset:4}]},
+    options:{maintainAspectRatio:false,cutout:'68%',plugins:{legend:{display:false},
+      tooltip:{...TOOLTIP,displayColors:false,callbacks:{label:c=>' '+c.label+': '+fmtUSD(c.parsed)+' · '+(c.parsed/total*100).toFixed(0)+'%'}}}}
   });
 }
 function renderCat(all){
@@ -1280,7 +1398,109 @@ function draw(){
   const sum = pivoted.reduce((s,g)=>s+g.total,0);
   $('#rowCount').textContent = `${pivoted.length} apps · ${fmtUSD(sum)}`;
   window.PIVOTED = pivoted;
+  drawOverview(pivoted, all);
 }
+
+/* ---------------- applications overview ---------------- */
+//
+// One row per app, the way an IT owner reads it: what it costs a year, what
+// it runs at a month, how the latest month moved, when it renews, who owns
+// it, and whether it is still being charged. The monthly pivot stays behind
+// the "Monthly breakdown" tab for the cell-by-cell view.
+let appsTab = 'overview';
+let ovSort = { key: 'annual', dir: -1 };
+
+const AVATAR_HUES = ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#4a3aa7'];
+function avatarStyle(name){
+  let h = 0; for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const c = AVATAR_HUES[h % AVATAR_HUES.length];
+  return `background:${c}1f;color:${c}`;
+}
+const initials = (name) => String(name||'').split(/[\s()]+/).filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join('') || '·';
+
+function weeksLeft(renewalDate){
+  const p = parseRenewal(renewalDate);
+  if (!p) return { text: renewalDate ? String(renewalDate) : '—', note: '', cls: 'mute', sort: Infinity };
+  const today = new Date(); today.setHours(0,0,0,0);
+  const days = Math.round((p.date - today) / 86400000);
+  const when = p.date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  if (p.recurring) return { text: when, note: 'monthly', cls: 'mute', sort: days };
+  if (days < 0) return { text: when, note: 'Overdue', cls: 'over', sort: days };
+  const w = Math.max(1, Math.round(days / 7));
+  return { text: when, note: `${w} week${w===1?'':'s'} left`, cls: w <= 4 ? 'soon' : 'ok', sort: days };
+}
+
+function drawOverview(pivoted, all){
+  const todayKey = realMonthKey(0), from = realMonthKey(-11);
+  const rate = new Map(trailingRunRateByApp(all.filter(r=>r.kind==='Apps')).map(x => [x.name, x]));
+  const rows = pivoted.map(g => {
+    const months = ALL_MONTHS.filter(m => g[m] != null && m <= todayKey);
+    const annual = ALL_MONTHS.filter(m => m >= from && m <= todayKey).reduce((s, m) => s + (g[m] || 0), 0);
+    const last = months[months.length - 1], prev = months[months.length - 2];
+    const change = last && prev && g[prev] > 0 ? (g[last] - g[prev]) / g[prev] * 100 : null;
+    const rr = rate.get(g.name);
+    const once = cycleMonths(g.cat) === 0;
+    let stage = rr ? ['active', 'Active'] : once ? ['once', 'One-time'] : months.length ? ['lapsed', 'Not charged lately'] : ['none', 'Never charged'];
+    if (g.kind === 'Laptops') stage = ['once', 'Hardware'];
+    return { g, annual, monthly: rr ? rr.m : (once ? 0 : null), change, last, renew: weeksLeft(g.renewalDate), stage };
+  });
+  const key = ovSort.key, dir = ovSort.dir;
+  rows.sort((a, b) => {
+    const va = key === 'name' ? a.g.name : key === 'dept' ? a.g.dept : key === 'renew' ? a.renew.sort : key === 'stage' ? a.stage[1] : key === 'change' ? (a.change ?? -Infinity) : (a[key] ?? -Infinity);
+    const vb = key === 'name' ? b.g.name : key === 'dept' ? b.g.dept : key === 'renew' ? b.renew.sort : key === 'stage' ? b.stage[1] : key === 'change' ? (b.change ?? -Infinity) : (b[key] ?? -Infinity);
+    if (typeof va === 'string' || typeof vb === 'string') return String(va).localeCompare(String(vb)) * dir;
+    return ((va || 0) - (vb || 0)) * dir;
+  });
+  const th = (k, label, num) => `<th class="${num?'num ':''}${ovSort.key===k?'sorted'+(ovSort.dir>0?' asc':''):''}" data-ov="${k}">${label}</th>`;
+  $('#appsOverview').innerHTML = `<table><thead><tr>
+      ${th('name','App')}${th('dept','Department')}${th('annual','Annual cost',true)}${th('monthly','Monthly run-rate',true)}${th('change','vs previous month',true)}${th('renew','Renewal')}<th>Owner</th>${th('stage','Stage')}
+    </tr></thead><tbody>${rows.map(r => `<tr data-name="${encodeURIComponent(r.g.name)}">
+      <td><div class="appcell"><span class="avatar" style="${avatarStyle(r.g.name)}">${initials(r.g.name)}</span><div><div class="nm">${r.g.name}</div><div class="sub">${r.g.cat || 'Monthly'}${r.g.kind==='Laptops'?' · hardware':''}</div></div></div></td>
+      <td><span class="chip">${r.g.dept || '—'}</span></td>
+      <td class="num"><b>${fmtUSD(r.annual)}</b></td>
+      <td class="num">${r.monthly == null ? '<span class="cap">—</span>' : fmtUSD(r.monthly)}</td>
+      <td class="num">${r.change == null ? '<span class="cap">—</span>' : `<span class="pill ${r.change > 0 ? 'up' : 'down'}">${r.change > 0 ? '▲' : '▼'} ${Math.abs(r.change).toFixed(0)}%</span>`}</td>
+      <td><div>${r.renew.text}</div>${r.renew.note ? `<div class="weeks ${r.renew.cls}">${r.renew.note}</div>` : ''}</td>
+      <td>${r.g.poc ? `<span class="avatar sm" style="${avatarStyle(r.g.poc)}" title="${r.g.poc}">${initials(r.g.poc)}</span>` : '<span class="cap">—</span>'}</td>
+      <td><span class="stage ${r.stage[0]}">${r.stage[1]}</span></td>
+    </tr>`).join('') || `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">No matching apps</td></tr>`}</tbody></table>`;
+  $('#appsOverview').querySelectorAll('th[data-ov]').forEach(h => h.onclick = () => {
+    const k = h.dataset.ov;
+    ovSort = { key: k, dir: ovSort.key === k ? -ovSort.dir : (k === 'name' || k === 'dept' || k === 'stage' || k === 'renew' ? 1 : -1) };
+    drawOverview(window.PIVOTED || [], window.MODEL || []);
+  });
+}
+$('#appsOverview').addEventListener('click', e => {
+  const tr = e.target.closest('tr[data-name]'); if (tr) openModal(decodeURIComponent(tr.dataset.name));
+});
+function setAppsTab(tab){
+  appsTab = tab;
+  $('#appsTabs').querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  $('#appsOverview').classList.toggle('hidden', tab !== 'overview');
+  document.querySelector('#appsCard .tblwrap').classList.toggle('hidden', tab !== 'monthly');
+  $('#tblCards').classList.toggle('on', tab === 'monthly');
+}
+$('#appsTabs').querySelectorAll('button').forEach(b => b.onclick = () => setAppsTab(b.dataset.tab));
+
+/* ---------------- sidebar ---------------- */
+document.querySelectorAll('.nav-item[data-goto]').forEach(b => b.onclick = () => {
+  const el = document.getElementById(b.dataset.goto);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: b.dataset.goto === 'top' ? 'start' : 'start' });
+  document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x === b));
+});
+$('#navRules').onclick = () => {
+  document.getElementById('pendingCard').scrollIntoView({ behavior: 'smooth' });
+  if ($('#rulesEditor').classList.contains('hidden')) $('#rulesBtn').click();
+};
+$('#sideSearch').oninput = () => {
+  $('#fSearch').value = $('#sideSearch').value;
+  $('#fSearch').dispatchEvent(new Event('input'));
+  if (appsTab !== 'overview') setAppsTab('overview');
+};
+$('#sideSearch').onfocus = () => document.getElementById('appsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+document.addEventListener('keydown', e => {
+  if (e.key === '/' && !/input|textarea|select/i.test(document.activeElement.tagName)) { e.preventDefault(); $('#sideSearch').focus(); }
+});
 
 /* ---------------- per-app drill-down modal ---------------- */
 let modalAppName = null;
@@ -1313,7 +1533,7 @@ function openModal(name){
     }]},
     options:{maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.parsed.y==null?'no data':fmtUSD(c.parsed.y)}}},
-      scales:{y:{ticks:{callback:v=>fmtShort(v)},grid:{color:'rgba(255,255,255,.04)'}},x:{grid:{display:false}}}}
+      scales:{y:{ticks:{callback:v=>fmtShort(v)},grid:GRID,border:{display:false}},x:{grid:{display:false},border:{display:false}}}}
   });
 
   $('#modalOverlay').classList.add('show');
@@ -2423,6 +2643,8 @@ function renderPending(){
   const items = pendingData.items || [];
   const apps = pendingData.apps || [];
   const monthLabel = m => { if (!m) return ''; const [y, mm] = m.split('-'); return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(mm)-1] + '-' + y.slice(2); };
+  const badge = $('#pendingBadge');
+  if (badge) { badge.textContent = items.length; badge.classList.toggle('zero', !items.length); }
   status.textContent = items.length
     ? `${items.length} invoice${items.length === 1 ? '' : 's'} waiting.${pendingData.slackConfigured ? '' : ' (Slack DM is not set up: add SLACK_BOT_TOKEN and SLACK_DM_USER in Vercel to get these questions in Slack.)'}`
     : `Nothing waiting — every invoice the sync has seen is filed.${pendingData.slackConfigured ? '' : ' Slack DM is not set up: add SLACK_BOT_TOKEN and SLACK_DM_USER in Vercel to get reports and questions in Slack.'}`;
