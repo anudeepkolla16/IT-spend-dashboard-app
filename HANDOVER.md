@@ -97,34 +97,49 @@ Claude seats `118`) and that writes land on the right cell and never on the Tota
 Invoices sent or forwarded to **`invoices@sarasanalytics.com`** are filed automatically, as the
 second half of the daily invoice cron (2 AM UTC), and from **📧 Fetch Invoices** in the header.
 
-**What it does per message**
+**The process it follows is the owner's, set out in September 2026, and every rule below is one
+of its points:**
 
-1. Looks only at mail with a real PDF attachment, and skips account-admin noise
-   ("Verify your email", "Password reset") even when it mentions billing.
-2. Works out the app from the subject, the attachment filename and the sender's domain —
-   taking the *original* sender out of a forwarded message, so `FW: [Bubble] Invoice`
-   forwarded by a colleague is filed under Bubble Starter, not against the colleague.
-3. Saves the PDF into the archive at `{archive}/{vendor}/{month}/`, skipping anything already there.
-   The vendor folder is the one that app is already mapped to in `_sync-config.json`
-   (`Bubble Starter` → `Bubble`, `Cursor pro` → `Cursor`), and the month subfolder **reuses
-   whatever is already there** — `Bubble/Aug`, `Cursor/July` — rather than adding a second
-   folder beside it. Only when no month folder exists is one created, named `Aug-26`.
-4. Ticks that app's month in the **Invoices tracker** sheet (the TRUE/FALSE grid).
+1. *Check the sender domain or subject for the application.* Which row an invoice belongs to
+   is decided by **`_vendor-rules.json`** in the archive (editable from the dashboard under
+   **❓ Needs your answer → ⚙ Filing rules**). A vendor rule names the sender `domains` it
+   mails from, `subject` words for vendors that bill through Stripe (where the domain is
+   `stripe.com` and says nothing), and either one `app` or several `apps`. Nothing fuzzy is
+   used to file: the old alias/descriptor resolver only supplies a *suggestion* beside a
+   question.
+2. *Check the billing period.* An invoice belongs to **the month its billing period starts in**:
+   a bill for `01-08-2026 to 31-08-2026` that arrives on 1 September is August's, and Luzmo's
+   `26 Aug → 26 Sep` cycle is August's too. With no labelled period, the invoice's own **issue
+   date** decides (`Date of issue`, `Invoice date`, a bare `Date:` — never the due date). With
+   neither, the sync **asks** — the month the mail arrived is never assumed.
+3. *Check the line items.* Where one vendor bills several rows, each row's rule lists `text`
+   phrases and the first row whose phrase appears in the invoice wins. Anthropic's three rows
+   are told apart by the **invoice number's account prefix** — `Q8MUNTUC-…` is the API console,
+   `2FSKIDHO-…` the Claude Team plan, `XQRYKLO3-…` the Max accounts (checked against the
+   invoices in the archive: the API console's read "One-time credit purchase", billed to
+   `ai@`; the Team plan's "Auto recharge extra usage, Team plan", billed to `krishna@`).
+   Google's four rows are told apart by the product named on the invoice (`Google Voice`,
+   `Google Ads`, `Google Cloud`, `Google Workspace`, in that order — Voice's invoice also says
+   "Google Workspace Telecom"). The old `google → GOOGLE ADS` catch-all, which filed Google
+   Voice under Ads, is gone.
+4. *Never guess — ask.* Anything the rules do not settle (an unknown sender, a several-row vendor
+   with no matching phrase, a rule naming a row the sheet lacks, no readable month, an unreadable
+   PDF) is **held**: the PDF is parked in `{archive}/_Pending/` and a question is recorded in
+   `_pending.json`. Nothing is filed into a vendor or month folder on a guess, and nothing goes to
+   `_Unmatched` any more. See "Answering the sync's questions" below.
+5. *Update the amounts.* The month's invoices are added up and the cell is **set to the total** —
+   see "Invoice totals and the Spendings sheet".
+6. *Slack DM on every change.* See "Slack".
+7. *Application mapping.* Every answer is written back into the rules, so each vendor is asked
+   about once.
+8. *Read every invoice type.* See "Reading the PDF".
 
-**Which month an invoice belongs to.** The invoice's own **billing period** decides it, not the
-day the mail arrived: an invoice is filed under the month holding **most of the period it pays
-for**. Luzmo's invoice of Aug 26 reads *"period from 2026-08-26 until 2026-09-26"* — six days of
-that fall in August and twenty-five in September, and the charge falls due on Sep 09 — so it is
-September's, and the folder, the tracker tick and the amount all follow it there. A period inside
-one calendar month (`01-JUN-2026 to 30-JUN-2026`) resolves to that month exactly as before, and a
-quarterly or annual period, which has no majority month, stays in the month it starts.
-
-Only a **labelled** period moves anything — "period", "billing period", "service term". Two things
-on an ordinary invoice look just like a date range and are not one: the invoice date beside the due
-date, and a line item's own dates (`Starter Web Plan 8/12/26 - 9/12/26`, of which Bubble sends nine
-a month on separate cycles). An invoice that names no period, or whose PDF can't be read, is filed
-by the mail's date as it always was. Anything moved is listed in the run summary, and a period more
-than two months from the mail is treated as a misread and ignored.
+Per message it: looks only at mail with a real PDF attachment, skipping account-admin noise;
+reads the PDF *first* (the rules look at its wording and the month comes from its period); takes the
+*original* sender out of a forwarded message; saves the PDF into `{archive}/{vendor}/{month}/`,
+reusing whatever the vendor already calls that month (`Bubble/Aug`, `Cursor/July`) and creating
+`Aug-26` only when none exists; ticks the app's month in the **Invoices tracker** sheet; and totals
+the month.
 
 **Invoices already filed under the old rule stay where they are.** A re-read (**📧 Fetch Invoices** →
 *Re-read the last 60 days*) files them again under the right month, but the copy the earlier run put
@@ -204,28 +219,24 @@ email. Invoices reach the archive by several routes (hand-filed, mirrored from t
 filed by this sync), and an email-only total undercounts badly: Bubble's August mail carried 2 of
 its 9 charges, so an email-only total read `64.00` against an actual `524.27`.
 
-It then keeps the app's month cell in Spendings up to date:
+**The cell is the month's invoice total.** The owner's rule: "certain applications have 3 to 4
+separate invoices in a month; calculate the total for all invoices in that month and show that in
+the sheet". So the sum of the month's invoices replaces whatever the cell holds — higher *or*
+lower:
 
 | Cell | What happens |
 |---|---|
-| Empty | Written with the folder total |
-| Invoice total is **higher** than the cell | **Updated** — a new invoice has arrived |
-| Invoice total is **lower** than the cell | **Left alone**, and reported |
+| Empty | Written with the month's total |
+| Different from the total, either way | **Set to the total**; a lowering is flagged in the report (it usually means invoices are missing from the folder) |
 | Equal | Nothing |
+| Some invoice in the month could not be used (unreadable, or not in USD) | **Held** — a partial sum is not the total, and a total that is not the total is never written; the report names the file to fix |
 
-Invoices for a month arrive across it — Bubble's ninth August invoice lands on the 28th — so the
-cell has to keep up or it sits short for ever while looking final.
+Nothing is ever *added* to a cell, which is what makes a re-run harmless: the same folder writes the
+same number twice, never twice the number.
 
-**Why a lower total never overwrites:** a new invoice can only add. A shortfall means invoices are
-missing from the folder, not that less was spent. Bubble's folder read `492.27` against a correct
-`524.27` with the ninth invoice still pending; overwriting there would have replaced a right figure
-with a wrong one.
-
-**An upward update will replace a hand correction or a statement figure.** That is deliberate — the
-sheet is meant to track invoices — but it is never silent: the run summary flags any figure the
-sync did not itself write, and `Invoices/_amount-log.json` records the previous value of every cell
-with `source: "invoice"`. If you want a figure to stand regardless, it has to be higher than the
-invoice total, or the app needs leaving out of the mailbox flow.
+**A replaced figure is never silent.** The report says whose number went — one the sync wrote
+itself, or a hand correction / statement figure — and `Invoices/_amount-log.json` records the
+previous value of every cell with `source: "invoice"`.
 
 **Only unambiguously USD invoices are used.** This matters more than it sounds. The sheet is
 entirely in USD, but Indian vendors bill in INR — Tata Tele's June invoice reads
@@ -234,18 +245,9 @@ Writing the face value would have been a ~95x error. So an invoice whose currenc
 USD is reported with its amount and currency and left for a human; it is never totalled into the
 sheet.
 
-**One vendor, several rows.** Anthropic bills the API console and the Claude seat subscriptions
-from the same address, with near-identical subjects and filenames — only the invoice body tells
-them apart, so the PDF is read *before* the file is placed:
-
-- line items reading `Claude <model> Usage …` → **Anthropic(Api Console)**
-- line items naming a plan or seats (`Enterprise plan`, `Team plan`, `3 accounts`) → **Claude Ai**
-- neither → falls back to the amount, above 10k being the API console
-
-Verified against both July 2026 invoices: the API console one totals `13,479.42` and the seats one
-`0.00 paid`, which is exactly what the sheet holds for `Jul-26` in each row. Note the threshold is
-the *last* resort, not the first — it does not hold historically (Claude Ai was `14,160` in Feb-26,
-the API console `371.88` in Jan-26).
+**One vendor, several rows** is settled by the rules file (point 3 above), never by the wording
+heuristics or the amount threshold this used to apply — those filed Claude API invoices under
+Claude Ai.
 
 **An invoice settled from a prepaid balance counts as nothing charged.** The July Claude receipt
 prints `Total $4,037.39` but `$0.00 paid` against an `Applied balance`; the sheet holds `0.00`.
@@ -418,27 +420,13 @@ a route with the per-app listing on purpose — see the function-count note belo
 
 ---
 
-### How a month's amount is topped up
+### The cell is the total — no top-up
 
-A cell holds **the invoices on file, plus whatever spend the sheet already knows about that no
-invoice has explained yet.** When a new invoice arrives it is **absorbed by that excess rather than
-added on top of it**, because the excess was anticipating it.
-
-The case it comes from: Bubble's cell held `524.27` against eight invoices totalling `492.27`, and
-the ninth was `32.00`. `492.27 + 32 = 524.27` — the sheet was never wrong, only early. Adding the
-ninth on arrival would have made it `556.27`.
-
-Written out that is `remainder_after + folderTotal_after`, which is exactly `max(cell, folderTotal)`:
-
-| Sheet cell | Invoices on file | Written |
-|---|---|---|
-| empty | 492.27 | **492.27** |
-| 524.27 | 492.27 (8 of 9) | left alone, gap reported |
-| 524.27 | 524.27 (9th arrived) | left alone — already correct |
-| 524.27 | 600.00 | **600.00** |
-
-So the cell never moves until the folder total passes it. That also makes the write **idempotent**,
-which no additive rule could be — the daily cron would grow the figure on every run.
+The earlier rule (`max(cell, folderTotal)`, "a cell holds the invoices on file plus whatever the
+sheet already knows about") is gone. The cell is set to the month's invoice total and nothing else;
+see "Invoice totals and the Spendings sheet". The **🗓 Recheck Periods** backfill follows the same
+rule: a cell holding a figure the invoices do not account for is *proposed* (for you to tick) with
+the figure it replaces and the invoices behind it, rather than blocked.
 
 **Several folders can map to one app, and the sync files into only one of them.** `Luzmo` and
 `Cumul(Luzmo)` both mean `Cumul(Luzmo)`; `Bubble` and `Bubble Starter` both mean `Bubble Starter`;
@@ -476,19 +464,58 @@ without one, two files that merely share an amount are two charges, because a ve
 figure twice in a month is ordinary. A duplicate is reported and does **not** count as an unread PDF
 — it is accounted for, not missing, so it must not make the folder look partially read.
 
-**A partial folder total never overwrites a filled cell.** When some PDF in an app-month folder
-cannot be read, the figure the sync has is not the folder's total — it is everything that happened to
-parse, and the real one is at least that and probably more. `max(cell, folderTotal)` asks "has the
-folder grown past the sheet?", and a lower bound cannot answer it.
-
-The case it comes from: Apollo's August folder held two invoices and one would not parse. The 85.00
-that did parse looked bigger than the 53.12 already in the cell, so the run raised the cell to 85.00,
-replacing a figure it had never written with one missing an invoice. A partial total may still fill
-an **empty** cell — something beats nothing there, and the write is flagged — but it may never
-replace a figure somebody else put in. The run reports those separately from the ordinary
-"invoices still to come" case, and lists the PDFs to fix.
+**A partial folder total is never written, not even into an empty cell.** When some PDF in an
+app-month cannot be used, the figure the sync has is not the month's total. The month is held and
+the report names the file; once it reads (or its amount is typed in when answering a question), the
+next run writes the cell.
 
 **Non-USD totals are never written**, whatever the comparison says.
+
+### Answering the sync's questions
+
+**❓ Needs your answer** on the dashboard lists every held invoice: the file, the sender, the
+subject, what was read from it (total, period, date), the question, and — for a several-row vendor —
+the options. Pick the app, give the month if asked, type the amount only if the PDF's total could
+not be read, and press **File it**: the PDF moves from `_Pending/` into `{vendor}/{month}/`, the
+month is totalled and ticked exactly as a mailed invoice is, and the answer is remembered as a
+rule (an unknown sender's domain, or a Stripe sender's name, or the invoice-number prefix for a
+several-row vendor). **Ignore** moves it to `_Ignored/` and leaves the sheet alone.
+
+The same questions go to the Slack DM, and a reply there is read at the start of the next run:
+
+```
+P12 = Google Voice
+P12 = 2                    (the second option the question listed)
+P12 = Google Voice, Aug-26
+P12 = ignore
+```
+
+A reply that does not read cleanly is reported back, never guessed at.
+
+`?mode=inspect&path=<archive path>` on `/api/invoices/sync-cron` reads one archived PDF the way
+the sync does and returns the text, total, period, date and invoice number it saw — for an invoice
+the sync got wrong, that is the first thing to look at.
+
+### Slack
+
+One DM per run that changed anything or has a question outstanding — what was filed, which cells
+were set (and lowered, and whose figure was replaced), what was ticked, what could not be used,
+and the open questions with the reply format. A run that filed nothing, wrote nothing and asks
+nothing sends nothing. Needs `SLACK_BOT_TOKEN` (the workspace's own Slack app, scopes
+`chat:write`, `im:write`, `im:history`) and `SLACK_DM_USER` (the member ID of the person to DM);
+without them the run carries on and says the DM was not sent.
+
+### Reading the PDF
+
+Two readers, tried in order: **pdfjs-dist 3.x** (legacy build — runs on plain Node, rebuilds a
+broken cross-reference table, which is what "bad XRef entry" was on twenty-one archived invoices
+that read fine elsewhere; its text is put back into lines by position, so a label and its figure
+in two table cells come out as `Total   USD 816.00`), then **pdf-parse 1.x**. The archive survey of
+September 2026 (675 PDFs) found the totals that were missed were pattern gaps, not bad files, and
+each is now covered: Google's column layout (figures then labels — `Total in USD` is paired by
+position), Sentry's `Total $82.31 USD`, Webflow's `TotalUSD 816.00`, PostHog's `$0.00` invoices
+(a real total of nothing, not an unread file), the currency detector reading "any currency" as
+`ANY`, and a per-vendor `currency` in the rules for invoices stating two (PhantomBuster).
 
 ---
 
@@ -545,6 +572,8 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 | `INVOICE_ARCHIVE_PATH` | Where invoices are archived, relative to the OneDrive root. Normally **unset** — the path is probed (see "The archive path is resolved, not hardcoded" below). Set it only if the folder is renamed to something the probe doesn't know. |
 | `INVOICE_SOURCE_PATH` | Older name for the same thing; still honoured, second in the probe order. Prefer `INVOICE_ARCHIVE_PATH`. |
 | `SPEND_SHEET_NAME` | Worksheet holding the amounts. Defaults to `Spendings`; only set it if that tab is renamed. |
+| `SLACK_BOT_TOKEN` | `xoxb-…` token of the workspace's Slack app (scopes `chat:write`, `im:write`, `im:history`). Unset = no DMs, runs still work. |
+| `SLACK_DM_USER` | Slack member ID (`U…`) of the person the run reports to and reads answers from. |
 
 > Env-var changes take effect only on the **next deployment**. To apply: push any commit
 > (an empty commit works: `git commit --allow-empty -m "redeploy"`), or redeploy in Vercel.
@@ -649,9 +678,12 @@ lib/
   vendor-map.js                Vendor label → app row matching (seeded aliases + descriptor rules)
   spend-sheet.js               Opens the spend workbook, alias map and audit log
   mail.js                      Graph mail helpers — invoice detection, forwarded-sender parsing
-  mail-sync.js                 Files invoice PDFs from the shared mailbox, ticks the tracker, fills empty amounts
-  invoice-amount.js            Reads the payable total + currency out of an invoice PDF
-  invoice-period.js            Reads the billing period, and picks the month it mostly covers
+  mail-sync.js                 Files invoice PDFs from the shared mailbox, holds what it is unsure of, totals months, ticks the tracker, sets cells, reports by Slack
+  slack.js                     Slack DM: post the run report, read the owner's replies
+  invoice-amount.js            Reads the payable total + currency out of an invoice PDF (pdfjs, then pdf-parse)
+  invoice-period.js            Reads the billing period (the month it starts in) and the invoice date
+  invoices/rules.js            The owner's filing rules (_vendor-rules.json): sender → vendor → row; learns answers
+  invoices/pending.js          The hold queue (_pending.json, _Pending/): hold, answer, parse a Slack reply
   invoices/period-backfill.js  Re-files invoices archived before that rule, in the folders and the sheet
   invoices/inventory.js        Crawls the invoice archive for the checklist tab (month folders, per-file totals)
                                (the archive's location comes from graph.js's resolveArchiveRoot)
@@ -665,7 +697,8 @@ api/
     upload.js                  Manual single-PDF upload from a drill-down modal
     import.js                  Bulk import: preview (suggest matches) + batched commit (skips existing)
     save-sync-config.js        Persists the folder→app mapping to _sync-config.json
-    sync-cron.js               Daily job: source-folder mirror + mailbox invoice filing
+    sync-cron.js               The invoice job (run from the dashboard; the cron is off): mailbox filing, Slack answers,
+                               pending/pending-resolve, rules-save, inspect, periods, folder mirror
 ```
 
 ## Notes / gotchas

@@ -631,3 +631,74 @@ test('the totaller accepts invoices from outside the month folder', () => {
   assert.match(src, /sumFolderInvoices\(token, driveId, folder, cache, budget, loose\)/,
     'and passed to the totaller, or the month is short by whatever sits loose');
 });
+
+/* ---------------- what the archive survey turned up ---------------- *
+ *
+ * Forty archived invoices had "no payable total found" and two were reported
+ * as being in the currencies AND and ANY. Each shape below is verbatim from a
+ * real file in the archive (as the connector reads it), and each was a gap in
+ * the patterns rather than a bad PDF.
+ */
+
+test('Sentry: "Total $82.31 USD" — the figure is followed by its currency', () => {
+  const r = extractInvoiceTotal('Total   $82.31 USD  Your subscription renews');
+  assert.strictEqual(r.amount, 82.31);
+  assert.strictEqual(r.usable, true);
+});
+
+test('Webflow: pdf-parse glues the label to the figure ("TotalUSD 816.00")', () => {
+  const r = extractInvoiceTotal('Subtotal USD 768.00 Tax (6.25%) USD 48.00 TotalUSD 816.00 Amount DueUSD 816.00');
+  assert.strictEqual(r.amount, 816);
+  assert.strictEqual(r.currency, 'USD');
+});
+
+test('Google Voice: a column of figures beside a column of labels', () => {
+  const r = extractInvoiceTotal('$10.00  $0.73  $0.19  $1.45  $1.50  $13.87  Subtotal in USD  State sales tax (6.25%)  Federal Regulatory Assessment Fee  Federal Universal Service Fund  State 911 Tax  Total in USD  Domain Name: x');
+  assert.strictEqual(r.amount, 13.87);
+  assert.strictEqual(r.via, 'total in CUR (columns)');
+});
+
+test('Google Ads statement: Total in USD is the month\'s spend, not the payments', () => {
+  const r = extractInvoiceTotal('$598.69  $0.00  $598.69  Subtotal in USD  Tax (0%)  Total in USD  -$460.00 Total payments received in USD');
+  assert.strictEqual(r.amount, 598.69);
+  assert.strictEqual(extractInvoiceTotal('Subtotal in USD $10.00  Total in USD $13.87').amount, 13.87, 'and inline, when the reader keeps the row together');
+});
+
+test('a figure/label pairing that does not line up is not trusted', () => {
+  // Three figures, two labels: whichever is missing, the last figure is not
+  // necessarily the total.
+  assert.strictEqual(extractInvoiceTotal('$1.00  $2.00  $3.00  Subtotal in USD  Total in USD').amount, null);
+});
+
+test('PostHog: a $0.00 invoice is a real total of nothing, not an unread one', () => {
+  const r = extractInvoiceTotal('$0.00 USD due April 24, 2026  Subtotal $0.00 Total $0.00  Amount due $0.00 USD');
+  assert.strictEqual(r.amount, 0);
+  assert.strictEqual(r.usable, true);
+  // But a nought never beats a real figure elsewhere on the invoice.
+  assert.strictEqual(extractInvoiceTotal('Credit $0.00  Total $12.00  Amount due $12.00 USD').amount, 12);
+});
+
+test('"any currency" and "currency and" are not currencies', () => {
+  assert.strictEqual(detectCurrency('Pay in any currency you like. Total $5.00').code, 'USD');
+  assert.strictEqual(detectCurrency('Currency and payment terms. Total $5.00').code, 'USD');
+  assert.strictEqual(detectCurrency('the errors were ours. Total $5.00').code, 'USD', 'lower-case "rs" is not rupees');
+});
+
+test('a vendor rule can say which of two stated currencies the sheet takes', () => {
+  const both = 'Total EUR 50.00 (USD 55.00) Total 55.00';
+  assert.strictEqual(extractInvoiceTotal(both).usable, false, 'ambiguous without a rule');
+  const r = extractInvoiceTotal(both, { currency: 'USD' });
+  assert.strictEqual(r.usable, true);
+  assert.strictEqual(r.currency, 'USD');
+  assert.strictEqual(extractInvoiceTotal('Net Payable (INR) 150591.60', { currency: 'USD' }).usable, false, 'a rule cannot turn rupees into dollars');
+});
+
+test('positioned text comes back as lines, with cells on a row kept together', () => {
+  const { linesFromTextContent } = require('../lib/invoice-amount');
+  const item = (str, x, y, w) => ({ str, transform: [10, 0, 0, 10, x, y], width: w });
+  const lines = linesFromTextContent({ items: [
+    item('Total', 20, 100, 25), item('USD 816.00', 200, 100.5, 50),
+    item('Sub', 20, 120, 15), item('total', 35.5, 120, 25),
+  ] });
+  assert.deepStrictEqual(lines, ['Subtotal', 'Total   USD 816.00']);
+});

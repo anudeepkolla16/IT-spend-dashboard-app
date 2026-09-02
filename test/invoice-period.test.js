@@ -174,13 +174,15 @@ test('the period still wins when the mail arrives late', () => {
 
 test('the mail sync files, ticks and totals by the resolved month', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'mail-sync.js'), 'utf8');
-  assert.match(src, /invoiceMonth\(/, 'the sync must ask which month the invoice is for');
-  assert.match(src, /const attMonth = placement\.month \|\| month/);
+  assert.match(src, /monthForInvoice\(pdfText, receivedMonth\)/, 'the sync must ask which month the invoice is for');
+  // Never the mail's month: the period start, else the invoice date, else ask.
+  assert.match(src, /const attMonth = when\.month;/);
+  assert.match(src, /if \(!verdict\.app \|\| !when\.month\) \{/, 'an invoice with no month is held and asked about, not filed by arrival');
   // Nothing downstream may keep using the mail's month: the folder, the tracker
   // tick and the folder total all have to agree with where the PDF went.
   assert.match(src, /placeFor\(attVendor, attMonth\)/, 'the PDF must be filed under the resolved month');
   assert.match(src, /marks\.push\(\{ app: attApp, month: attMonth \}\)/, 'the tracker must tick the resolved month');
-  assert.match(src, /touched\.set\(`\$\{attApp\}\|\|\$\{attMonth\}`/, 'the folder total must follow the PDF');
+  assert.match(src, /touched\.set\(markKey, \{ app: attApp, month: attMonth/, 'the folder total must follow the PDF');
 });
 
 test('a copy left in the old month folder is reported, not silently doubled', () => {
