@@ -702,3 +702,45 @@ test('positioned text comes back as lines, with cells on a row kept together', (
   ] });
   assert.deepStrictEqual(lines, ['Subtotal', 'Total   USD 816.00']);
 });
+
+/* ---------------- what the first live run exposed ---------------- */
+
+test('a Stripe account prefix on its own is not an invoice number', () => {
+  // Five Cursor invoices in one month all read as "WYO2F9CO" when the number
+  // broke across a line, and four were dropped as duplicates of the first.
+  const { extractInvoiceRef } = require('../lib/invoice-amount');
+  assert.strictEqual(extractInvoiceRef('Invoice number WYO2F9CO\n0101\nDate of issue'), 'WYO2F9CO0101');
+  assert.strictEqual(extractInvoiceRef('Invoice number   Q8MUNTUC   0200  Date of issue'), 'Q8MUNTUC0200');
+  assert.strictEqual(extractInvoiceRef('Invoice number WYO2F9CO Date of issue July 1 Reference WYO2F9CO 0101'), 'WYO2F9CO0101', 'the sequence is picked up from wherever the page states it');
+  assert.strictEqual(extractInvoiceRef('Invoice number INV50264'), 'INV50264');
+});
+
+test('a PDF holding several invoices is totalled as all of them', () => {
+  // Anthropic's "July 26.pdf": three credit top-ups and the usage invoice in
+  // one file. Reading it as one document took the first Total, 138.82.
+  const four = 'Invoice number   Q8MUNTUC   0200  Date of issue   July 1, 2026 Total   $138.82  Amount due   $138.82 USD'
+    + '  Invoice number   Q8MUNTUC   0201 Total   $138.31  Amount due   $138.31 USD'
+    + '  Invoice number   Q8MUNTUC   0202 Total   $139.28  Amount due   $139.28 USD'
+    + '  Invoice number   Q8MUNTUC   0203  Date of issue   August 1, 2026 Subtotal   $12,686.51 Total   $13,479.42  Amount due   $13,479.42 USD';
+  const r = extractInvoiceTotal(four);
+  assert.strictEqual(r.amount, 13895.83);
+  assert.strictEqual(r.usable, true);
+  assert.deepStrictEqual(r.refs, ['Q8MUNTUC0200', 'Q8MUNTUC0201', 'Q8MUNTUC0202', 'Q8MUNTUC0203']);
+  assert.match(r.via, /4 invoices in one file/);
+});
+
+test('an invoice number read as the total is refused', () => {
+  const r = extractInvoiceTotal('Invoice number: 5685830900  Total 5685830900');
+  assert.strictEqual(r.usable, false);
+  assert.match(r.note, /not a plausible charge/);
+});
+
+test('a month emptied by a move is cleared only when the figure was this sync\'s own', () => {
+  const prior = { 'Bubble Starter||2026-06': 751.96 };
+  const { updated } = planAmountCells({ 'Bubble Starter': { '2026-06': 0 } }, grid(), USED, cellValue, prior);
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].value, 0);
+  assert.strictEqual(updated[0].emptied, true);
+  const theirs = planAmountCells({ 'Bubble Starter': { '2026-06': 0 } }, grid(), USED, cellValue, {});
+  assert.strictEqual(theirs.updated.length + theirs.write.length, 0, 'a figure not ours stays');
+});

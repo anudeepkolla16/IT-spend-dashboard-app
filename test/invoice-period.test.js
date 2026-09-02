@@ -174,10 +174,10 @@ test('the period still wins when the mail arrives late', () => {
 
 test('the mail sync files, ticks and totals by the resolved month', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'mail-sync.js'), 'utf8');
-  assert.match(src, /monthForInvoice\(pdfText, receivedMonth\)/, 'the sync must ask which month the invoice is for');
+  assert.match(src, /monthForInvoice\(pdfText, receivedMonth, /, 'the sync must ask which month the invoice is for');
   // Never the mail's month: the period start, else the invoice date, else ask.
-  assert.match(src, /const attMonth = when\.month;/);
-  assert.match(src, /if \(!verdict\.app \|\| !when\.month\) \{/, 'an invoice with no month is held and asked about, not filed by arrival');
+  assert.match(src, /const attMonth = doc\.month;/);
+  assert.match(src, /if \(!doc\.app \|\| !doc\.month \|\| doc\.holdWithGroup\) \{/, 'an invoice with no month is held and asked about, not filed by arrival');
   // Nothing downstream may keep using the mail's month: the folder, the tracker
   // tick and the folder total all have to agree with where the PDF went.
   assert.match(src, /placeFor\(attVendor, attMonth\)/, 'the PDF must be filed under the resolved month');
@@ -229,14 +229,39 @@ test('a date with no year cannot be placed and is refused', () => {
   assert.strictEqual(extractInvoiceDate('Invoice date: Aug 26'), null);
 });
 
-test('a flattened invoice table is refused rather than guessed at', () => {
+test('a flattened invoice table is paired by column order, never by adjacency', () => {
   // Real text from the archive's ClickUp invoices: the PDF's table collapses to
   // a run of labels followed by a run of values, so the date next to "Invoice
-  // date" belongs to a different column. Nothing here says which value is
-  // which, so it stays undated and gets reported for filing by hand.
+  // date" is the wrong column's. The k-th date label goes with the k-th date.
   const flattened = 'Invoice number:   Purchase order:   Invoice date:   Due date:   Terms:   Amount due:  '
     + 'INV50264   5/31/2025   6/30/2025   Net 30   USD $0.00';
-  assert.strictEqual(extractInvoiceDate(flattened), null);
+  const r = extractInvoiceDate(flattened);
+  assert.strictEqual(r.month, '2025-05');
+  assert.strictEqual(r.paired, true);
+});
+
+test('Stripe and Google headers, which come out as labels then values or values then labels', () => {
+  // The three invoices the first live run held for want of a month: each one
+  // states its date, in a column the reader separated from its label.
+  const stripe = 'Invoice  Invoice number  Date of issue  Date due  Q8MUNTUC-0204  September 2, 2026  September 2, 2026  Anthropic, PBC';
+  assert.strictEqual(extractInvoiceDate(stripe).month, '2026-09');
+  const google = 'Invoice  Invoice number: 5571764174  5571764174  Apr 30, 2026  7476-5812-7596  sarasanalytics.com  Details  Invoice number  Invoice date  Billing ID  Domain Name  $13.87';
+  assert.strictEqual(extractInvoiceDate(google).month, '2026-04');
+  // Labels in the other order still pair by position, not by nearest date.
+  assert.strictEqual(extractInvoiceDate('Date due  Date of issue  September 9, 2026  September 2, 2026').month, '2026-09');
+  assert.strictEqual(extractInvoiceDate('Date due  Date of issue  October 9, 2026  September 2, 2026').month, '2026-09');
+});
+
+test('a metered vendor can declare its usage lines as the period', () => {
+  const t = 'Date of issue August 1, 2026  Claude Haiku 4.5 Usage Jul 2   Jul 31, 2026 1   $425.42';
+  assert.strictEqual(invoiceMonth(t, '2026-08').month, '2026-08', 'off by default: a line-item range is not a period');
+  const r = invoiceMonth(t, '2026-08', { usageRange: true });
+  assert.strictEqual(r.month, '2026-07');
+  assert.strictEqual(r.period.start, '2026-07-02');
+});
+
+test('Google\'s "Summary for" is a billing period', () => {
+  assert.strictEqual(invoiceMonth('Summary for Apr 1, 2026 - Apr 30, 2026  Subtotal in USD', '2026-05').month, '2026-04');
 });
 
 test('an invoice with no date at all yields nothing', () => {
