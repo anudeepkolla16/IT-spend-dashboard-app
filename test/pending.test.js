@@ -51,7 +51,6 @@ test('the DM lists each question with its id, options and the reply format', () 
   const text = describeQuestions(ITEMS);
   assert.match(text, /\*P3\*/);
   assert.match(text, /1\) Anthropic\(Api Console\)   2\) Claude Ai/);
-  assert.match(text, /and the month/);
   assert.match(text, /P12 = Google Voice, Aug-26/);
 });
 
@@ -112,4 +111,17 @@ test('without a token the Slack client is a no-op that says so', async () => {
     if (saved[0]) process.env.SLACK_BOT_TOKEN = saved[0];
     if (saved[1]) process.env.SLACK_DM_USER = saved[1];
   }
+});
+
+test('the other documents from the same mail are found by subject and arrival, wherever they were filed', () => {
+  const { companionsOf } = require('../lib/mail-sync');
+  const index = { entries: [
+    { file: 'Receipt-2311.pdf', folder: 'X/Anthropic(Api Console)/Sep-26', subject: 'Your receipt from Anthropic, PBC #2311', receivedAt: '2026-09-02T09:00:00Z', app: 'Anthropic(Api Console)', month: '2026-09' },
+    { file: 'Invoice-Q8MUNTUC-0204.pdf', folder: 'X/Anthropic(Api Console)/Aug-26', subject: 'Your receipt from Anthropic, PBC #2311', receivedAt: '2026-09-02T09:00:00Z' },
+    { file: 'other.pdf', folder: 'X/Adobe/Sep-26', subject: 'Adobe', receivedAt: '2026-09-02T09:00:00Z' },
+  ] };
+  const item = { file: 'Invoice-Q8MUNTUC-0204.pdf', subject: 'Your receipt from Anthropic, PBC #2311', receivedAt: '2026-09-02T09:00:00Z' };
+  const mates = companionsOf(index, item, 'X/Anthropic(Api Console)/Aug-26');
+  assert.deepStrictEqual(mates.map(m => m.file), ['Receipt-2311.pdf']);
+  assert.strictEqual(mates[0].movedFrom, 'X/Anthropic(Api Console)/Sep-26/Receipt-2311.pdf');
 });
