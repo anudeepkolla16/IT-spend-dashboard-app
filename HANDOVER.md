@@ -572,8 +572,8 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 | `INVOICE_ARCHIVE_PATH` | Where invoices are archived, relative to the OneDrive root. Normally **unset** — the path is probed (see "The archive path is resolved, not hardcoded" below). Set it only if the folder is renamed to something the probe doesn't know. |
 | `INVOICE_SOURCE_PATH` | Older name for the same thing; still honoured, second in the probe order. Prefer `INVOICE_ARCHIVE_PATH`. |
 | `SPEND_SHEET_NAME` | Worksheet holding the amounts. Defaults to `Spendings`; only set it if that tab is renamed. |
-| `SLACK_BOT_TOKEN` | `xoxb-…` token of the workspace's Slack app (scopes `chat:write`, `im:write`, `im:history`). Unset = no DMs, runs still work. |
-| `SLACK_DM_USER` | Slack member ID (`U…`) of the person the run reports to and reads answers from. |
+| `SLACK_BOT_TOKEN` | `xoxb-…` token of the workspace's Slack app (scopes `chat:write`, `im:write`, `im:history`). Unset = no DMs, runs still work. Set on 2 Sep 2026. |
+| `SLACK_DM_USER` | Slack member ID (`U…`) of the person the run reports to and reads answers from. Set on 2 Sep 2026 (`U09BGGLK338`). |
 
 > Env-var changes take effect only on the **next deployment**. To apply: push any commit
 > (an empty commit works: `git commit --allow-empty -m "redeploy"`), or redeploy in Vercel.
