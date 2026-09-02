@@ -704,6 +704,11 @@ api/
 ## Notes / gotchas
 
 - **Amounts are USD.** The sheet's native currency; no conversion is applied.
+- **Chart colours are a validated set, not decoration.** `COLORS` in `index.html` is the eight-slot
+  categorical palette for the dark surface (adjacent pairs ≥ ΔE 8 under colour-vision deficiency,
+  ≥ 3:1 on the panel), assigned in order and never cycled; a single-series chart takes slot 1.
+  Grids are hairlines, bars are thin with a rounded data end, and the Apps-vs-Laptops split is two
+  numbers and a bar rather than a two-slice pie. Keep to that when adding a chart.
 - **Run-rate = trailing 3-month average per app, annualised** (smooths volatile cloud/API costs); future
   budgeted months already in the sheet are excluded from run-rate and "current month" figures.
 - **Invoice uploads handle any size** — files over 4 MB go via a Graph resumable upload session.
