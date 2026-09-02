@@ -204,6 +204,27 @@
   <div id="dash" class="hidden">
     <div class="kpis" id="kpis"></div>
 
+    <div class="card" id="pendingCard">
+      <h3>❓ Needs your answer</h3>
+      <div class="cap">Invoices the sync would not file without asking — no rule names the sender, the vendor bills several rows and nothing in the invoice picks one, or nothing says which month it bills. Answer here or in your Slack DM: the file moves into its folder, the month is totalled and ticked, and the answer is remembered as a rule.</div>
+      <div id="pendingStatus" class="cap" style="margin:8px 0"></div>
+      <div id="pendingList"></div>
+      <div class="filters" style="margin-top:10px">
+        <div class="grow"></div>
+        <button class="btn ghost" id="pendingRefresh">↻ Refresh questions</button>
+        <button class="btn ghost" id="rulesBtn">⚙ Filing rules</button>
+      </div>
+      <div id="rulesEditor" class="hidden">
+        <div class="cap">The rules that decide which row an invoice belongs to, kept as <code>_vendor-rules.json</code> beside the invoices. Each vendor has the sender <code>domains</code> it mails from, <code>subject</code> words for vendors that bill through Stripe, and either one <code>app</code> (a row in the sheet) or several <code>apps</code>, each with the <code>text</code> phrases that pick it — Anthropic's invoice-number prefixes, Google's product names. First match wins; no match asks you.</div>
+        <textarea id="rulesText" spellcheck="false" style="width:100%;min-height:320px;margin:8px 0;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px;font:12px ui-monospace,Menlo,monospace"></textarea>
+        <div class="filters">
+          <button class="btn" id="rulesSave">Save rules</button>
+          <button class="btn ghost" id="rulesCancel">Close</button>
+          <span class="cap" id="rulesStatus" style="align-self:center"></span>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h3>📅 Upcoming Renewals</h3>
       <div class="cap">Yearly renewals in the next 6 months, and every monthly renewal in the current month, with expected cost (click a row for full detail)</div>
@@ -1992,6 +2013,18 @@ async function runMailSync(rescan){
     const lines = [`Scanned ${json.scanned} message${json.scanned===1?'':'s'} in ${json.mailbox}.`];
     lines.push(`Filed ${json.filed} invoice PDF${json.filed===1?'':'s'}${json.alreadyPresent?`, ${json.alreadyPresent} already there`:''}.`);
     if (json.tracker && json.tracker.marked) lines.push(`Ticked ${json.tracker.marked} cell${json.tracker.marked===1?'':'s'} in the "${json.tracker.sheet}" sheet.`);
+    const answers = outer.answers || null;
+    if (answers && answers.answers) lines.push(`Applied ${answers.answers} answer${answers.answers===1?'':'s'} from your Slack replies first.`);
+    if (answers && (answers.unreadable||[]).length){
+      lines.push(`Could not read ${answers.unreadable.length} Slack repl${answers.unreadable.length===1?'y':'ies'}:`);
+      answers.unreadable.slice(0,5).forEach(u => lines.push(`  · "${u.line}" — ${u.error}`));
+    }
+    const heldNow = json.heldItems || [];
+    if (heldNow.length){
+      lines.push(`\nHeld ${heldNow.length} invoice${heldNow.length===1?'':'s'} for your answer rather than guess — see "Needs your answer" on the dashboard, or your Slack DM:`);
+      heldNow.slice(0,8).forEach(h => lines.push(`  · ${h.id} ${h.file} — ${h.question}`));
+    }
+    if (json.pendingCount) lines.push(`${json.pendingCount} question${json.pendingCount===1?'':'s'} waiting in total.`);
 
     const wrote = json.amountsWritten || [];
     if (wrote.length){
@@ -2022,30 +2055,23 @@ async function runMailSync(rescan){
     }
     const upd = json.amountsUpdated || [];
     if (upd.length){
-      lines.push(`\nUpdated ${upd.length} amount${upd.length===1?'':'s'} as later invoices arrived:`);
+      // The cell is the month's invoice total, so it moves either way. Say
+      // which way, and whose figure went: a lowering is the sign of a month
+      // whose invoices are missing from the archive.
       const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2});
+      lines.push(`\nSet ${upd.length} cell${upd.length===1?'':'s'} to the month's invoice total:`);
       upd.slice(0,10).forEach(u => lines.push(
-        `  · ${u.app} ${u.month}: ${fmt(u.previous)} → ${fmt(u.amount)}${u.wasOurs ? '' : '   (replaced a figure this sync did not write)'}`));
+        `  · ${u.app} ${u.month}: ${fmt(u.previous)} → ${fmt(u.amount)}${u.direction==='down' ? "   (lowered — check the month's invoices are all in the folder)" : ''}${u.wasOurs ? '' : '   (replaced a figure this sync did not write)'}`));
     }
     const filled = json.amountsSkippedFilled || [];
-    // Two different reasons a cell was left alone, and they need different
-    // wording: the folder is behind the sheet (normal, invoices still to come),
-    // or the folder could not be fully read, so its total is not a total at all
-    // and no comparison against it means anything.
-    const behind = filled.filter(f => f.reason !== 'folder-total-incomplete');
+    // A month with an invoice nobody could read has no total, only a lower
+    // bound, and a lower bound is never written: the month is held until the
+    // file reads.
     const unreadable = filled.filter(f => f.reason === 'folder-total-incomplete');
-    if (behind.length){
-      lines.push(`\n${behind.length===1?'1 cell was':behind.length+' cells were'} left alone — the invoice total is lower than the sheet, which usually means invoices are still to come:`);
-      behind.slice(0,8).forEach(f => {
-        const sheet = Number(f.current), inv = Number(f.invoiceTotal);
-        const gap = (sheet - inv).toLocaleString('en-US',{minimumFractionDigits:2});
-        lines.push(`  · ${f.app} ${f.month}: sheet has ${sheet.toLocaleString('en-US',{minimumFractionDigits:2})}, invoices so far ${inv.toLocaleString('en-US',{minimumFractionDigits:2})} — ${gap} not yet invoiced`);
-      });
-    }
     if (unreadable.length){
-      lines.push(`\n${unreadable.length===1?'1 cell was':unreadable.length+' cells were'} left alone — some invoices in the folder could not be read, so the total below is only what parsed, not the folder's real total:`);
+      lines.push(`\n${unreadable.length===1?'1 cell was':unreadable.length+' cells were'} held — an invoice in that month could not be read, so its total is not known yet:`);
       unreadable.slice(0,8).forEach(f => lines.push(
-        `  · ${f.app} ${f.month}: sheet has ${Number(f.current).toLocaleString('en-US',{minimumFractionDigits:2})}, invoices that parsed ${Number(f.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})} — fix or re-save the unreadable PDFs listed below, then run this again`));
+        `  · ${f.app} ${f.month}: sheet has ${f.current==null?'nothing':Number(f.current).toLocaleString('en-US',{minimumFractionDigits:2})}, invoices that read ${Number(f.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})} — fix or re-save the unreadable PDF listed below, then run this again`));
     }
     const loose = json.looseIncluded || [];
     if (loose.length){
@@ -2078,6 +2104,8 @@ async function runMailSync(rescan){
     if (json.skippedNotInvoice) lines.push(`\nSkipped ${json.skippedNotInvoice} message${json.skippedNotInvoice===1?'':'s'} that didn't look like an invoice.`);
     if (json.timedOut) lines.push('\nRan out of time part-way — run it again to pick up the rest.');
     if ((json.errors||[]).length) lines.push(`\nErrors:\n  ${json.errors.slice(0,5).join('\n  ')}`);
+    if (json.slack) lines.push(json.slack.sent ? '\nSent you this report by Slack DM.' : `\nNo Slack DM sent — ${json.slack.why}.`);
+    loadPending(true);
     // Nothing new is the normal case between runs — the sync only looks at mail
     // that arrived since the last one. Offer the wider re-read rather than
     // leaving "Scanned 0" looking like a failure.
@@ -2184,22 +2212,25 @@ $('#periodsBtn').onclick = async () => {
     }
 
     if (cells.length) {
-      lines.push(`\nand ${cells.length} sheet cell${cells.length === 1 ? '' : 's'} would change:`);
-      cells.slice(0, 15).forEach(c => lines.push(
-        `  · ${c.app} ${c.month}: ${c.current === null ? '(empty)' : money(c.current)} → ${money(c.value)}`));
+      lines.push(`\nand ${cells.length} sheet cell${cells.length === 1 ? '' : 's'} would be set to the month's invoice total:`);
+      cells.slice(0, 15).forEach(c => {
+        lines.push(`  · ${c.app} ${c.month}: ${c.current === null ? '(empty)' : money(c.current)} → ${money(c.value)}`);
+        // A cell holding a figure the invoices do not account for is still
+        // proposed — the cell is the invoice total — but it says so, and names
+        // the invoices: a short archive and a stale sheet look identical as
+        // one number, and they want opposite answers.
+        if (c.replaces) {
+          lines.push(`        replaces a figure that is not the invoices' — ${c.replaces}`);
+          (c.files || []).slice(0, 6).forEach(inv => lines.push(
+            `        ${inv.file} — ${inv.amount === null || inv.amount === undefined ? 'not readable' : money(inv.amount)}`));
+          if ((c.files || []).length > 6) lines.push(`        … and ${c.files.length - 6} more`);
+        }
+      });
       if (cells.length > 15) lines.push(`  … and ${cells.length - 15} more`);
     }
     if (blocked.length) {
-      lines.push(`\n${blocked.length} month${blocked.length === 1 ? ' is' : 's are'} yours to adjust — nothing will be written to ${blocked.length === 1 ? 'it' : 'them'}:`);
-      blocked.slice(0, 8).forEach(b => {
-        lines.push(`  · ${b.app} ${b.month}: ${b.blocked}${b.would === undefined ? '' : `   (the invoices there now come to ${money(b.would)})`}`);
-        // Naming them is the difference between a judgement call and a glance:
-        // a short archive and a stale sheet look identical as one number, and
-        // they want opposite answers.
-        (b.invoices || []).slice(0, 6).forEach(inv => lines.push(
-          `        ${inv.file} — ${inv.amount === null || inv.amount === undefined ? 'not readable' : money(inv.amount)}`));
-        if ((b.invoices || []).length > 6) lines.push(`        … and ${b.invoices.length - 6} more`);
-      });
+      lines.push(`\n${blocked.length} month${blocked.length === 1 ? '' : 's'} cannot be totalled yet — nothing will be written to ${blocked.length === 1 ? 'it' : 'them'}:`);
+      blocked.slice(0, 8).forEach(b => lines.push(`  · ${b.app} ${b.month}: ${b.blocked}`));
     }
     // The skips are not noise: an invoice nothing could date is one to file by
     // hand, and naming it is the only way that ever happens.
@@ -2308,6 +2339,149 @@ $('#fixTotalsBtn').onclick = async () => {
     btn.textContent = orig; btn.disabled = false;
   }
 };
+
+/* The questions the sync is waiting on. Loaded with the dashboard and after
+   every run; answered here or from Slack — both land in the same place. */
+let pendingData = { items: [], apps: [], rules: null };
+
+async function postMode(mode, body){
+  const res = await fetch('/api/invoices/sync-cron?mode=' + mode, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+  });
+  const raw = await res.text();
+  let json;
+  try { json = JSON.parse(raw); }
+  catch { throw new Error(`HTTP ${res.status}: ${raw.slice(0, 300) || 'empty response'}`); }
+  if (!res.ok || json.error) throw new Error(json.error || ('HTTP ' + res.status));
+  return json;
+}
+
+async function loadPending(quiet){
+  const status = $('#pendingStatus');
+  if (!quiet) status.textContent = 'Checking…';
+  try{
+    const json = await postMode('pending');
+    pendingData = json;
+    renderPending();
+  }catch(err){
+    status.textContent = 'Could not load the questions: ' + err.message;
+  }
+}
+
+function renderPending(){
+  const list = $('#pendingList'), status = $('#pendingStatus');
+  const items = pendingData.items || [];
+  const apps = pendingData.apps || [];
+  const monthLabel = m => { if (!m) return ''; const [y, mm] = m.split('-'); return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(mm)-1] + '-' + y.slice(2); };
+  status.textContent = items.length
+    ? `${items.length} invoice${items.length === 1 ? '' : 's'} waiting.${pendingData.slackConfigured ? '' : ' (Slack DM is not set up: add SLACK_BOT_TOKEN and SLACK_DM_USER in Vercel to get these questions in Slack.)'}`
+    : `Nothing waiting — every invoice the sync has seen is filed.${pendingData.slackConfigured ? '' : ' Slack DM is not set up: add SLACK_BOT_TOKEN and SLACK_DM_USER in Vercel to get reports and questions in Slack.'}`;
+  list.innerHTML = '';
+  for (const it of items){
+    const row = document.createElement('div');
+    row.className = 'amt-row';
+    row.style.cssText = 'display:grid;grid-template-columns:1fr auto;gap:8px 14px;padding:10px 0;border-top:1px solid var(--line)';
+    const opts = ['<option value="">— pick the app —</option>'].concat(apps.map(a =>
+      `<option value="${a.replace(/"/g,'&quot;')}"${(it.suggestion === a || it.app === a) ? ' selected' : ''}>${a}</option>`)).join('');
+    const amountBox = it.amountUsable ? '' :
+      `<input data-amount placeholder="Amount in USD (only if the PDF's total could not be read)" style="min-width:250px" />`;
+    row.innerHTML = `
+      <div>
+        <div><b>${it.id}</b> · ${it.file}${it.receivedAt ? ` · ${String(it.receivedAt).slice(0,10)}` : ''}</div>
+        <div class="cap">${it.subject ? `"${it.subject}" · ` : ''}from ${it.from || 'unknown sender'}${it.vendor ? ` · rule: ${it.vendor}` : ''}${it.amount !== null && it.amount !== undefined ? ` · reads ${Number(it.amount).toLocaleString('en-US',{minimumFractionDigits:2})} ${it.currency || ''}` : ' · no total read'}${it.periodStart ? ` · period ${it.periodStart} → ${it.periodEnd}` : ''}${it.invoiceDate ? ` · dated ${it.invoiceDate}` : ''}</div>
+        <div style="margin-top:4px">${it.question}</div>
+        ${(it.options||[]).length ? `<div class="cap">options: ${it.options.map((o,i)=>`${i+1}) ${o}`).join('   ')}</div>` : ''}
+        <div class="cap">held at ${it.heldPath}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:stretch;min-width:260px">
+        <select data-app>${opts}</select>
+        <input data-month placeholder="Month, e.g. Aug-26" value="${monthLabel(it.month)}" />
+        ${amountBox}
+        <div style="display:flex;gap:6px">
+          <button class="btn" data-resolve>File it</button>
+          <button class="btn ghost" data-ignore title="Not an invoice for the sheet — moves it to _Ignored">Ignore</button>
+        </div>
+      </div>`;
+    row.querySelector('[data-resolve]').onclick = () => {
+      const app = row.querySelector('[data-app]').value;
+      const month = row.querySelector('[data-month]').value.trim();
+      const amountEl = row.querySelector('[data-amount]');
+      const amount = amountEl && amountEl.value.trim() ? Number(amountEl.value.replace(/[^0-9.]/g, '')) : null;
+      if (!app) { alert('Pick the app first.'); return; }
+      if (!month) { alert('Say which month (e.g. Aug-26).'); return; }
+      submitAnswers([{ id: it.id, app, month: monthKeyFromText(month), amount }], row);
+    };
+    row.querySelector('[data-ignore]').onclick = () => {
+      if (!confirm(`Leave ${it.file} out of the sheet? It moves to _Ignored in the archive.`)) return;
+      submitAnswers([{ id: it.id, ignore: true }], row);
+    };
+    list.appendChild(row);
+  }
+}
+
+// "Aug-26", "Aug 2026", "August", "2026-08" → "2026-08". Same reading the
+// server applies to a Slack reply, so the two agree.
+function monthKeyFromText(text){
+  const s = String(text || '').trim();
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^([A-Za-z]{3,9})[\s\-]*(\d{2,4})?$/);
+  if (!m) return s;
+  const idx = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[1].slice(0,3).toLowerCase());
+  if (idx === -1) return s;
+  let year = m[2] ? Number(m[2]) : new Date().getFullYear();
+  if (year < 100) year += 2000;
+  return `${year}-${String(idx + 1).padStart(2, '0')}`;
+}
+
+async function submitAnswers(answers, row){
+  const buttons = row ? [...row.querySelectorAll('button')] : [];
+  buttons.forEach(b => b.disabled = true);
+  try{
+    const json = await postMode('pending-resolve', { answers });
+    const r = json.result || {};
+    const lines = [];
+    (r.answered||[]).forEach(a => lines.push(`${a.id} ${a.file} → ${a.app} ${a.month}`));
+    (r.ignored||[]).forEach(i => lines.push(`${i.id} ${i.file} left out`));
+    (r.learned||[]).forEach(l => lines.push(`Remembered: ${l}`));
+    const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2});
+    (r.amountsWritten||[]).forEach(w => lines.push(`Spendings ${w.app} ${w.month} = ${fmt(w.amount)}`));
+    (r.amountsUpdated||[]).forEach(u => lines.push(`Spendings ${u.app} ${u.month}: ${fmt(u.previous)} → ${fmt(u.amount)}`));
+    (r.amountsSkippedFilled||[]).forEach(f => lines.push(`${f.app} ${f.month} not written yet — an invoice in that month could not be used (readable ones come to ${fmt(f.invoiceTotal)})`));
+    if (r.tracker && r.tracker.marked) lines.push(`Ticked ${r.tracker.marked} tracker cell${r.tracker.marked===1?'':'s'}.`);
+    (r.errors||[]).forEach(e => lines.push(`Error: ${e}`));
+    if (r.slack) lines.push(r.slack.sent ? 'Sent you a Slack DM.' : `No Slack DM — ${r.slack.why}.`);
+    alert(lines.join('\n') || 'Done.');
+    await loadPending(true);
+    if ((r.answered||[]).length) { loadInventory(true); syncFromApi(true); }
+  }catch(err){
+    alert('Could not apply the answer: ' + err.message);
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+
+$('#pendingRefresh').onclick = () => loadPending(false);
+$('#rulesBtn').onclick = () => {
+  const ed = $('#rulesEditor');
+  ed.classList.toggle('hidden');
+  if (!ed.classList.contains('hidden')) $('#rulesText').value = JSON.stringify(pendingData.rules || { vendors: [] }, null, 2);
+};
+$('#rulesCancel').onclick = () => $('#rulesEditor').classList.add('hidden');
+$('#rulesSave').onclick = async () => {
+  const status = $('#rulesStatus');
+  let rules;
+  try { rules = JSON.parse($('#rulesText').value); }
+  catch (e) { status.textContent = 'Not valid JSON: ' + e.message; return; }
+  status.textContent = 'Saving…';
+  try{
+    const json = await postMode('rules-save', { rules });
+    pendingData.rules = json.rules;
+    $('#rulesText').value = JSON.stringify(json.rules, null, 2);
+    status.textContent = `Saved ${json.rules.vendors.length} vendor rule${json.rules.vendors.length===1?'':'s'}.`;
+  }catch(err){
+    status.textContent = 'Save failed: ' + err.message;
+  }
+};
+loadPending(true);
 </script>
 </body>
 </html>

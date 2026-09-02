@@ -166,17 +166,20 @@ test('updates a filled cell when the invoice total has grown', () => {
   assert.strictEqual(updated[0].value, 999);
 });
 
-test('leaves a filled cell alone when the invoice total is lower', () => {
-  // A new invoice can only add, so a shortfall means invoices are missing from
-  // the folder — not that less was spent. Overwriting here would replace a
-  // correct figure with a wrong one.
+test('lowers a filled cell when the invoice total is lower', () => {
+  // The cell is the month's invoice total, whichever way it has to move — the
+  // owner's rule ("calculate the total for all invoices in that month and show
+  // that in sheet"). A lowering is reported as such, so a month whose
+  // invoices are missing from the archive is easy to spot.
   const { write, updated, skippedFilled } = planAmountCells(
     { 'Bubble Starter': { '2026-06': 500 } }, grid(), USED, cellValue, {}
   );
-  assert.strictEqual(write.length + updated.length, 0);
-  assert.strictEqual(skippedFilled.length, 1);
-  assert.strictEqual(skippedFilled[0].current, 751.96);
-  assert.strictEqual(skippedFilled[0].reason, 'invoice-total-lower');
+  assert.strictEqual(write.length, 0);
+  assert.strictEqual(skippedFilled.length, 0);
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].previous, 751.96);
+  assert.strictEqual(updated[0].value, 500);
+  assert.strictEqual(updated[0].direction, 'down');
 });
 
 test('never writes to the Total row or an unknown app', () => {
@@ -302,8 +305,10 @@ test('tops up a cell this sync wrote when later invoices arrive', () => {
   assert.strictEqual(updated[0].value, 524.27);
 });
 
-test('never touches a figure a human or the statement put there', () => {
-  // The cell holds 524.27 but we never wrote it — it is not ours to change.
+test('a figure a human or the statement put there is replaced, and flagged', () => {
+  // The cell holds 524.27 and we never wrote it. It is still replaced by the
+  // invoice total — that is what the cell means — but `wasOurs` is false, so
+  // the summary and the audit log say whose number went.
   const values = VALUES.map(r => r.slice());
   values[3][8] = 524.27;
   const { write, updated, skippedFilled } = planAmountCells(
@@ -311,8 +316,10 @@ test('never touches a figure a human or the statement put there', () => {
     locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, {}
   );
   assert.strictEqual(write.length, 0);
-  assert.strictEqual(updated.length, 0);
-  assert.strictEqual(skippedFilled.length, 1, 'must be reported, not written');
+  assert.strictEqual(skippedFilled.length, 0);
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].wasOurs, false, 'must be flagged as not our own figure');
+  assert.strictEqual(updated[0].direction, 'down');
 });
 
 test('a hand correction is still superseded by a higher invoice total', () => {
@@ -332,7 +339,7 @@ test('a hand correction is still superseded by a higher invoice total', () => {
   assert.strictEqual(updated[0].wasOurs, false, 'must be flagged as not our own figure');
 });
 
-test('a hand correction survives an invoice total that is lower', () => {
+test('a hand correction above the invoice total is brought back to the invoices', () => {
   const prior = { 'Bubble Starter||2026-06': 492.27 };
   const values = VALUES.map(r => r.slice());
   values[3][8] = 600; // corrected upward by a human
@@ -340,8 +347,11 @@ test('a hand correction survives an invoice total that is lower', () => {
     { 'Bubble Starter': { '2026-06': 524.27 } },
     locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, prior
   );
-  assert.strictEqual(write.length + updated.length, 0, 'must not drag a correction back down');
-  assert.strictEqual(skippedFilled.length, 1);
+  assert.strictEqual(write.length + skippedFilled.length, 0);
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].previous, 600);
+  assert.strictEqual(updated[0].value, 524.27);
+  assert.strictEqual(updated[0].wasOurs, false);
 });
 
 test('does not rewrite a cell that already holds the right total', () => {
@@ -423,57 +433,43 @@ test('leaves non-Anthropic invoices alone', () => {
   assert.strictEqual(refineAnthropic(BUBBLE, ANTHROPIC_ROWS), null);
 });
 
-/* ---------------- the top-up model, stated ---------------- *
+/* ---------------- the cell is the month's invoice total ---------------- *
  *
- * What a cell should hold when the sheet is AHEAD of the invoices on file.
- * The rule the owner chose: a higher figure means invoices are still to come
- * and it already covers them, so a newly arrived invoice is ABSORBED by that
- * excess rather than added on top of it. The cell only grows once the folder
- * total passes the sheet figure.
- *
- * That is what `max(cell, folderTotal)` computes — the two are the same
- * arithmetic — but it had only ever been written as "leave a lower total
- * alone", which reads like caution rather than a decision. These pin the model
- * itself, using the reconciliation it came from: Bubble's cell held 524.27
- * against eight invoices totalling 492.27, and the ninth, for 32.00, was still
- * pending. 492.27 + 32 = 524.27 — the sheet was never wrong, just early.
+ * The rule the owner set: "calculate the total for all invoices in that month
+ * and show that in sheet". The cell holds the sum of the month's invoices,
+ * replacing whatever is there, and nothing is ever ADDED to a cell — that is
+ * what makes a re-run harmless: the same folder writes the same number twice,
+ * never twice the number. Bubble's June is the fixture: eight invoices
+ * totalling 492.27, a ninth of 32.00 still to come.
  */
 
 const bubble = (total) => planAmountCells(
   { 'Bubble Starter': { '2026-06': total } }, grid(), USED, cellValue
 );
 
-test('top-up: an invoice the sheet already anticipated does not raise the cell', () => {
-  // Eight of nine invoices on file. The sheet is 32.00 ahead — the ninth.
+test('sum: the cell follows the invoices on file, down as well as up', () => {
+  // Eight of nine invoices on file; the cell holds 751.96 from somewhere else.
   const eight = bubble(492.27);
   assert.strictEqual(eight.write.length, 0);
-  assert.strictEqual(eight.updated.length, 0);
-  assert.strictEqual(eight.skippedFilled.length, 1);
-  assert.strictEqual(eight.skippedFilled[0].current, 751.96);
+  assert.strictEqual(eight.skippedFilled.length, 0);
+  assert.strictEqual(eight.updated.length, 1);
+  assert.strictEqual(eight.updated[0].value, 492.27);
+  assert.strictEqual(eight.updated[0].direction, 'down');
 
-  // The ninth lands. Adding it on top would give 783.96; absorbing it leaves
-  // the figure that was right all along.
-  const nine = bubble(751.96);
-  assert.strictEqual(nine.write.length, 0, 'the cell is already correct');
-  assert.strictEqual(nine.updated.length, 0, 'and must not be written again');
-  assert.strictEqual(nine.skippedFilled.length, 0, 'nor reported as a shortfall');
+  // The ninth lands: the folder total is 524.27 and so is the cell.
+  const nine = bubble(524.27);
+  assert.strictEqual(nine.updated.length, 1);
+  assert.strictEqual(nine.updated[0].value, 524.27);
 });
 
-test('top-up: an invoice beyond what the sheet anticipated does raise it', () => {
-  // Once the folder passes the sheet figure, the excess is spent and the extra
-  // is real spend the sheet has not caught up with.
-  const { updated, write, skippedFilled } = bubble(800);
-  assert.strictEqual(write.length, 0);
-  assert.strictEqual(skippedFilled.length, 0);
-  assert.strictEqual(updated.length, 1);
-  assert.strictEqual(updated[0].previous, 751.96);
-  assert.strictEqual(updated[0].value, 800);
+test('sum: a cell already holding the month\'s total is not written again', () => {
+  const same = bubble(751.96);
+  assert.strictEqual(same.write.length, 0, 'the cell is already correct');
+  assert.strictEqual(same.updated.length, 0, 'and must not be written again');
+  assert.strictEqual(same.skippedFilled.length, 0);
 });
 
-test('top-up: re-running changes nothing, so the daily cron cannot inflate a cell', () => {
-  // The one property an additive rule could not have had. The folder total is
-  // the whole figure, so running the sync twice writes the same number twice —
-  // never 751.96 + 751.96.
+test('sum: re-running changes nothing, so a repeat run cannot inflate a cell', () => {
   const first = bubble(900);
   assert.strictEqual(first.updated[0].value, 900);
 
@@ -524,15 +520,17 @@ test('the same total DOES apply once every invoice in the folder has been read',
   assert.strictEqual(updated[0].value, 85);
 });
 
-test('a partial total may still fill an empty cell, and says that it is partial', () => {
-  // Something beats nothing when the cell is blank, and the run reports it.
-  const { write, skippedFilled } = planAmountCells(
+test('a partial total does not fill an empty cell either — it is held and asked about', () => {
+  // A cell claims to be the month's total, and a lower bound is not that.
+  // "Never guess": the month is reported with the file that would not read,
+  // and the cell is written on the run after it is fixed.
+  const { write, updated, skippedFilled } = planAmountCells(
     { 'Adobe': { '2026-08': 85 } }, apolloGrid(), USED, cellValue, {}, { 'Adobe||2026-08': true }
   );
-  assert.strictEqual(skippedFilled.length, 0);
-  assert.strictEqual(write.length, 1);
-  assert.strictEqual(write[0].value, 85);
-  assert.strictEqual(write[0].partial, true, 'the write has to carry that it is a lower bound');
+  assert.strictEqual(write.length + updated.length, 0);
+  assert.strictEqual(skippedFilled.length, 1);
+  assert.strictEqual(skippedFilled[0].reason, 'folder-total-incomplete');
+  assert.strictEqual(skippedFilled[0].current, null);
 });
 
 test('a complete total is not flagged as partial', () => {
@@ -632,4 +630,75 @@ test('the totaller accepts invoices from outside the month folder', () => {
     'loose invoices have to be found before they can be totalled');
   assert.match(src, /sumFolderInvoices\(token, driveId, folder, cache, budget, loose\)/,
     'and passed to the totaller, or the month is short by whatever sits loose');
+});
+
+/* ---------------- what the archive survey turned up ---------------- *
+ *
+ * Forty archived invoices had "no payable total found" and two were reported
+ * as being in the currencies AND and ANY. Each shape below is verbatim from a
+ * real file in the archive (as the connector reads it), and each was a gap in
+ * the patterns rather than a bad PDF.
+ */
+
+test('Sentry: "Total $82.31 USD" — the figure is followed by its currency', () => {
+  const r = extractInvoiceTotal('Total   $82.31 USD  Your subscription renews');
+  assert.strictEqual(r.amount, 82.31);
+  assert.strictEqual(r.usable, true);
+});
+
+test('Webflow: pdf-parse glues the label to the figure ("TotalUSD 816.00")', () => {
+  const r = extractInvoiceTotal('Subtotal USD 768.00 Tax (6.25%) USD 48.00 TotalUSD 816.00 Amount DueUSD 816.00');
+  assert.strictEqual(r.amount, 816);
+  assert.strictEqual(r.currency, 'USD');
+});
+
+test('Google Voice: a column of figures beside a column of labels', () => {
+  const r = extractInvoiceTotal('$10.00  $0.73  $0.19  $1.45  $1.50  $13.87  Subtotal in USD  State sales tax (6.25%)  Federal Regulatory Assessment Fee  Federal Universal Service Fund  State 911 Tax  Total in USD  Domain Name: x');
+  assert.strictEqual(r.amount, 13.87);
+  assert.strictEqual(r.via, 'total in CUR (columns)');
+});
+
+test('Google Ads statement: Total in USD is the month\'s spend, not the payments', () => {
+  const r = extractInvoiceTotal('$598.69  $0.00  $598.69  Subtotal in USD  Tax (0%)  Total in USD  -$460.00 Total payments received in USD');
+  assert.strictEqual(r.amount, 598.69);
+  assert.strictEqual(extractInvoiceTotal('Subtotal in USD $10.00  Total in USD $13.87').amount, 13.87, 'and inline, when the reader keeps the row together');
+});
+
+test('a figure/label pairing that does not line up is not trusted', () => {
+  // Three figures, two labels: whichever is missing, the last figure is not
+  // necessarily the total.
+  assert.strictEqual(extractInvoiceTotal('$1.00  $2.00  $3.00  Subtotal in USD  Total in USD').amount, null);
+});
+
+test('PostHog: a $0.00 invoice is a real total of nothing, not an unread one', () => {
+  const r = extractInvoiceTotal('$0.00 USD due April 24, 2026  Subtotal $0.00 Total $0.00  Amount due $0.00 USD');
+  assert.strictEqual(r.amount, 0);
+  assert.strictEqual(r.usable, true);
+  // But a nought never beats a real figure elsewhere on the invoice.
+  assert.strictEqual(extractInvoiceTotal('Credit $0.00  Total $12.00  Amount due $12.00 USD').amount, 12);
+});
+
+test('"any currency" and "currency and" are not currencies', () => {
+  assert.strictEqual(detectCurrency('Pay in any currency you like. Total $5.00').code, 'USD');
+  assert.strictEqual(detectCurrency('Currency and payment terms. Total $5.00').code, 'USD');
+  assert.strictEqual(detectCurrency('the errors were ours. Total $5.00').code, 'USD', 'lower-case "rs" is not rupees');
+});
+
+test('a vendor rule can say which of two stated currencies the sheet takes', () => {
+  const both = 'Total EUR 50.00 (USD 55.00) Total 55.00';
+  assert.strictEqual(extractInvoiceTotal(both).usable, false, 'ambiguous without a rule');
+  const r = extractInvoiceTotal(both, { currency: 'USD' });
+  assert.strictEqual(r.usable, true);
+  assert.strictEqual(r.currency, 'USD');
+  assert.strictEqual(extractInvoiceTotal('Net Payable (INR) 150591.60', { currency: 'USD' }).usable, false, 'a rule cannot turn rupees into dollars');
+});
+
+test('positioned text comes back as lines, with cells on a row kept together', () => {
+  const { linesFromTextContent } = require('../lib/invoice-amount');
+  const item = (str, x, y, w) => ({ str, transform: [10, 0, 0, 10, x, y], width: w });
+  const lines = linesFromTextContent({ items: [
+    item('Total', 20, 100, 25), item('USD 816.00', 200, 100.5, 50),
+    item('Sub', 20, 120, 15), item('total', 35.5, 120, 25),
+  ] });
+  assert.deepStrictEqual(lines, ['Subtotal', 'Total   USD 816.00']);
 });

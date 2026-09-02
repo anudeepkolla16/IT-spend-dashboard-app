@@ -4,8 +4,13 @@ const {
   graphFetch, graphListAll, resolveArchiveRoot, archiveFile,
 } = require('../../lib/graph');
 const { verify, parseCookies } = require('../../lib/session');
-const { runMailSync } = require('../../lib/mail-sync');
+const { runMailSync, resolvePending, collectSlackAnswers, notify, readRules, writeRules } = require('../../lib/mail-sync');
 const { scanPeriods, applyBackfill } = require('../../lib/invoices/period-backfill');
+const { readPending } = require('../../lib/invoices/pending');
+const { openSpendSheet } = require('../../lib/spend-sheet');
+const { readPdfText, extractInvoiceTotal, extractInvoiceRef } = require('../../lib/invoice-amount');
+const { extractBillingPeriod, extractInvoiceDate } = require('../../lib/invoice-period');
+const { normalizeRules } = require('../../lib/invoices/rules');
 
 // The daily invoice job. Two sources, one function:
 //   1. mirrors new invoice PDFs from the mapped SharePoint source folders
@@ -125,6 +130,22 @@ async function mirrorSourceFolders(token, targetDriveId, deadline, config, archi
   return summary;
 }
 
+// Two run summaries (answers applied, then mail filed) as one, for one DM.
+function mergeSummaries(a, b) {
+  const out = { ...b };
+  for (const key of Object.keys(a)) {
+    if (Array.isArray(a[key])) out[key] = a[key].concat(Array.isArray(b[key]) ? b[key] : []);
+    else if (typeof a[key] === 'number') out[key] = a[key] + (typeof b[key] === 'number' ? b[key] : 0);
+    else if (key === 'perApp') {
+      out.perApp = { ...(b.perApp || {}) };
+      for (const [app, n] of Object.entries(a.perApp || {})) out.perApp[app] = (out.perApp[app] || 0) + n;
+    } else if (key === 'tracker') {
+      out.tracker = { sheet: (b.tracker && b.tracker.sheet) || (a.tracker && a.tracker.sheet) || null, marked: ((a.tracker && a.tracker.marked) || 0) + ((b.tracker && b.tracker.marked) || 0) };
+    }
+  }
+  return out;
+}
+
 module.exports = async (req, res) => {
   try {
     // Vercel automatically sends `Authorization: Bearer <CRON_SECRET>` for
@@ -156,6 +177,70 @@ module.exports = async (req, res) => {
     // file each invoice under the vendor folder it has always lived in.
     const config = await readJsonFile(token, targetDriveId, archiveFile(archiveRoot, '_sync-config.json'));
 
+    // The questions the sync is waiting on, with what the page needs to answer
+    // them: the sheet's rows and the rules file the owner edits.
+    if (mode === 'pending') {
+      const held = await readPending(token, targetDriveId, archiveRoot);
+      const sheet = await openSpendSheet(token);
+      const rules = await readRules(token, targetDriveId, archiveRoot);
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({
+        ok: true, mode, items: held.items, apps: sheet.grid.apps.map(a => a.name),
+        rules, slackConfigured: !!(process.env.SLACK_BOT_TOKEN && process.env.SLACK_DM_USER),
+      });
+      return;
+    }
+
+    // Answers from the dashboard: [{ id, app, month, amount, ignore }].
+    if (mode === 'pending-resolve') {
+      const body = req.body || {};
+      const answers = Array.isArray(body.answers) ? body.answers : [];
+      const result = await resolvePending(token, targetDriveId, answers, {
+        deadline: Date.now() + 45 * 1000, root: archiveRoot, mapping: config && config.mapping,
+      });
+      result.slack = await notify(token, targetDriveId, result, null, archiveRoot);
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({ ok: true, mode, result });
+      return;
+    }
+
+    // The owner's rules, saved from the dashboard's editor.
+    if (mode === 'rules-save') {
+      const body = req.body || {};
+      const rules = normalizeRules(body.rules);
+      if (!rules.vendors.length) throw new Error('The rules have no vendors in them — refusing to save an empty file');
+      const saved = await writeRules(token, targetDriveId, archiveRoot, rules);
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({ ok: true, mode, rules: saved });
+      return;
+    }
+
+    // Reads one archived PDF the way the sync does and says what it found —
+    // the text, the total, the period, the invoice number — so an invoice the
+    // sync got wrong can be looked at without guessing what it saw.
+    if (mode === 'inspect') {
+      const path = String((req.query && req.query.path) || (req.body && req.body.path) || '').trim();
+      if (!path) throw new Error('inspect needs ?path=<archive-relative path>');
+      const full = path.startsWith(archiveRoot.path) ? path : `${archiveRoot.path}/${path.replace(/^\/+/, '')}`;
+      const dl = await graphFetch(
+        `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(targetDriveId)}/root:/${encodeGraphPath(full)}:/content`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!dl.ok) throw new Error(`could not download "${full}" (${dl.status})`);
+      const bytes = Buffer.from(await dl.arrayBuffer());
+      const read = await readPdfText(bytes);
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({
+        ok: true, mode, path: full, reader: read.reader, error: read.error,
+        total: read.error ? null : extractInvoiceTotal(read.text),
+        period: read.error ? null : extractBillingPeriod(read.text),
+        invoiceDate: read.error ? null : extractInvoiceDate(read.text),
+        ref: read.error ? null : extractInvoiceRef(read.text),
+        text: read.text.slice(0, 6000),
+      });
+      return;
+    }
+
     // The billing-period backfill. The scan writes nothing; the apply moves only
     // the files, and writes only the cells, that the scan proposed and the user
     // ticked — the browser sends both lists back.
@@ -183,16 +268,31 @@ module.exports = async (req, res) => {
     // that arrives by mail reaches the dashboard in the same run rather than
     // waiting a day.
     if (mode !== 'folders') {
+      // Anything the owner answered in the Slack DM since the last run is
+      // applied first, so a held invoice is filed before its month is totalled.
+      let slackAnswers = null;
+      try {
+        slackAnswers = await collectSlackAnswers(token, targetDriveId, {
+          deadline: started + 20 * 1000, root: archiveRoot, mapping: config && config.mapping,
+        });
+        if (slackAnswers) out.answers = slackAnswers;
+      } catch (e) {
+        out.answers = { error: e.message };
+      }
       // A mailbox failure (most likely a missing Mail.Read grant) must not take
       // the folder mirror down with it.
       try {
         out.mail = await runMailSync(token, targetDriveId, {
           deadline: mode === 'mail' ? HARD_DEADLINE : started + 25 * 1000,
           mapping: config && config.mapping,
+          root: archiveRoot,
           // ?rescan=1 re-reads mail already seen, so totals can be picked up
           // from invoices that were filed before amounts were being read.
           rescan: !!(req.query && (req.query.rescan === '1' || req.query.rescan === 'true')),
         });
+        // One DM per run, covering the answers applied and the mail filed.
+        const merged = slackAnswers && slackAnswers.result ? mergeSummaries(slackAnswers.result, out.mail) : out.mail;
+        out.mail.slack = await notify(token, targetDriveId, merged, slackAnswers, archiveRoot);
       } catch (e) {
         out.mail = { error: e.message };
       }

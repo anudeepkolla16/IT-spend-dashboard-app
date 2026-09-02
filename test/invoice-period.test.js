@@ -36,10 +36,13 @@ DETAIL  Starter Web Plan   8/12/26 - 9/12/26   $32  TOTAL PAID   $32  Amounts ar
 const ANTHROPIC = `Invoice number 8A2F  Date of issue July 31, 2026  Claude Opus 4.8 Usage
 Jul 2   Jul 31, 2026   1   13,479.42   13,479.42  Total   13,479.42  Amount due   $13,479.42`;
 
-test('a cycle that straddles two months is filed where most of it falls', () => {
+test('a cycle that straddles two months is filed in the month it starts', () => {
+  // The owner's rule: "period is 01-08-2026 to 31-08-2026 and invoice came on
+  // 1st Sep but this bill belongs to Aug" — and a 26 Aug → 26 Sep cycle is
+  // August's too. The start date decides, however the days fall.
   const r = invoiceMonth(LUZMO, '2026-08');
-  assert.strictEqual(r.month, '2026-09');
-  assert.strictEqual(r.via, 'period-majority');
+  assert.strictEqual(r.month, '2026-08');
+  assert.strictEqual(r.via, 'period-start');
   assert.strictEqual(r.period.start, '2026-08-26');
   assert.strictEqual(r.period.end, '2026-09-26');
 });
@@ -120,17 +123,25 @@ test('nonsense dates are left alone rather than guessed at', () => {
 
 // --- Choosing the month ---------------------------------------------------
 
-test('the end date is the next cycle\'s start, so it is not counted twice', () => {
-  // Aug 26 → Sep 26: six days in August, twenty-five in September.
+test('a straddling cycle goes to the month it starts in, however the days fall', () => {
+  // Aug 26 → Sep 26: six days in August, twenty-five in September — and it is
+  // still August's invoice. The breakdown is reported, not decided by.
   const r = monthOfPeriod({ start: '2026-08-26', end: '2026-09-26' });
-  assert.strictEqual(r.month, '2026-09');
+  assert.strictEqual(r.month, '2026-08');
+  assert.strictEqual(r.rule, 'period-start');
   assert.strictEqual(r.days['2026-08'], 6);
   assert.strictEqual(r.days['2026-09'], 25);
 });
 
+test('a bill for last month that arrives on the 1st belongs to last month', () => {
+  // "period is 01-08-2026 to 31-08-2026 and invoice came on 1st sep but this
+  // bill belong to Aug" — the case the rule was written for.
+  const r = invoiceMonth('Billing period: 01-08-2026 to 31-08-2026  Total $50.00', '2026-09');
+  assert.strictEqual(r.month, '2026-08');
+  assert.strictEqual(r.via, 'period-start');
+});
+
 test('an even split goes to the month the period starts in', () => {
-  // Jan 17 → Feb 16 is fifteen days each way, so the tie has to break somewhere;
-  // the month the cycle opens in is the one the invoice was raised in.
   const r = monthOfPeriod({ start: '2026-01-17', end: '2026-02-16' });
   assert.strictEqual(r.days['2026-01'], 15);
   assert.strictEqual(r.days['2026-02'], 15);
@@ -155,21 +166,23 @@ test('a period far from the mail is treated as a misread, not a cycle', () => {
 });
 
 test('the period still wins when the mail arrives late', () => {
-  // Luzmo's invoice forwarded a week later still belongs to September.
-  assert.strictEqual(invoiceMonth(LUZMO, '2026-09').month, '2026-09');
+  // Luzmo's August invoice forwarded in September still belongs to August.
+  assert.strictEqual(invoiceMonth(LUZMO, '2026-09').month, '2026-08');
 });
 
 // --- Wiring ---------------------------------------------------------------
 
 test('the mail sync files, ticks and totals by the resolved month', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'mail-sync.js'), 'utf8');
-  assert.match(src, /invoiceMonth\(/, 'the sync must ask which month the invoice is for');
-  assert.match(src, /const attMonth = placement\.month \|\| month/);
+  assert.match(src, /monthForInvoice\(pdfText, receivedMonth\)/, 'the sync must ask which month the invoice is for');
+  // Never the mail's month: the period start, else the invoice date, else ask.
+  assert.match(src, /const attMonth = when\.month;/);
+  assert.match(src, /if \(!verdict\.app \|\| !when\.month\) \{/, 'an invoice with no month is held and asked about, not filed by arrival');
   // Nothing downstream may keep using the mail's month: the folder, the tracker
   // tick and the folder total all have to agree with where the PDF went.
   assert.match(src, /placeFor\(attVendor, attMonth\)/, 'the PDF must be filed under the resolved month');
   assert.match(src, /marks\.push\(\{ app: attApp, month: attMonth \}\)/, 'the tracker must tick the resolved month');
-  assert.match(src, /touched\.set\(`\$\{attApp\}\|\|\$\{attMonth\}`/, 'the folder total must follow the PDF');
+  assert.match(src, /touched\.set\(markKey, \{ app: attApp, month: attMonth/, 'the folder total must follow the PDF');
 });
 
 test('a copy left in the old month folder is reported, not silently doubled', () => {
