@@ -2289,6 +2289,11 @@ async function runMailSync(rescan){
       lines.push(`Could not read ${answers.unreadable.length} Slack repl${answers.unreadable.length===1?'y':'ies'}:`);
       answers.unreadable.slice(0,5).forEach(u => lines.push(`  · "${u.line}" — ${u.error}`));
     }
+    const reread = json.reread || [];
+    if (reread.length){
+      lines.push(`\nRe-read ${reread.length} held invoice${reread.length===1?'':'s'} with the current reader:`);
+      reread.slice(0,8).forEach(r => lines.push(`  · ${r.id} ${r.file}: ${r.result}${r.app ? ` → ${r.app} ${r.month}` : ''}${r.note ? ` — ${r.note}` : ''}`));
+    }
     const heldNow = json.heldItems || [];
     if (heldNow.length){
       lines.push(`\nHeld ${heldNow.length} invoice${heldNow.length===1?'':'s'} for your answer rather than guess — see "Needs your answer" on the dashboard, or your Slack DM:`);

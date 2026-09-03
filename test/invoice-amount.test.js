@@ -744,3 +744,27 @@ test('a month emptied by a move is cleared only when the figure was this sync\'s
   const theirs = planAmountCells({ 'Bubble Starter': { '2026-06': 0 } }, grid(), USED, cellValue, {});
   assert.strictEqual(theirs.updated.length + theirs.write.length, 0, 'a figure not ours stays');
 });
+
+/* ---------------- the reader, end to end ---------------- *
+ *
+ * The first live run on Vercel read nothing: pdfjs loads its worker through
+ * an eval'd require that no bundler follows, so the function shipped without
+ * pdf.worker.js. The fixture is a small invoice-shaped PDF; this pins that the
+ * worker resolves, that pdfjs is the reader that answers, and that its text
+ * keeps a label and its figure on one line.
+ */
+
+test('pdfjs reads a PDF end to end, with the worker it needs on disk', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { readPdfText } = require('../lib/invoice-amount');
+  assert.ok(require.resolve('pdfjs-dist/legacy/build/pdf.worker.js'), 'the worker must be resolvable');
+  const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
+  assert.match(String(vercel.functions['api/invoices/sync-cron.js'].includeFiles), /pdf\.worker\.js/, 'and shipped with the function');
+
+  const r = await readPdfText(fs.readFileSync(path.join(__dirname, 'fixtures', 'sample-invoice.pdf')));
+  assert.strictEqual(r.error, null);
+  assert.strictEqual(r.reader, 'pdfjs');
+  assert.match(r.text, /Total\s+USD 816\.00/);
+  assert.strictEqual(extractInvoiceTotal(r.text).amount, 816);
+});
