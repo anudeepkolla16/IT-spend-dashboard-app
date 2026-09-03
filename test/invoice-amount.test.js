@@ -768,3 +768,61 @@ test('pdfjs reads a PDF end to end, with the worker it needs on disk', async () 
   assert.match(r.text, /Total\s+USD 816\.00/);
   assert.strictEqual(extractInvoiceTotal(r.text).amount, 816);
 });
+
+
+/* ---------------- cells the owner has locked ---------------- *
+ *
+ * "never change these amounts in next runs, these are correct figures":
+ * some months have invoices missing from the archive, and Claude Ai's and
+ * Cursor's charges were paid from prepaid credits. A lock in the rules file
+ * holds the owner's figure; the sync writes it back if the cell drifts and
+ * ignores the folder total for that month.
+ */
+
+const LOCKS = [{ app: 'Bubble Starter', month: '2026-06', value: 745.89, note: 'invoices missing' }];
+
+test('a locked cell is never set to the folder total', () => {
+  const values = VALUES.map(r => r.slice());
+  values[3][8] = 745.89;
+  const { write, updated, skippedFilled, locked } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 192 } }, locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, {}, {}, LOCKS
+  );
+  assert.strictEqual(write.length + updated.length + skippedFilled.length, 0);
+  assert.strictEqual(locked.length, 1);
+  assert.strictEqual(locked[0].enforced, false);
+  assert.strictEqual(locked[0].invoiceTotal, 192, 'the ignored total is reported beside the kept figure');
+});
+
+test('a locked cell that has drifted is put back to the locked figure', () => {
+  // The cell holds 192 (a previous run's total); the lock says 745.89.
+  const values = VALUES.map(r => r.slice());
+  values[3][8] = 192;
+  const { updated, locked } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 192 } }, locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, {}, {}, LOCKS
+  );
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].value, 745.89);
+  assert.strictEqual(updated[0].locked, true);
+  assert.strictEqual(locked[0].enforced, true);
+});
+
+test('a lock of zero clears a figure the sync wrote, and holds it there', () => {
+  const values = VALUES.map(r => r.slice());
+  values[3][8] = 4473.45;
+  const zero = [{ app: 'bubble starter', month: '2026-06', value: 0, note: 'paid from credits' }];
+  const { updated } = planAmountCells({ 'Bubble Starter': { '2026-06': 4473.45 } }, locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, {}, {}, zero);
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].value, 0);
+  const values2 = VALUES.map(r => r.slice());
+  values2[3][8] = '';
+  const again = planAmountCells({ 'Bubble Starter': { '2026-06': 4473.45 } }, locateGrid(values2, TEXT), { values: values2, start: { col: 0, row: 0 } }, cellValue, {}, {}, zero);
+  assert.strictEqual(again.write.length + again.updated.length, 0, 'an empty cell already reads as zero');
+});
+
+test('locks are enforced even for a month no invoice touched this run', () => {
+  const values = VALUES.map(r => r.slice());
+  values[3][8] = 10;
+  const { updated } = planAmountCells({}, locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, {}, {}, LOCKS);
+  assert.strictEqual(updated.length, 1);
+  assert.strictEqual(updated[0].value, 745.89);
+});

@@ -2336,7 +2336,13 @@ async function runMailSync(rescan){
       const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2});
       lines.push(`\nSet ${upd.length} cell${upd.length===1?'':'s'} to the month's invoice total:`);
       upd.slice(0,10).forEach(u => lines.push(
-        `  · ${u.app} ${u.month}: ${fmt(u.previous)} → ${fmt(u.amount)}${u.direction==='down' ? "   (lowered — check the month's invoices are all in the folder)" : ''}${u.wasOurs ? '' : '   (replaced a figure this sync did not write)'}`));
+        `  · ${u.app} ${u.month}: ${fmt(u.previous==null?0:u.previous)} → ${fmt(u.amount)}${u.locked ? '   (restored to the figure you locked)' : u.direction==='down' ? "   (lowered — check the month's invoices are all in the folder)" : ''}${u.wasOurs || u.locked ? '' : '   (replaced a figure this sync did not write)'}`));
+    }
+    const lockedCells = json.amountsLocked || [];
+    const keptLocked = lockedCells.filter(l => !l.enforced && l.invoiceTotal !== undefined && Math.abs((l.invoiceTotal||0) - l.value) >= 0.005);
+    if (keptLocked.length){
+      lines.push(`\n${keptLocked.length} locked cell${keptLocked.length===1?'':'s'} left as you set ${keptLocked.length===1?'it':'them'} (the invoices on file were ignored):`);
+      keptLocked.slice(0,8).forEach(l => lines.push(`  · ${l.app} ${l.month}: ${Number(l.value).toLocaleString('en-US',{minimumFractionDigits:2})} kept; invoices come to ${Number(l.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})}`));
     }
     const filled = json.amountsSkippedFilled || [];
     // A month with an invoice nobody could read has no total, only a lower

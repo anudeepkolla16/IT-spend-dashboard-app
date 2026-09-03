@@ -117,3 +117,34 @@ test('the rules file survives a careless edit', () => {
   assert.strictEqual(r.vendors[1].apps.length, 1);
   assert.deepStrictEqual(r.vendors[1].apps[0].text, ['word']);
 });
+
+
+test('locks survive normalisation and match the sheet\'s spelling loosely', () => {
+  const { lockFor } = require('../lib/invoices/rules');
+  const r = normalizeRules({ vendors: [{ name: 'X', domains: ['x.com'], app: 'Adobe' }], locks: [
+    { app: 'Cursor pro', month: '2026-07', value: '1133.53', note: 'invoices missing' },
+    { app: 'Claude Ai', month: '2026-08', value: 0 },
+    { app: 'Bad', month: 'July' }, { app: '', month: '2026-01', value: 5 },
+  ] });
+  assert.strictEqual(r.locks.length, 2);
+  assert.strictEqual(r.locks[0].value, 1133.53);
+  assert.strictEqual(lockFor(r, 'Cursor Pro', '2026-07').value, 1133.53);
+  assert.strictEqual(lockFor(r, 'Claude Ai', '2026-08').value, 0);
+  assert.strictEqual(lockFor(r, 'Claude Ai', '2026-07'), null);
+});
+
+
+test('a live rules file gains what the seed has since gained, and nothing the owner set is touched', () => {
+  const { upgradeRules, SEED_LOCKS } = require('../lib/invoices/rules');
+  // The file as first written: Anthropic without `period`, no `locks` key.
+  const live = { vendors: [{ name: 'Anthropic', domains: ['anthropic.com'], subject: ['Anthropic'], apps: [] }, { name: 'PhantomBuster', domains: ['phantombuster.com'], app: 'Phantombuster', currency: 'EUR' }] };
+  const up = upgradeRules(live);
+  assert.strictEqual(up.changed, true);
+  assert.strictEqual(up.rules.vendors[0].period, 'usage');
+  assert.strictEqual(up.rules.vendors[1].currency, 'EUR', 'the owner\'s own setting stands');
+  assert.deepStrictEqual(up.rules.locks, SEED_LOCKS);
+  // Once the file has a locks list — even an empty one — the seed is not consulted again.
+  const again = upgradeRules({ vendors: up.rules.vendors, locks: [] });
+  assert.strictEqual(again.changed, false);
+  assert.deepStrictEqual(again.rules.locks, []);
+});

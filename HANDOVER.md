@@ -234,6 +234,14 @@ lower:
 Nothing is ever *added* to a cell, which is what makes a re-run harmless: the same folder writes the
 same number twice, never twice the number.
 
+**A cell the owner has locked is never touched.** `_vendor-rules.json` carries a `locks` list
+(`{ "app", "month", "value", "note" }`), editable from **Needs your answer → ⚙ Filing rules**. A
+locked cell is held at the owner's figure: the sync writes that figure back if the cell has
+drifted, ignores the month's folder total (the report says what the invoices come to, beside the
+figure kept), and the Recheck Periods backfill skips it. Five were set on 3 Sep 2026 — Claude Ai
+Jul/Aug and Cursor pro Aug at 0 (charges paid from prepaid credits), Bubble Starter Jul at 745.89
+and Cursor pro Jul at 1,133.53 (invoices missing from the archive).
+
 **A replaced figure is never silent.** The report says whose number went — one the sync wrote
 itself, or a hand correction / statement figure — and `Invoices/_amount-log.json` records the
 previous value of every cell with `source: "invoice"`.
