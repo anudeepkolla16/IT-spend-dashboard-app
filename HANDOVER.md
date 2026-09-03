@@ -491,6 +491,10 @@ app-month cannot be used, the figure the sync has is not the month's total. The 
 the report names the file; once it reads (or its amount is typed in when answering a question), the
 next run writes the cell.
 
+**A month holds single and merged files side by side, and is added up invoice by invoice.**
+Every invoice number counts once whichever file it is seen in; a merged file contributes the
+invoices in it not already counted, never all or nothing (`tallyInvoices` in `lib/mail-sync.js`).
+
 **A PDF holding several invoices is totalled as all of them.** The owner staples a month's
 invoices into one file; the reader yields the text page by page, and the file is split into its
 invoices — "Page 1 of N" opens one, or a page carrying an invoice header — each totalled and added

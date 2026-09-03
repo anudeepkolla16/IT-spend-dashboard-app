@@ -889,3 +889,63 @@ test('a single invoice is not mistaken for a merged file', () => {
   assert.strictEqual(r.amount, 10);
   assert.strictEqual(r.parts, undefined);
 });
+
+
+/* ---------------- a month of single and merged files together ---------------- *
+ *
+ * "They will be both: some have separate invoices and some have merged
+ * invoices, look for both." Every invoice number in the month counts once,
+ * whichever file it is seen in; a merged file contributes only the invoices
+ * not already counted.
+ */
+
+const { tallyInvoices } = require('../lib/mail-sync');
+const single = (name, ref, amount) => ({ name, entry: { usable: true, amount, currency: 'USD', ref } });
+const merged = (name, parts) => ({ name, entry: { usable: true, amount: parts.reduce((s, p) => s + p.amount, 0), currency: 'USD', refs: parts.map(p => p.ref), parts } });
+
+test('single and merged files in one month are added invoice by invoice', () => {
+  const t = tallyInvoices([
+    single('Invoice-0101.pdf', 'WYO2F9CO0101', 241.33),
+    single('Invoice-0102.pdf', 'WYO2F9CO0102', 225.79),
+    merged('rest of July.pdf', [{ ref: 'WYO2F9CO0103', amount: 222.53 }, { ref: 'WYO2F9CO0104', amount: 222.45 }, { ref: 'WYO2F9CO0105', amount: 221.43 }]),
+  ]);
+  assert.strictEqual(t.total, 1133.53);
+  assert.strictEqual(t.counted, 3);
+  assert.strictEqual(t.duplicates.length, 0);
+});
+
+test('a merged file that repeats an invoice already filed on its own counts the rest, not nothing', () => {
+  const t = tallyInvoices([
+    single('Invoice-0101.pdf', 'WYO2F9CO0101', 241.33),
+    merged('July all.pdf', [{ ref: 'WYO2F9CO0101', amount: 241.33 }, { ref: 'WYO2F9CO0102', amount: 225.79 }]),
+  ]);
+  assert.strictEqual(t.total, 467.12, 'the repeated invoice once, the new one added');
+  assert.strictEqual(t.duplicates.length, 1);
+  assert.strictEqual(t.duplicates[0].ref, 'WYO2F9CO0101');
+  // The other way round: the merged file first, then the single copy.
+  const u = tallyInvoices([
+    merged('July all.pdf', [{ ref: 'WYO2F9CO0101', amount: 241.33 }, { ref: 'WYO2F9CO0102', amount: 225.79 }]),
+    single('Invoice-0101.pdf', 'WYO2F9CO0101', 241.33),
+  ]);
+  assert.strictEqual(u.total, 467.12);
+});
+
+test('a merged file holding only invoices already counted is a duplicate, and a receipt still pairs with its invoice', () => {
+  const t = tallyInvoices([
+    single('Invoice-A0589F17-0017.pdf', 'A0589F170017', 85),
+    single('Receipt-2601-5895.pdf', 'A0589F170017', 85),
+    merged('again.pdf', [{ ref: 'A0589F170017', amount: 85 }]),
+    single('Invoice-0016.pdf', 'A0589F170016', 53.12),
+    { name: 'scan.pdf', entry: { usable: false, amount: null, note: 'no text' } },
+  ]);
+  assert.strictEqual(t.total, 138.12);
+  assert.strictEqual(t.counted, 2);
+  assert.strictEqual(t.duplicates.length, 2);
+  assert.strictEqual(t.unread.length, 1);
+});
+
+test('files with no invoice number are never treated as duplicates of each other', () => {
+  const t = tallyInvoices([single('a.pdf', null, 32), single('b.pdf', null, 32), single('c.pdf', null, 32)]);
+  assert.strictEqual(t.total, 96);
+  assert.strictEqual(t.counted, 3);
+});
