@@ -301,10 +301,11 @@
     <button class="btn ghost" id="periodsBtn" title="Re-read every archived invoice's billing period and re-file the ones that were filed by their arrival date">🗓 Recheck Periods</button>
     <button class="btn ghost" id="amountsBtn">💰 Update Amounts</button>
     <input type="file" id="amountsFile" accept=".xlsx,.xlsm,.xls,.csv" class="hidden" />
-    <button class="btn ghost" id="importBtn">📥 Import Invoices</button>
+    <!-- Kept for their handlers; the two action tiles in the KPI strip are the visible controls. -->
+    <button class="btn ghost hidden" id="importBtn">📥 Import Invoices</button>
     <button class="btn ghost" id="tidyBtn">🧹 Tidy Archive</button>
     <button class="btn ghost" id="refreshBtn">↻ Refresh now</button>
-    <button class="btn primary" id="mailSyncBtn">📧 Fetch Invoices</button>
+    <button class="btn primary hidden" id="mailSyncBtn">📧 Fetch Invoices</button>
   </div>
 </header>
 
@@ -767,6 +768,7 @@ $('#importBtn').onclick = async () => {
   const btn = $('#importBtn');
   const origText = btn.textContent;
   btn.textContent = 'Scanning…'; btn.disabled = true;
+  tileBusy('#tileImport', 'Scanning the folder…');
   try{
     const res = await fetch('/api/invoices/import', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -778,7 +780,7 @@ $('#importBtn').onclick = async () => {
   }catch(err){
     alert('Scan failed: ' + err.message);
   }finally{
-    btn.textContent = origText; btn.disabled = false;
+    btn.textContent = origText; btn.disabled = false; tileBusy('#tileImport', null);
   }
 };
 
@@ -2298,6 +2300,7 @@ $('#mailSyncBtn').onclick = () => runMailSync(false);
 async function runMailSync(rescan){
   const btn = $('#mailSyncBtn'), orig = btn.textContent;
   btn.textContent = rescan ? 'Re-reading mailbox…' : 'Checking mailbox…'; btn.disabled = true;
+  tileBusy('#tileFetch', rescan ? 'Re-reading the mailbox…' : 'Checking the mailbox…');
   try{
     const res = await fetch('/api/invoices/sync-cron?mode=mail' + (rescan ? '&rescan=1' : ''), { method:'POST' });
     // A crashed function replies with plain text ("A server error has occurred"),
@@ -2439,7 +2442,17 @@ async function runMailSync(rescan){
     alert('Mailbox fetch failed: ' + err.message);
   }finally{
     btn.textContent = orig; btn.disabled = false;
+    tileBusy('#tileFetch', null);
   }
+}
+
+// The header buttons are hidden; the KPI-strip tiles stand in for them and
+// have to show the same busy state.
+function tileBusy(sel, label){
+  const tile = $(sel);
+  if (!tile) return;
+  if (label){ tile.dataset.orig = tile.dataset.orig || tile.innerHTML; tile.innerHTML = `<span class="ic">⏳</span>${label}`; tile.disabled = true; }
+  else if (tile.dataset.orig){ tile.innerHTML = tile.dataset.orig; tile.disabled = false; }
 }
 
 /* Re-checks the billing period of every invoice already in the archive and
