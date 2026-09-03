@@ -116,6 +116,13 @@
   th.stickycol{background:var(--panel2);z-index:3}
   td.total,th.total{border-left:2px solid var(--line2);font-weight:650}
   .tblwrap{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .loginwrap{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .loginwrap th{cursor:default}
+  .loginwrap td{vertical-align:top}
+  .pw{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.03em;user-select:all}
+  .pw.masked{letter-spacing:.14em;color:var(--muted);user-select:none}
+  .iconbtn{background:none;border:1px solid var(--line2);border-radius:6px;padding:1px 6px;cursor:pointer;font-size:11px;color:var(--muted);font-family:inherit;margin-left:6px;line-height:1.5}
+  .iconbtn:hover{border-color:var(--accent);color:var(--accent-ink)}
   .chip{display:inline-block;background:var(--chip);color:var(--muted);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600}
   .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
   select,.filters input,input[data-month],input[data-amount]{background:var(--panel);border:1px solid var(--line2);color:var(--txt);border-radius:8px;padding:7px 10px;font-size:12.5px;font-family:inherit}
@@ -284,6 +291,7 @@
   <div class="nav-sec">Manage</div>
   <button class="nav-item" data-goto="pendingCard"><span class="ico">❓</span>Needs your answer<span class="badge zero" id="pendingBadge">0</span></button>
   <button class="nav-item" id="navRules"><span class="ico">⚙</span>Filing rules</button>
+  <button class="nav-item" data-goto="loginsCard"><span class="ico">🔑</span>Password</button>
   <div class="side-foot">
     <div class="who" id="whoami"></div>
     <div class="sub"><span class="dot" id="syncDot"></span><span id="syncLabel">Connecting to SharePoint…</span></div>
@@ -413,6 +421,26 @@
         <span><b style="color:var(--muted)">·</b> nothing charged</span>
         <span><b style="color:var(--muted)">–</b> future month budgeted in the sheet, not yet billed</span>
       </div>
+    </div>
+
+    <div class="card" id="loginsCard" style="order:9">
+      <h3>🔑 Passwords</h3>
+      <div class="cap">The workbook's <b>Invoices mail id</b> sheet: where each app's invoices arrive, and the login used to fetch them. Passwords stay hidden until you reveal them.</div>
+      <div class="filters">
+        <select id="loginFilter">
+          <option value="all">All applications</option>
+          <option value="password">Only apps with a password</option>
+          <option value="sso">Only SSO logins</option>
+          <option value="none">Only apps with nothing recorded</option>
+        </select>
+        <input id="loginSearch" placeholder="Search app / mail id / POC…" style="min-width:240px" />
+        <div class="grow"></div>
+        <span class="chip" id="loginCount" style="align-self:center"></span>
+        <button class="btn ghost" id="loginReveal">👁 Show all</button>
+        <button class="btn ghost" id="loginReload" title="Read the sheet again">↻ Reload sheet</button>
+      </div>
+      <div id="loginStatus" class="cap" style="margin-bottom:10px"></div>
+      <div id="loginTable"></div>
     </div>
 
     <div class="card" id="appsCard" style="order:3">
@@ -1518,6 +1546,7 @@ $('#appsTabs').querySelectorAll('button').forEach(b => b.onclick = () => setApps
 /* ---------------- sidebar ---------------- */
 document.querySelectorAll('.nav-item[data-goto]').forEach(b => b.onclick = () => {
   const el = document.getElementById(b.dataset.goto);
+  if (b.dataset.goto === 'loginsCard' && !loginRows) loadLogins(false);
   if (el) el.scrollIntoView({ behavior: 'smooth', block: b.dataset.goto === 'top' ? 'start' : 'start' });
   document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x === b));
 });
@@ -1534,6 +1563,91 @@ $('#sideSearch').onfocus = () => document.getElementById('appsCard').scrollIntoV
 document.addEventListener('keydown', e => {
   if (e.key === '/' && !/input|textarea|select/i.test(document.activeElement.tagName)) { e.preventDefault(); $('#sideSearch').focus(); }
 });
+
+/* ---------------- passwords: the workbook's "Invoices mail id" sheet ---------------- */
+// Fetched only when someone opens the page (sidebar item or the Load button),
+// never with the spend data the dashboard polls. Every password starts masked;
+// a row's eye reveals just that one, "Show all" reveals them together.
+let loginRows = null, loginLoading = false;
+const loginRevealed = new Set();
+const loginEsc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const loginIsSso = r => /sso/i.test(r.loginMail || '') && !r.password;
+async function loadLogins(force){
+  if (loginLoading) return;
+  loginLoading = true;
+  $('#loginStatus').textContent = 'Reading the Invoices mail id sheet…';
+  try{
+    const res = await fetch(`/api/spend-data?sheet=logins${force ? '&refresh=1' : ''}`, {cache:'no-store'});
+    if (res.status === 401){ window.location.href = '/api/auth/login'; return; }
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    loginRows = json.rows || [];
+    loginRevealed.clear();
+    const at = json.syncedAt ? new Date(json.syncedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '';
+    $('#loginStatus').textContent = `${loginRows.length} apps from the "${json.sheet || 'Invoices mail id'}" sheet${at ? ' · read ' + at : ''}`;
+    renderLogins();
+  }catch(err){
+    $('#loginStatus').textContent = `Couldn't read the sheet: ${err.message}`;
+    if (!loginRows) renderLogins();
+  }finally{ loginLoading = false; }
+}
+function renderLogins(){
+  const box = $('#loginTable');
+  if (!loginRows){
+    box.innerHTML = '<button class="btn" id="loginLoad">🔑 Load logins from the sheet</button>';
+    $('#loginLoad').onclick = () => loadLogins(false);
+    $('#loginCount').textContent = '';
+    return;
+  }
+  const q = ($('#loginSearch').value || '').trim().toLowerCase();
+  const f = $('#loginFilter').value;
+  const rows = loginRows.map((r, i) => ({ r, i })).filter(({ r }) => {
+    if (f === 'password' && !r.password) return false;
+    if (f === 'sso' && !loginIsSso(r)) return false;
+    if (f === 'none' && (r.loginMail || r.password || r.invoiceMail)) return false;
+    if (q && ![r.app, r.dept, r.poc, r.invoiceMail, r.status, r.loginMail].some(v => String(v || '').toLowerCase().includes(q))) return false;
+    return true;
+  });
+  const withPw = loginRows.filter(r => r.password).length;
+  const allShown = withPw > 0 && loginRows.every((r, i) => !r.password || loginRevealed.has(i));
+  $('#loginReveal').textContent = allShown ? '🙈 Hide all' : '👁 Show all';
+  $('#loginCount').textContent = `${rows.length} of ${loginRows.length}`;
+  if (!rows.length){ box.innerHTML = '<div class="cap">Nothing matches.</div>'; return; }
+  const dash = v => loginEsc(v) || '<span class="cap">—</span>';
+  box.innerHTML = `<div class="loginwrap"><table><thead><tr><th>Application</th><th>Department</th><th>POC</th><th>Invoice mail id</th><th>Status</th><th>Login mail id</th><th>Password</th></tr></thead><tbody>${rows.map(({ r, i }) => {
+    const shown = loginRevealed.has(i);
+    const pw = r.password
+      ? `<span class="pw${shown ? '' : ' masked'}">${shown ? loginEsc(r.password) : '••••••••'}</span><button class="iconbtn" data-toggle="${i}" title="${shown ? 'Hide' : 'Reveal'}">${shown ? '🙈' : '👁'}</button><button class="iconbtn" data-copy="${i}" title="Copy password">📋</button>`
+      : (loginIsSso(r) ? '<span class="chip">SSO</span>' : '<span class="cap">—</span>');
+    return `<tr><td><b>${loginEsc(r.app)}</b></td><td>${dash(r.dept)}</td><td>${dash(r.poc)}</td><td>${dash(r.invoiceMail)}</td><td>${dash(r.status)}</td><td>${dash(r.loginMail)}</td><td>${pw}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
+  box.querySelectorAll('[data-toggle]').forEach(b => b.onclick = () => {
+    const i = Number(b.dataset.toggle);
+    if (loginRevealed.has(i)) loginRevealed.delete(i); else loginRevealed.add(i);
+    renderLogins();
+  });
+  box.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
+    const r = loginRows[Number(b.dataset.copy)];
+    try{
+      await navigator.clipboard.writeText(r.password);
+      b.textContent = '✓';
+    }catch{
+      b.textContent = '✗'; b.title = 'Copy blocked by the browser — reveal and select it instead';
+    }
+    setTimeout(() => { b.textContent = '📋'; }, 1200);
+  });
+}
+$('#loginSearch').oninput = renderLogins;
+$('#loginFilter').onchange = renderLogins;
+$('#loginReveal').onclick = () => {
+  if (!loginRows) { loadLogins(false); return; }
+  const allShown = loginRows.every((r, i) => !r.password || loginRevealed.has(i));
+  loginRevealed.clear();
+  if (!allShown) loginRows.forEach((r, i) => { if (r.password) loginRevealed.add(i); });
+  renderLogins();
+};
+$('#loginReload').onclick = () => loadLogins(true);
+renderLogins();
 
 /* ---------------- per-app drill-down modal ---------------- */
 let modalAppName = null;

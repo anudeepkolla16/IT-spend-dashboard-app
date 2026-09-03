@@ -552,6 +552,26 @@ position), Sentry's `Total $82.31 USD`, Webflow's `TotalUSD 816.00`, PostHog's `
 
 ---
 
+## 🔑 Password page
+
+The sidebar's **Password** item shows the workbook's **Invoices mail id** sheet
+as a table: application, department, POC, the mailbox its invoices arrive in,
+status (e.g. "Mail Forword From Anudeep"), the login mail id, and the password.
+The sheet stays the source of truth — edit it in Excel and press **↻ Reload
+sheet** (or wait a minute; the page caches it for 60 s).
+
+- The sheet is read only when the page is opened (sidebar item or the **Load
+  logins** button), through `/api/spend-data?sheet=logins`. It is never sent
+  with the spend data the dashboard polls every five minutes.
+- Every password starts masked. The eye on a row reveals that one, **Show all**
+  reveals them together, 📋 copies without revealing. A login written as
+  "… mail sso" with no password shows an **SSO** chip.
+- Columns are found by header text (`APPLICATION`, `Department`, `POC`,
+  `Invoice mail`, `Status`, `Login mail`, `password`), so the sheet can be
+  reordered or gain columns. If the tab is renamed, set `LOGIN_SHEET_NAME`.
+- The page is behind the same SSO gate as everything else (`middleware.js`);
+  anyone who can open the dashboard can open this page.
+
 ## 🧹 Tidy Archive
 
 Filing drifts. A whole vendor folder gets dragged inside another and its month
@@ -605,6 +625,7 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 | `INVOICE_ARCHIVE_PATH` | Where invoices are archived, relative to the OneDrive root. Normally **unset** — the path is probed (see "The archive path is resolved, not hardcoded" below). Set it only if the folder is renamed to something the probe doesn't know. |
 | `INVOICE_SOURCE_PATH` | Older name for the same thing; still honoured, second in the probe order. Prefer `INVOICE_ARCHIVE_PATH`. |
 | `SPEND_SHEET_NAME` | Worksheet holding the amounts. Defaults to `Spendings`; only set it if that tab is renamed. |
+| `LOGIN_SHEET_NAME` | Worksheet the Password page shows. Defaults to `Invoices mail id`; only set it if that tab is renamed. |
 | `SLACK_BOT_TOKEN` | `xoxb-…` token of the workspace's Slack app (scopes `chat:write`, `im:write`, `im:history`). Unset = no DMs, runs still work. Set on 2 Sep 2026. |
 | `SLACK_DM_USER` | Slack member ID (`U…`) of the person the run reports to and reads answers from. Set on 2 Sep 2026 (`U09BGGLK338`). |
 
@@ -722,7 +743,8 @@ lib/
                                (the archive's location comes from graph.js's resolveArchiveRoot)
   amounts/{preview,apply,log}.js  The amount-import handlers, behind api/amounts.js
 api/
-  spend-data.js                Reads + parses the Excel sheet → JSON the dashboard renders (60s cache)
+  spend-data.js                Reads + parses the Excel sheet → JSON the dashboard renders (60s cache);
+                               `?sheet=logins` returns the Invoices mail id sheet for the Password page
   amounts.js                   One route for the amount import; dispatches on `action`
   auth/{login,callback,logout,me}.js   Microsoft OAuth sign-in flow
   invoices/
