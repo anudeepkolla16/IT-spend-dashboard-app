@@ -826,3 +826,68 @@ test('locks are enforced even for a month no invoice touched this run', () => {
   assert.strictEqual(updated.length, 1);
   assert.strictEqual(updated[0].value, 745.89);
 });
+
+
+/* ---------------- one file, several invoices, by page ---------------- *
+ *
+ * "Some time if there are 7 invoices for an app for a single month I merge
+ * all 7 invoices in a single pdf; you are calculating a single page and
+ * updating the first invoice amount". The reader yields the text page by
+ * page; the file is split into its invoices and every one is added up.
+ */
+
+const PAGE = (n, of, ref, amount, extra) => `Page ${n} of ${of}  Invoice  Invoice number ${ref}  Date of issue July 1, 2026  ${extra || ''}  Total   $${amount}  Amount due   $${amount} USD`;
+
+test('a merged file is the sum of every invoice in it', () => {
+  const pages = [PAGE(1, 1, 'WYO2F9CO-0101', '241.33'), PAGE(1, 1, 'WYO2F9CO-0102', '225.79'), PAGE(1, 1, 'WYO2F9CO-0103', '222.53')];
+  const r = extractInvoiceTotal(pages.join('\n\n'), { pages });
+  assert.strictEqual(r.amount, 689.65);
+  assert.strictEqual(r.usable, true);
+  assert.match(r.via, /3 invoices in one file/);
+  assert.deepStrictEqual(r.refs, ['WYO2F9CO0101', 'WYO2F9CO0102', 'WYO2F9CO0103']);
+});
+
+test('a two-page invoice inside a merged file stays one invoice', () => {
+  // Anthropic's usage invoice runs to two pages; its total is on the second.
+  const pages = [
+    PAGE(1, 1, 'Q8MUNTUC-0200', '138.82'),
+    'Page 1 of 2  Invoice  Invoice number Q8MUNTUC-0203  Date of issue August 1, 2026  Claude Opus 4.8 Usage Jul 2   Jul 31, 2026  $1,362.52',
+    'Page 2 of 2  Claude Sonnet 5 Usage Jul 2   Jul 31, 2026  $5,863.72  Subtotal $12,686.51  Total   $13,479.42  Amount due   $13,479.42 USD',
+  ];
+  const r = extractInvoiceTotal(pages.join('\n\n'), { pages });
+  assert.strictEqual(r.amount, 13618.24);
+  assert.strictEqual(r.parts.length, 2);
+});
+
+test('without page numbers, an invoice header opens a new invoice and a total-less page is folded in', () => {
+  const pages = [
+    'Tax Invoice  Bill to Saras  Invoice ID 5001  Plan fee  Total $50.00',
+    'Tax Invoice  Bill to Saras  Invoice ID 5002  Plan fee',
+    'Line items continued  Total $70.00',
+    'Tax Invoice  Bill to Saras  Invoice ID 5003  Total $30.00',
+  ];
+  const r = extractInvoiceTotal(pages.join('\n\n'), { pages });
+  assert.strictEqual(r.amount, 150);
+  assert.strictEqual(r.parts.length, 3);
+});
+
+test('an invoice and its receipt stapled together count once', () => {
+  const pages = [PAGE(1, 1, 'A0589F17-0017', '85.00'), 'Page 1 of 1  Receipt  Receipt number 2601-5895  Invoice number A0589F17-0017  Amount paid $85.00', PAGE(1, 1, 'A0589F17-0018', '53.12')];
+  const r = extractInvoiceTotal(pages.join('\n\n'), { pages });
+  assert.strictEqual(r.amount, 138.12);
+  assert.match(r.via, /1 receipt counted once/);
+});
+
+test('a merged file with one unreadable invoice is refused whole, not totalled short', () => {
+  const pages = [PAGE(1, 1, 'X1', '10.00'), 'Page 1 of 1  Invoice  Invoice number X2  Date of issue July 1, 2026  (scanned, no figures)'];
+  const r = extractInvoiceTotal(pages.join('\n\n'), { pages });
+  assert.strictEqual(r.usable, false);
+  assert.match(r.note, /one of the 2 invoices in this file could not be read/);
+});
+
+test('a single invoice is not mistaken for a merged file', () => {
+  const pages = ['Page 1 of 2  Invoice number 77  Date of issue July 1, 2026  Item A $5', 'Page 2 of 2  Item B $5  Total $10.00  Amount due $10.00 USD'];
+  const r = extractInvoiceTotal(pages.join('\n\n'), { pages });
+  assert.strictEqual(r.amount, 10);
+  assert.strictEqual(r.parts, undefined);
+});

@@ -232,7 +232,8 @@ module.exports = async (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       res.status(200).json({
         ok: true, mode, path: full, reader: read.reader, error: read.error,
-        total: read.error ? null : extractInvoiceTotal(read.text),
+        total: read.error ? null : extractInvoiceTotal(read.text, { pages: read.pages }),
+        pages: read.pages ? read.pages.length : null,
         period: read.error ? null : extractBillingPeriod(read.text),
         invoiceDate: read.error ? null : extractInvoiceDate(read.text),
         ref: read.error ? null : extractInvoiceRef(read.text),

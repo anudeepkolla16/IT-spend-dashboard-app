@@ -477,6 +477,13 @@ app-month cannot be used, the figure the sync has is not the month's total. The 
 the report names the file; once it reads (or its amount is typed in when answering a question), the
 next run writes the cell.
 
+**A PDF holding several invoices is totalled as all of them.** The owner staples a month's
+invoices into one file; the reader yields the text page by page, and the file is split into its
+invoices — "Page 1 of N" opens one, or a page carrying an invoice header — each totalled and added
+up. A stapled receipt counts once; a file with any invoice that will not read is held whole rather
+than totalled short. `PARSE_VERSION` in `lib/mail-sync.js` is bumped when reading rules change, and
+every archived file is then read once more under the new rules.
+
 **Non-USD totals are never written**, whatever the comparison says.
 
 ### Answering the sync's questions
