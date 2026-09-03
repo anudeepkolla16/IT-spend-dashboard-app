@@ -117,3 +117,18 @@ test('the rules file survives a careless edit', () => {
   assert.strictEqual(r.vendors[1].apps.length, 1);
   assert.deepStrictEqual(r.vendors[1].apps[0].text, ['word']);
 });
+
+
+test('locks survive normalisation and match the sheet\'s spelling loosely', () => {
+  const { lockFor } = require('../lib/invoices/rules');
+  const r = normalizeRules({ vendors: [{ name: 'X', domains: ['x.com'], app: 'Adobe' }], locks: [
+    { app: 'Cursor pro', month: '2026-07', value: '1133.53', note: 'invoices missing' },
+    { app: 'Claude Ai', month: '2026-08', value: 0 },
+    { app: 'Bad', month: 'July' }, { app: '', month: '2026-01', value: 5 },
+  ] });
+  assert.strictEqual(r.locks.length, 2);
+  assert.strictEqual(r.locks[0].value, 1133.53);
+  assert.strictEqual(lockFor(r, 'Cursor Pro', '2026-07').value, 1133.53);
+  assert.strictEqual(lockFor(r, 'Claude Ai', '2026-08').value, 0);
+  assert.strictEqual(lockFor(r, 'Claude Ai', '2026-07'), null);
+});

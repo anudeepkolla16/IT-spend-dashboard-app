@@ -246,9 +246,10 @@ module.exports = async (req, res) => {
     // ticked — the browser sends both lists back.
     if (mode === 'periods' || mode === 'periods-apply') {
       const deadline = Date.now() + 45 * 1000;
+      const locks = (await readRules(token, targetDriveId, archiveRoot)).locks || [];
       const result = mode === 'periods'
-        ? await scanPeriods(token, targetDriveId, { deadline, root: archiveRoot, mapping: config && config.mapping })
-        : await applyBackfill(token, targetDriveId, req.body || {}, { deadline, root: archiveRoot });
+        ? await scanPeriods(token, targetDriveId, { deadline, root: archiveRoot, mapping: config && config.mapping, locks })
+        : await applyBackfill(token, targetDriveId, req.body || {}, { deadline, root: archiveRoot, locks });
       res.setHeader('Cache-Control', 'no-store');
       res.status(200).json({ ok: true, ranAt: new Date().toISOString(), mode, periods: result });
       return;
