@@ -132,3 +132,19 @@ test('locks survive normalisation and match the sheet\'s spelling loosely', () =
   assert.strictEqual(lockFor(r, 'Claude Ai', '2026-08').value, 0);
   assert.strictEqual(lockFor(r, 'Claude Ai', '2026-07'), null);
 });
+
+
+test('a live rules file gains what the seed has since gained, and nothing the owner set is touched', () => {
+  const { upgradeRules, SEED_LOCKS } = require('../lib/invoices/rules');
+  // The file as first written: Anthropic without `period`, no `locks` key.
+  const live = { vendors: [{ name: 'Anthropic', domains: ['anthropic.com'], subject: ['Anthropic'], apps: [] }, { name: 'PhantomBuster', domains: ['phantombuster.com'], app: 'Phantombuster', currency: 'EUR' }] };
+  const up = upgradeRules(live);
+  assert.strictEqual(up.changed, true);
+  assert.strictEqual(up.rules.vendors[0].period, 'usage');
+  assert.strictEqual(up.rules.vendors[1].currency, 'EUR', 'the owner\'s own setting stands');
+  assert.deepStrictEqual(up.rules.locks, SEED_LOCKS);
+  // Once the file has a locks list — even an empty one — the seed is not consulted again.
+  const again = upgradeRules({ vendors: up.rules.vendors, locks: [] });
+  assert.strictEqual(again.changed, false);
+  assert.deepStrictEqual(again.rules.locks, []);
+});
