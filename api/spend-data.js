@@ -125,16 +125,84 @@ function parseWorkbook(buffer) {
   return { records, apps, appRows };
 }
 
+// The workbook's "Invoices mail id" sheet: per app, which mailbox its invoices
+// land in and the login the mailbox owner uses to fetch them. The dashboard's
+// Password page shows it. Columns are found by header text, so the sheet can
+// be reordered or gain columns without breaking the page; a column that is not
+// there simply comes back empty.
+const LOGIN_COLUMNS = [
+  ['app', /application|sw\s*\/\s*license/i],
+  ['dept', /department/i],
+  ['poc', /^\s*poc/i],
+  ['invoiceMail', /invoice\s*mail/i],
+  ['status', /status/i],
+  ['loginMail', /login\s*(mail|email|id)/i],
+  ['password', /password/i],
+];
+
+function pickLoginSheet(sheetNames) {
+  const preferred = (process.env.LOGIN_SHEET_NAME || 'Invoices mail id').trim().toLowerCase();
+  const exact = sheetNames.find(n => n.trim().toLowerCase() === preferred);
+  if (exact) return exact;
+  return sheetNames.find(n => /mail\s*id|login|password/i.test(n)) || null;
+}
+
+function parseLoginSheet(buffer) {
+  const wb = XLSX.read(buffer, { type: 'buffer' });
+  const sheetName = pickLoginSheet(wb.SheetNames);
+  if (!sheetName) {
+    throw new Error(`The workbook has no "Invoices mail id" sheet (sheets: ${wb.SheetNames.join(', ')}). Set LOGIN_SHEET_NAME if it is called something else.`);
+  }
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '', raw: false });
+  const headerRowIdx = rows.findIndex(r => r.some(c => LOGIN_COLUMNS[0][1].test(String(c))));
+  if (headerRowIdx === -1) throw new Error(`Could not find the header row (an "APPLICATION / SW / LICENSE" column) in the "${sheetName}" sheet.`);
+  const headers = rows[headerRowIdx].map(h => String(h || '').trim());
+  const cols = {};
+  for (const [key, re] of LOGIN_COLUMNS) cols[key] = headers.findIndex(h => re.test(h));
+  const out = [];
+  for (let i = headerRowIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const cell = key => (cols[key] === -1 ? '' : String(row[cols[key]] ?? '').trim());
+    const app = cell('app');
+    if (!app || /^total$/i.test(app)) continue;
+    out.push({
+      app, dept: cell('dept'), poc: cell('poc'), invoiceMail: cell('invoiceMail'),
+      status: cell('status'), loginMail: cell('loginMail'), password: cell('password'),
+    });
+  }
+  return { sheet: sheetName, columns: LOGIN_COLUMNS.filter(([k]) => cols[k] !== -1).map(([k]) => k), rows: out };
+}
+
 // Best-effort in-memory cache. Serverless instances are ephemeral (cold starts
 // bypass it entirely), but it cuts down redundant Graph calls from the 5-min
 // auto-poll and from multiple people viewing the dashboard within the same window.
 const CACHE_TTL_MS = 60 * 1000;
 let cache = { data: null, expiresAt: 0 };
+// The login sheet is cached on its own: it is only fetched when someone opens
+// the Password page, and the credentials it carries are kept out of the spend
+// payload the dashboard polls every few minutes.
+let loginCache = { data: null, expiresAt: 0 };
 
 module.exports = async (req, res) => {
   try {
     const forceRefresh = req.query && (req.query.refresh === '1' || req.query.refresh === 'true');
     const now = Date.now();
+    if (req.query && req.query.sheet === 'logins') {
+      res.setHeader('Cache-Control', 'no-store');
+      if (!forceRefresh && loginCache.data && now < loginCache.expiresAt) {
+        res.setHeader('X-Cache', 'HIT');
+        res.status(200).json(loginCache.data);
+        return;
+      }
+      const token = await getGraphToken();
+      const buffer = await downloadWorkbook(token);
+      const { sheet, columns, rows } = parseLoginSheet(buffer);
+      const payload = { syncedAt: new Date().toISOString(), source: 'sharepoint', sheet, columns, rowCount: rows.length, rows };
+      loginCache = { data: payload, expiresAt: now + CACHE_TTL_MS };
+      res.setHeader('X-Cache', 'MISS');
+      res.status(200).json(payload);
+      return;
+    }
     if (!forceRefresh && cache.data && now < cache.expiresAt) {
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('X-Cache', 'HIT');
@@ -154,3 +222,6 @@ module.exports = async (req, res) => {
     res.status(502).json({ error: err.message || String(err) });
   }
 };
+
+module.exports.parseLoginSheet = parseLoginSheet;
+module.exports.pickLoginSheet = pickLoginSheet;
