@@ -205,3 +205,31 @@ test('an app with no spend is still listed, with its own details', () => {
     assert.ok(seed.includes(guard), `the seeded rows must honour the ${guard} filter`);
   }
 });
+
+
+// --- The renewal-date parser reads every form the sheet uses ----------------
+//
+// Sprinto's renewal is written "19-09-2026" and never showed: the parser knew
+// only US slashes and "Nth of every month". Pulled out of the page source and
+// run as-is, so the page and this test cannot drift apart.
+test('the page reads renewal dates in every form the sheet uses', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const start = html.indexOf('const MONTH_IDX =');
+  const end = html.indexOf("let renewalsTab = 'yearly';");
+  assert.ok(start > 0 && end > start, 'parseRenewal must sit where the test expects');
+  const parseRenewal = new Function(html.slice(start, end) + '; return parseRenewal;')();
+  const ymd = r => r && `${r.date.getFullYear()}-${String(r.date.getMonth()+1).padStart(2,'0')}-${String(r.date.getDate()).padStart(2,'0')}`;
+  assert.strictEqual(ymd(parseRenewal('19-09-2026')), '2026-09-19');
+  assert.strictEqual(ymd(parseRenewal('1/21/2027')), '2027-01-21');
+  assert.strictEqual(ymd(parseRenewal('19/09/2026')), '2026-09-19', 'a slash still reads day-first when the first number cannot be a month');
+  assert.strictEqual(ymd(parseRenewal('2026-09-19')), '2026-09-19');
+  assert.strictEqual(ymd(parseRenewal('19 Sep 2026')), '2026-09-19');
+  assert.strictEqual(ymd(parseRenewal('19-Sep-26')), '2026-09-19');
+  assert.strictEqual(ymd(parseRenewal('Sep 19, 2026')), '2026-09-19');
+  assert.strictEqual(ymd(parseRenewal('46284')), '2026-09-19', 'an Excel serial number');
+  assert.strictEqual(parseRenewal('1st of every month').recurring, true);
+  assert.strictEqual(parseRenewal('monthly').recurring, true);
+  assert.strictEqual(parseRenewal(''), null);
+  assert.strictEqual(parseRenewal('cancelled after june'), null);
+  assert.strictEqual(parseRenewal('31-02-2026'), null, 'an impossible date is not a date');
+});
