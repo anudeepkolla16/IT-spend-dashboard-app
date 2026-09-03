@@ -242,6 +242,20 @@ figure kept), and the Recheck Periods backfill skips it. Five were set on 3 Sep 
 Jul/Aug and Cursor pro Aug at 0 (charges paid from prepaid credits), Bubble Starter Jul at 745.89
 and Cursor pro Jul at 1,133.53 (invoices missing from the archive).
 
+**A LOWER invoice total is never written on the sync's own judgement.** The run of 3 Sep 2026
+lowered Luzmo's August from a 14,638 statement figure to the one invoice on file, and the owner had
+already said twice that such lowerings were wrong — the archive was short, not the sheet. A lower
+total now becomes a question under **Needs your answer** (and in the DM): keep the sheet figure
+(which locks it), write the invoice total, or set and lock a figure. The one exception is a month
+whose invoices this sync moved to another month. A higher total is still written.
+
+**Every PDF is read with both readers** (`readInvoiceTotal` in `lib/invoice-amount.js`): pdf-parse
+and pdfjs lay text out differently, and each reads files the other cannot — pdf-parse fails on a
+broken cross-reference table, pdfjs's layout defeated the patterns on Bubble's invoices and lost
+three of the four invoices in Anthropic's July file. A usable total beats none, a total built from
+more invoices in the file beats fewer, and otherwise pdf-parse's answer stands with pdfjs's noted
+beside it. `?mode=inspect` shows both readers' text and totals.
+
 **A replaced figure is never silent.** The report says whose number went — one the sync wrote
 itself, or a hand correction / statement figure — and `Invoices/_amount-log.json` records the
 previous value of every cell with `source: "invoice"`.

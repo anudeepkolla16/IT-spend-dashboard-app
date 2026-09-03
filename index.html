@@ -2372,6 +2372,11 @@ async function runMailSync(rescan){
       upd.slice(0,10).forEach(u => lines.push(
         `  · ${u.app} ${u.month}: ${fmt(u.previous==null?0:u.previous)} → ${fmt(u.amount)}${u.locked ? '   (restored to the figure you locked)' : u.direction==='down' ? "   (lowered — check the month's invoices are all in the folder)" : ''}${u.wasOurs || u.locked ? '' : '   (replaced a figure this sync did not write)'}`));
     }
+    const loweredCells = json.amountsLowered || [];
+    if (loweredCells.length){
+      lines.push(`\n${loweredCells.length} cell${loweredCells.length===1?'':'s'} NOT lowered — the invoices on file come to less than the sheet, so it is a question under "Needs your answer" instead:`);
+      loweredCells.slice(0,8).forEach(l => lines.push(`  · ${l.app} ${l.month}: sheet ${Number(l.current).toLocaleString('en-US',{minimumFractionDigits:2})}, invoices ${Number(l.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})}`));
+    }
     const lockedCells = json.amountsLocked || [];
     const keptLocked = lockedCells.filter(l => !l.enforced && l.invoiceTotal !== undefined && Math.abs((l.invoiceTotal||0) - l.value) >= 0.005);
     if (keptLocked.length){
@@ -2707,6 +2712,29 @@ function renderPending(){
   for (const it of items){
     const row = document.createElement('div');
     row.className = 'pend-row';
+    if (it.kind === 'cell'){
+      const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2});
+      row.innerHTML = `
+        <div>
+          <div><span class="pend-id">${it.id}</span><b>${it.app} · ${monthLabel(it.month)}</b></div>
+          <div class="cap">the sheet has ${fmt(it.sheetValue)} · the invoices on file come to ${fmt(it.invoiceTotal)}</div>
+          <div class="pend-q">${it.question}</div>
+        </div>
+        <div class="pend-side">
+          <button class="btn" data-keep>Keep ${fmt(it.sheetValue)} and lock it</button>
+          <button class="btn ghost" data-use>Write the invoice total ${fmt(it.invoiceTotal)}</button>
+          <div style="display:flex;gap:6px"><input data-value placeholder="Or set a figure" style="flex:1" /><button class="btn ghost" data-set>Set &amp; lock</button></div>
+        </div>`;
+      row.querySelector('[data-keep]').onclick = () => submitAnswers([{ id: it.id, keep: true }], row);
+      row.querySelector('[data-use]').onclick = () => { if (confirm(`Write ${fmt(it.invoiceTotal)} into ${it.app} ${monthLabel(it.month)}, replacing ${fmt(it.sheetValue)}?`)) submitAnswers([{ id: it.id, useInvoices: true }], row); };
+      row.querySelector('[data-set]').onclick = () => {
+        const v = Number(row.querySelector('[data-value]').value.replace(/[^0-9.]/g, ''));
+        if (!Number.isFinite(v)) { alert('Type a figure first.'); return; }
+        submitAnswers([{ id: it.id, value: v }], row);
+      };
+      list.appendChild(row);
+      continue;
+    }
     const opts = ['<option value="">— pick the app —</option>'].concat(apps.map(a =>
       `<option value="${a.replace(/"/g,'&quot;')}"${(it.suggestion === a || it.app === a) ? ' selected' : ''}>${a}</option>`)).join('');
     const amountBox = it.amountUsable ? '' :

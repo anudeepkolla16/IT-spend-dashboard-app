@@ -142,9 +142,27 @@ test('a live rules file gains what the seed has since gained, and nothing the ow
   assert.strictEqual(up.changed, true);
   assert.strictEqual(up.rules.vendors[0].period, 'usage');
   assert.strictEqual(up.rules.vendors[1].currency, 'EUR', 'the owner\'s own setting stands');
-  assert.deepStrictEqual(up.rules.locks, SEED_LOCKS);
-  // Once the file has a locks list — even an empty one — the seed is not consulted again.
-  const again = upgradeRules({ vendors: up.rules.vendors, locks: [] });
+  assert.deepStrictEqual(up.rules.locks, SEED_LOCKS.map(l => { const { since, ...rest } = l; return rest; }));
+  // Once the file has a locks list and has seen every seed round, the seed is
+  // not consulted again — even when the owner has emptied the list.
+  const latest = Math.max(...SEED_LOCKS.map(l => l.since || 1));
+  const again = upgradeRules({ vendors: up.rules.vendors, locks: [], locksSeeded: latest });
   assert.strictEqual(again.changed, false);
   assert.deepStrictEqual(again.rules.locks, []);
+});
+
+
+test('a later seed round adds its locks to a file that already has a locks list, and nothing else', () => {
+  const { upgradeRules, SEED_LOCKS } = require('../lib/invoices/rules');
+  const live = { vendors: [{ name: 'Anthropic', domains: ['anthropic.com'], apps: [] }], locks: [{ app: 'Claude Ai', month: '2026-07', value: 5, note: 'mine' }], locksSeeded: 1 };
+  const up = upgradeRules(live);
+  assert.strictEqual(up.changed, true);
+  assert.ok(up.rules.locks.some(l => l.app === 'Cumul(Luzmo)' && l.month === '2026-08' && l.value === 14638), 'round 2 arrives');
+  assert.strictEqual(up.rules.locks.find(l => l.app === 'Claude Ai' && l.month === '2026-07').value, 5, 'an owner-changed lock is not touched');
+  assert.strictEqual(up.rules.locks.length, 2, 'round-1 locks are not re-added');
+  assert.strictEqual(up.rules.locksSeeded, Math.max(...SEED_LOCKS.map(l => l.since || 1)));
+  const again = upgradeRules(up.rules);
+  assert.strictEqual(again.changed, false, 'and the round is not applied twice');
+  const fresh = upgradeRules({ vendors: [] });
+  assert.strictEqual(fresh.rules.locks.length, SEED_LOCKS.length, 'a file with no locks list gets every round');
 });
