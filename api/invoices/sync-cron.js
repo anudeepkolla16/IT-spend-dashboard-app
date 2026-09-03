@@ -8,7 +8,7 @@ const { runMailSync, resolvePending, collectSlackAnswers, notify, readRules, wri
 const { scanPeriods, applyBackfill } = require('../../lib/invoices/period-backfill');
 const { readPending } = require('../../lib/invoices/pending');
 const { openSpendSheet } = require('../../lib/spend-sheet');
-const { readPdfText, extractInvoiceTotal, extractInvoiceRef } = require('../../lib/invoice-amount');
+const { readInvoiceTotal, extractInvoiceRef } = require('../../lib/invoice-amount');
 const { extractBillingPeriod, extractInvoiceDate } = require('../../lib/invoice-period');
 const { normalizeRules } = require('../../lib/invoices/rules');
 
@@ -228,12 +228,14 @@ module.exports = async (req, res) => {
       );
       if (!dl.ok) throw new Error(`could not download "${full}" (${dl.status})`);
       const bytes = Buffer.from(await dl.arrayBuffer());
-      const read = await readPdfText(bytes);
+      const read = await readInvoiceTotal(bytes);
       res.setHeader('Cache-Control', 'no-store');
       res.status(200).json({
         ok: true, mode, path: full, reader: read.reader, error: read.error,
-        total: read.error ? null : extractInvoiceTotal(read.text, { pages: read.pages }),
+        total: read.total,
         pages: read.pages ? read.pages.length : null,
+        // Both readers' answers and text, for a file the sync got wrong.
+        readers: read.attempts.map(a => ({ reader: a.reader, error: a.error || null, total: a.total || null, pages: a.pages ? a.pages.length : null, text: a.text ? a.text.slice(0, 4000) : null })),
         period: read.error ? null : extractBillingPeriod(read.text),
         invoiceDate: read.error ? null : extractInvoiceDate(read.text),
         ref: read.error ? null : extractInvoiceRef(read.text),

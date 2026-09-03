@@ -166,18 +166,25 @@ test('updates a filled cell when the invoice total has grown', () => {
   assert.strictEqual(updated[0].value, 999);
 });
 
-test('lowers a filled cell when the invoice total is lower', () => {
-  // The cell is the month's invoice total, whichever way it has to move — the
-  // owner's rule ("calculate the total for all invoices in that month and show
-  // that in sheet"). A lowering is reported as such, so a month whose
-  // invoices are missing from the archive is easy to spot.
-  const { write, updated, skippedFilled } = planAmountCells(
+test('a lower invoice total is a question, never a write', () => {
+  // The owner has said twice that a lowered cell was wrong: the archive was
+  // short, not the sheet. So a lower total is held and asked about; only an
+  // answer (or a lock) lowers a cell.
+  const { write, updated, skippedFilled, lowered } = planAmountCells(
     { 'Bubble Starter': { '2026-06': 500 } }, grid(), USED, cellValue, {}
   );
-  assert.strictEqual(write.length, 0);
-  assert.strictEqual(skippedFilled.length, 0);
+  assert.strictEqual(write.length + updated.length + skippedFilled.length, 0);
+  assert.strictEqual(lowered.length, 1);
+  assert.strictEqual(lowered[0].current, 751.96);
+  assert.strictEqual(lowered[0].invoiceTotal, 500);
+});
+
+test('an answered "use the invoices" lets that one lowering through', () => {
+  const { updated, lowered } = planAmountCells(
+    { 'Bubble Starter': { '2026-06': 500 } }, grid(), USED, cellValue, {}, {}, [], new Set(['Bubble Starter||2026-06'])
+  );
+  assert.strictEqual(lowered.length, 0);
   assert.strictEqual(updated.length, 1);
-  assert.strictEqual(updated[0].previous, 751.96);
   assert.strictEqual(updated[0].value, 500);
   assert.strictEqual(updated[0].direction, 'down');
 });
@@ -305,21 +312,16 @@ test('tops up a cell this sync wrote when later invoices arrive', () => {
   assert.strictEqual(updated[0].value, 524.27);
 });
 
-test('a figure a human or the statement put there is replaced, and flagged', () => {
-  // The cell holds 524.27 and we never wrote it. It is still replaced by the
-  // invoice total — that is what the cell means — but `wasOurs` is false, so
-  // the summary and the audit log say whose number went.
+test('a figure a human put there, above the invoices, is held and asked about', () => {
   const values = VALUES.map(r => r.slice());
   values[3][8] = 524.27;
-  const { write, updated, skippedFilled } = planAmountCells(
+  const { write, updated, lowered } = planAmountCells(
     { 'Bubble Starter': { '2026-06': 492.27 } },
     locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, {}
   );
-  assert.strictEqual(write.length, 0);
-  assert.strictEqual(skippedFilled.length, 0);
-  assert.strictEqual(updated.length, 1);
-  assert.strictEqual(updated[0].wasOurs, false, 'must be flagged as not our own figure');
-  assert.strictEqual(updated[0].direction, 'down');
+  assert.strictEqual(write.length + updated.length, 0);
+  assert.strictEqual(lowered.length, 1);
+  assert.strictEqual(lowered[0].wasOurs, false);
 });
 
 test('a hand correction is still superseded by a higher invoice total', () => {
@@ -339,19 +341,17 @@ test('a hand correction is still superseded by a higher invoice total', () => {
   assert.strictEqual(updated[0].wasOurs, false, 'must be flagged as not our own figure');
 });
 
-test('a hand correction above the invoice total is brought back to the invoices', () => {
+test('a hand correction above the invoice total stands until the owner answers', () => {
   const prior = { 'Bubble Starter||2026-06': 492.27 };
   const values = VALUES.map(r => r.slice());
   values[3][8] = 600; // corrected upward by a human
-  const { write, updated, skippedFilled } = planAmountCells(
+  const { write, updated, lowered } = planAmountCells(
     { 'Bubble Starter': { '2026-06': 524.27 } },
     locateGrid(values, TEXT), { values, start: { col: 0, row: 0 } }, cellValue, prior
   );
-  assert.strictEqual(write.length + skippedFilled.length, 0);
-  assert.strictEqual(updated.length, 1);
-  assert.strictEqual(updated[0].previous, 600);
-  assert.strictEqual(updated[0].value, 524.27);
-  assert.strictEqual(updated[0].wasOurs, false);
+  assert.strictEqual(write.length + updated.length, 0);
+  assert.strictEqual(lowered.length, 1);
+  assert.strictEqual(lowered[0].current, 600);
 });
 
 test('does not rewrite a cell that already holds the right total', () => {
@@ -447,19 +447,17 @@ const bubble = (total) => planAmountCells(
   { 'Bubble Starter': { '2026-06': total } }, grid(), USED, cellValue
 );
 
-test('sum: the cell follows the invoices on file, down as well as up', () => {
+test('sum: the cell follows the invoices on file upward; a shortfall is a question', () => {
   // Eight of nine invoices on file; the cell holds 751.96 from somewhere else.
   const eight = bubble(492.27);
-  assert.strictEqual(eight.write.length, 0);
-  assert.strictEqual(eight.skippedFilled.length, 0);
-  assert.strictEqual(eight.updated.length, 1);
-  assert.strictEqual(eight.updated[0].value, 492.27);
-  assert.strictEqual(eight.updated[0].direction, 'down');
+  assert.strictEqual(eight.write.length + eight.updated.length, 0);
+  assert.strictEqual(eight.lowered.length, 1, 'held and asked, not lowered');
 
-  // The ninth lands: the folder total is 524.27 and so is the cell.
-  const nine = bubble(524.27);
-  assert.strictEqual(nine.updated.length, 1);
-  assert.strictEqual(nine.updated[0].value, 524.27);
+  // The folder passes the sheet: the cell is raised.
+  const more = bubble(800);
+  assert.strictEqual(more.updated.length, 1);
+  assert.strictEqual(more.updated[0].value, 800);
+  assert.strictEqual(more.updated[0].direction, 'up');
 });
 
 test('sum: a cell already holding the month\'s total is not written again', () => {

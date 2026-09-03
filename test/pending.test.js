@@ -125,3 +125,13 @@ test('the other documents from the same mail are found by subject and arrival, w
   assert.deepStrictEqual(mates.map(m => m.file), ['Receipt-2311.pdf']);
   assert.strictEqual(mates[0].movedFrom, 'X/Anthropic(Api Console)/Sep-26/Receipt-2311.pdf');
 });
+
+
+test('a question about a cell is answered keep, invoices, or a figure', () => {
+  const items = [{ id: 'P8', kind: 'cell', app: 'Cumul(Luzmo)', month: '2026-08', sheetValue: 14638, invoiceTotal: 557.28 }];
+  const r = parseReply('P8 = keep\nP8 = invoices\nP8 = 14,638\nP8 = 2\nP8 = Adobe', items, APPS, NOW);
+  assert.deepStrictEqual(r.map(x => [x.keep, x.useInvoices, x.value, !!x.error]), [[true, undefined, undefined, false], [undefined, true, undefined, false], [undefined, undefined, 14638, false], [undefined, true, undefined, false], [undefined, undefined, undefined, true]]);
+  const text = describeQuestions(items);
+  assert.match(text, /the sheet has 14,638\.00, the invoices on file come to 557\.28/);
+  assert.match(text, /P8 = keep/);
+});
