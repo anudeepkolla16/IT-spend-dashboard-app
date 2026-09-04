@@ -109,9 +109,16 @@ of its points:**
    question.
 2. *Check the billing period.* An invoice belongs to **the month its billing period starts in**:
    a bill for `01-08-2026 to 31-08-2026` that arrives on 1 September is August's, and Luzmo's
-   `26 Aug → 26 Sep` cycle is August's too. With no labelled period, the invoice's own **issue
-   date** decides (`Date of issue`, `Invoice date`, a bare `Date:` — never the due date). With
-   neither, the sync **asks** — the month the mail arrived is never assumed.
+   `26 Aug → 26 Sep` cycle is August's too. A period need not be labelled: the **first date range
+   on the line items** counts (Anthropic's `Usage Aug 1 – Aug 31, 2026`, Render's `Aug 1 - Aug 31`,
+   dbt's `Seats Sep 2 – Sep 30`, Apollo's `Sep 2, 2026 – Sep 2, 2027`), and AWS's sentence
+   "this invoice is for the billing period August 1 - August 31 , 2026" reads as one. **The date of
+   issue on its own never decides.** An invoice dated 1 September is August's from a vendor billing
+   usage in arrears and September's from one billing the month ahead, and filing by the date put
+   August under September. So an invoice stating no period at all is filed by **how its vendor
+   bills** — `"period": "arrears"` (the month before its date) or `"advance"` (the month it is
+   dated) on the vendor's rule — and while that is not known the sync **asks**, then remembers the
+   answer on the rule. The month the mail arrived is never assumed.
 3. *Check the line items.* Where one vendor bills several rows, each row's rule lists `text`
    phrases and the first row whose phrase appears in the invoice wins. Anthropic's three rows
    are told apart by the **invoice number's account prefix** — `Q8MUNTUC-…` is the API console,
@@ -207,10 +214,16 @@ of. The same test runs again at write time against the live sheet — approval s
 consider, never that a cell may be replaced. A month holding any invoice that could not be read as a
 USD total is likewise reported and left alone rather than written short.
 
-Left alone as a matter of course: invoices that state no period (most of them — their arrival month
-is the best thing known about them), a period more than two months from where the file sits (a
-contract term misread as a cycle), an annual or quarterly period (no majority month — it stays where
-it starts), and anything filed deeper than `{vendor}/{month}`.
+Left alone as a matter of course: invoices in a month folder that state no period (the folder is
+somebody's decision, and the date alone says nothing), a period more than two months from where the
+file sits (a contract term misread as a cycle), an annual or quarterly period (no majority month — it
+stays where it starts), and anything filed deeper than `{vendor}/{month}`. A loose invoice with no
+month in its name and no period inside is filed by its date only when the vendor's billing convention
+is on its rule (see point 2 above); otherwise it is reported as undated.
+
+The scan caches what it read. A record from before line-item ranges were read (September 2026) that
+found no period is read again once, so an invoice whose period was there all along is proposed for
+its month; a record that found a period stands.
 
 ### Invoice totals and the Spendings sheet
 
@@ -735,7 +748,8 @@ lib/
   mail-sync.js                 Files invoice PDFs from the shared mailbox, holds what it is unsure of, totals months, ticks the tracker, sets cells, reports by Slack
   slack.js                     Slack DM: post the run report, read the owner's replies
   invoice-amount.js            Reads the payable total + currency out of an invoice PDF (pdfjs, then pdf-parse)
-  invoice-period.js            Reads the billing period (the month it starts in) and the invoice date
+  invoice-period.js            Reads the billing period — labelled, or the first line-item range — (the
+                               month it starts in) and the invoice date
   invoices/rules.js            The owner's filing rules (_vendor-rules.json): sender → vendor → row; learns answers
   invoices/pending.js          The hold queue (_pending.json, _Pending/): hold, answer, parse a Slack reply
   invoices/period-backfill.js  Re-files invoices archived before that rule, in the folders and the sheet

@@ -56,14 +56,32 @@ test('the DM lists each question with its id, options and the reply format', () 
 
 // --- The month, by the owner's rules ----------------------------------------
 
-test('the billing period\'s start month wins, then the invoice date, then nothing', () => {
+test('the billing period\'s start month wins; the invoice date alone is a question', () => {
   assert.strictEqual(monthForInvoice('Billing period: 01-08-2026 to 31-08-2026', '2026-09').month, '2026-08');
-  const dated = monthForInvoice('Invoice number 5 Date of issue June 1, 2026 Total $5', '2026-07');
-  assert.strictEqual(dated.month, '2026-06');
-  assert.strictEqual(dated.via, 'invoice-date');
+  // No period, only a date: which month that is depends on how the vendor
+  // bills, and guessing put August's usage under September.
+  const dated = monthForInvoice('Invoice number 5 Date of issue September 1, 2026 Total $5', '2026-09', { vendor: 'Render' });
+  assert.strictEqual(dated.month, null);
+  assert.strictEqual(dated.via, 'no-period');
+  assert.strictEqual(dated.issued.date, '2026-09-01');
+  assert.match(dated.why, /no billing period, only its date \(2026-09-01\).*month before.*remembered for Render/);
   const none = monthForInvoice('Total $5.00', '2026-07');
   assert.strictEqual(none.month, null, 'the mail\'s month is never assumed');
   assert.match(none.why, /nothing in the invoice says/);
+});
+
+test('a vendor whose billing convention is known files its undated invoices itself', () => {
+  const text = 'Invoice number 5 Date of issue September 1, 2026 Total $5';
+  const arrears = monthForInvoice(text, '2026-09', { convention: 'arrears', vendor: 'AWS' });
+  assert.strictEqual(arrears.month, '2026-08');
+  assert.strictEqual(arrears.via, 'month before invoice date (billed in arrears)');
+  const advance = monthForInvoice(text, '2026-09', { convention: 'advance', vendor: 'Zapier' });
+  assert.strictEqual(advance.month, '2026-09');
+  assert.strictEqual(advance.via, 'invoice-date (billed in advance)');
+  // January's arrears invoice is December's, the year before.
+  assert.strictEqual(monthForInvoice('Date of issue January 2, 2027 Total $5', '2027-01', { convention: 'arrears' }).month, '2026-12');
+  // A stated period still wins over the convention.
+  assert.strictEqual(monthForInvoice('Date of issue September 1, 2026 Seats Sep 1 – Sep 30, 2026 $200', '2026-09', { convention: 'arrears' }).month, '2026-09');
 });
 
 test('a period months away from the mail is a question, not a filing', () => {
