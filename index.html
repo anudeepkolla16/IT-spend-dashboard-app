@@ -2463,7 +2463,7 @@ async function runMailSync(rescan){
     if (byPeriod.length){
       lines.push(`\nFiled by the billing period on the invoice rather than the month the mail arrived:`);
       byPeriod.slice(0,8).forEach(r => lines.push(
-        `  · ${r.file}: ${r.from} → ${r.to}${r.periodStart ? `   (period ${r.periodStart} → ${r.periodEnd})` : ''}`));
+        `  · ${r.file}: ${r.from} → ${r.to}${r.periodStart ? `   (period ${r.periodStart} → ${r.periodEnd})` : r.invoiceDate ? `   (invoice dated ${r.invoiceDate}, ${/arrears/.test(r.via||'') ? 'billed in arrears' : 'billed in advance'})` : ''}`));
       const leftovers = byPeriod.filter(r => r.alsoStillAt);
       if (leftovers.length){
         lines.push(`  ${leftovers.length===1?'A copy of one of these is':'Copies of '+leftovers.length+' of these are'} still filed under the old month — delete ${leftovers.length===1?'it':'them'} or that month is counted twice:`);
@@ -2636,8 +2636,8 @@ $('#periodsBtn').onclick = async () => {
 
     // Two kinds of move read differently. A misfiled invoice comes FROM a month;
     // an undated one belonged to no month at all, which is the whole problem.
-    const why = (m) => (m.via === 'invoice-date'
-      ? `invoice dated ${m.invoiceDate}`
+    const why = (m) => (/invoice date|invoice-date/.test(m.via || '')
+      ? `invoice dated ${m.invoiceDate}${/arrears/.test(m.via) ? ', billed in arrears' : /advance/.test(m.via) ? ', billed in advance' : ''}`
       : `period ${m.periodStart} → ${m.periodEnd}`);
     const undated = moves.filter(m => m.undated);
     const misfiled = moves.filter(m => !m.undated);

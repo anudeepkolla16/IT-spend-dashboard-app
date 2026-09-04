@@ -53,16 +53,19 @@ test('a period inside one calendar month stays in that month', () => {
   assert.strictEqual(r.via, 'period-start');
 });
 
-test('an unlabelled line-item date range does not move the invoice', () => {
-  // Bubble's "8/12/26 - 9/12/26" is the same shape as Luzmo's cycle, but it is
-  // not called a period and there are nine of them per month.
-  assert.strictEqual(extractBillingPeriod(BUBBLE), null);
+test('a line-item date range is the period when nothing labels one', () => {
+  // Bubble's "8/12/26 - 9/12/26" is not called a period, but it is one, and
+  // the month it starts in is the invoice's — the same month as before.
+  assert.strictEqual(extractBillingPeriod(BUBBLE).start, '2026-08-12');
   assert.strictEqual(invoiceMonth(BUBBLE, '2026-08').month, '2026-08');
 });
 
-test('metered usage dates do not move the invoice either', () => {
-  assert.strictEqual(extractBillingPeriod(ANTHROPIC), null);
+test('metered usage dates are the period, for every vendor', () => {
+  // Issued 31 July for "Jul 2 – Jul 31" usage: July's. The same invoice issued
+  // on 1 August would still be July's, which is the whole point.
+  assert.strictEqual(extractBillingPeriod(ANTHROPIC).start, '2026-07-02');
   assert.strictEqual(invoiceMonth(ANTHROPIC, '2026-07').month, '2026-07');
+  assert.strictEqual(invoiceMonth(ANTHROPIC, '2026-08').month, '2026-07');
 });
 
 test('an invoice date beside a due date is never read as a period', () => {
@@ -252,10 +255,9 @@ test('Stripe and Google headers, which come out as labels then values or values 
   assert.strictEqual(extractInvoiceDate('Date due  Date of issue  October 9, 2026  September 2, 2026').month, '2026-09');
 });
 
-test('a metered vendor can declare its usage lines as the period', () => {
+test('usage lines with the dash lost are read as the period, with no opt-in', () => {
   const t = 'Date of issue August 1, 2026  Claude Haiku 4.5 Usage Jul 2   Jul 31, 2026 1   $425.42';
-  assert.strictEqual(invoiceMonth(t, '2026-08').month, '2026-08', 'off by default: a line-item range is not a period');
-  const r = invoiceMonth(t, '2026-08', { usageRange: true });
+  const r = invoiceMonth(t, '2026-08');
   assert.strictEqual(r.month, '2026-07');
   assert.strictEqual(r.period.start, '2026-07-02');
 });

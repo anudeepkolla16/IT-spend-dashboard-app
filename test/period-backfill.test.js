@@ -119,15 +119,25 @@ test('an invoice with no month anywhere is filed by the period it states', () =>
   assert.strictEqual(v.move.undated, true);
 });
 
-test('with no period stated, the date the invoice was issued decides', () => {
+test('with no period stated, the issue date decides only once the vendor\'s billing is known', () => {
   // ClickUp's are the case in hand: a bare invoice number for a name, no month
-  // folder, no period — only "Invoice date: 5/31/2025".
-  const v = planMove(undated({ invoiceDate: '2025-05-31', invoiceMonth: '2025-05' }), luzmoFolder(), BASE);
+  // folder, no period — only "Invoice date: 5/31/2025". Whether that is May's
+  // or April's depends on how the vendor bills; the date alone is a guess.
+  const asked = planMove(undated({ invoiceDate: '2025-05-31', invoiceMonth: '2025-05' }), luzmoFolder(), BASE);
+  assert.ok(asked.skip && !asked.move, 'not moved on the date alone');
+  assert.strictEqual(asked.kind, 'undated');
+  assert.match(asked.skip, /only its date \(2025-05-31\).*month before or the month ahead is not known yet/);
+
+  const v = planMove(undated({ invoiceDate: '2025-05-31', invoiceMonth: '2025-05' }), luzmoFolder({ convention: 'advance' }), BASE);
   assert.ok(v && v.move);
   assert.strictEqual(v.move.toMonth, '2025-05');
-  assert.strictEqual(v.move.via, 'invoice-date');
+  assert.strictEqual(v.move.via, 'invoice-date (billed in advance)');
   assert.strictEqual(v.move.toFolderPath, `${BASE}/Cumul/May-25`,
     'no folder for that month yet, so one in the style the archive already uses');
+
+  const back = planMove(undated({ invoiceDate: '2026-09-01', invoiceMonth: '2026-09' }), luzmoFolder({ convention: 'arrears' }), BASE);
+  assert.strictEqual(back.move.toMonth, '2026-08', 'an arrears invoice of 1 September is August\'s');
+  assert.strictEqual(back.move.via, 'month before invoice date (billed in arrears)');
 });
 
 test('a stated period beats the issue date, which is only the fallback', () => {
@@ -139,7 +149,7 @@ test('a stated period beats the issue date, which is only the fallback', () => {
 });
 
 test('an undated invoice moves into the folder name the vendor already uses', () => {
-  const v = planMove(undated({ invoiceDate: '2026-08-04', invoiceMonth: '2026-08' }), luzmoFolder(), BASE);
+  const v = planMove(undated({ invoiceDate: '2026-08-04', invoiceMonth: '2026-08' }), luzmoFolder({ convention: 'advance' }), BASE);
   assert.strictEqual(v.move.toFolderPath, `${BASE}/Cumul/Aug-26`, 'never a second folder beside Aug-26');
 });
 
