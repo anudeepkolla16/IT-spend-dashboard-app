@@ -6,6 +6,9 @@ export const config = {
   runtime: 'nodejs', // needed for Node's crypto module used below
 };
 
+// Endpoints the report token may read (GET only). Keep this list tiny.
+const REPORT_READ_PATHS = new Set(['/api/spend-data', '/api/invoices/list']);
+
 function b64urlDecode(str) {
   return Buffer.from(str.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
 }
@@ -39,6 +42,18 @@ export default function middleware(request) {
   // The scheduled invoice job has no browser session; it authenticates itself
   // with CRON_SECRET inside the handler, so let it past the session gate.
   if (url.pathname === '/api/invoices/sync-cron') return next();
+
+  // Read-only report access. The IT report agent (a GitHub Actions job) has no
+  // browser session; it presents REPORT_TOKEN as a Bearer token and may read
+  // only the two data endpoints — never the auth, import, upload or amount
+  // routes, and never the Password page's `?sheet=logins` payload.
+  if (request.method === 'GET' && REPORT_READ_PATHS.has(url.pathname)
+      && url.searchParams.get('sheet') !== 'logins') {
+    const want = process.env.REPORT_TOKEN || '';
+    const got = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+    if (want && got && got.length === want.length
+        && timingSafeEqual(Buffer.from(got), Buffer.from(want))) return next();
+  }
 
   const secret = process.env.SESSION_SECRET;
   const session = verifySession(request.headers.get('cookie'), secret);
