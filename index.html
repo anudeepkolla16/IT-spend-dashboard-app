@@ -1123,33 +1123,36 @@ function latestActualRowsPerApp(apps){
   const todayKey = realMonthKey(0);
   return latestRowsPerApp(apps.filter(a => a.month <= todayKey));
 }
-// Per app: what it costs per month, on average, right now.
-//
-// The charge has to be spread over its billing cycle first. An annual invoice is
-// one row in the sheet like any other, so averaging an app's last few rows and
-// calling the result monthly counted WINGMAN's 12,189 and Clickup's 23,026.50 as
-// if they recurred every month — which is why this read 133K against actual
-// monthly spend of 36-114K.
-//
-// Monthly-billed apps still use a trailing average: usage-based costs (cloud, API
-// metering) swing hard month to month, and a single month over- or under-states
-// them badly. Everything else divides its latest charge by the cycle length.
-//
-// One-time purchases are excluded — they are not a recurring cost to project —
-// and so is anything that has stopped being charged: an app whose last actual
-// charge is more than a cycle overdue has almost certainly been cancelled, and
-// the sheet has several (Hex and windsurf pro are both marked "cancled after
-// june"). Counting those would keep billing them for ever.
 function monthsBetween(fromKey, toKey){
   const [fy, fm] = String(fromKey).split('-').map(Number);
   const [ty, tm] = String(toKey).split('-').map(Number);
   return (ty - fy) * 12 + (tm - fm);
 }
-function trailingRunRateByApp(apps){
-  const todayKey = realMonthKey(0);
+// Per app: what it costs per month right now, and how that was worked out.
+//
+// Only complete months count: the current month is part-billed, and a future
+// month the sheet has budgeted is a plan. Averaging dbt's part-billed September
+// in with its June–August put its run-rate at 388 against a steady 531.
+//
+// How an app bills is read from its charges before its label. Cursor is
+// labelled Yearly in the sheet and charged every month; dividing its last
+// charge by twelve gave a run-rate of $94.
+//   monthly  charged in at least two of the last three complete months, or
+//            labelled Monthly and charged in one of them: the average of those
+//            three months (from the month the app started, for a new one), a
+//            month with no charge counting as nothing — Claude's 0.00 months
+//            are what was paid.
+//   cycle    anything else on a billing cycle: the latest charge, the current
+//            month's included (an annual bill that just landed is the best
+//            information there is), spread over the cycle. Overdue by more than
+//            a cycle and a month, it is gone.
+// A one-time purchase has no run-rate.
+function trailingRunRateByApp(apps, today){
+  const todayKey = today || realMonthKey(0);
+  const window = [addMonths(todayKey, -3), addMonths(todayKey, -2), addMonths(todayKey, -1)];
   const byApp = {};
   apps.forEach(r => {
-    if (r.month > todayKey) return; // ignore budgeted future months already in the sheet
+    if (!r.month || r.month > todayKey) return; // ignore budgeted future months already in the sheet
     (byApp[r.name] = byApp[r.name] || []).push(r);
   });
   return Object.entries(byApp).map(([name, rows]) => {
@@ -1157,19 +1160,17 @@ function trailingRunRateByApp(apps){
     const latest = rows[rows.length - 1];
     const cm = cycleMonths(latest.cycle);
     if (!cm) return null; // one-time purchase
-
-    // Overdue by more than one whole cycle (plus a month's grace) — treat as gone.
-    const staleBy = monthsBetween(latest.month, todayKey);
-    if (staleBy > Math.max(cm, 1) + 1) return null;
-
-    if (cm <= 1) {
-      // Monthly (or weekly) — smooth the last few actual months.
-      const last3 = rows.slice(-3);
-      const avg = last3.reduce((s, r) => s + r.usd, 0) / last3.length;
-      return { name, dept: latest.dept, m: cm < 1 ? avg / cm : avg, cycle: latest.cycle };
+    const at = m => rows.find(r => r.month === m);
+    const charged = window.filter(m => at(m) && at(m).usd > 0).length;
+    const monthlyLabel = cm <= 1;
+    if (charged >= 2 || (monthlyLabel && charged >= 1)) {
+      const span = window.filter(m => m >= rows[0].month);
+      const avg = span.reduce((s, m) => s + ((at(m) || {}).usd || 0), 0) / (span.length || 1);
+      return { name, dept: latest.dept, m: avg, cycle: latest.cycle, pattern: 'monthly', basis: span, latest: latest.month };
     }
-    // Annual, half-yearly, quarterly, multi-year: spread over the cycle.
-    return { name, dept: latest.dept, m: latest.usd / cm, cycle: latest.cycle };
+    if (monthlyLabel) return null; // nothing in three complete months: lapsed
+    if (monthsBetween(latest.month, todayKey) > cm + 1) return null;
+    return { name, dept: latest.dept, m: latest.usd / cm, cycle: latest.cycle, pattern: 'cycle', basis: [latest.month], latest: latest.month };
   }).filter(Boolean);
 }
 function monthlyRunRate(apps){
@@ -1257,34 +1258,29 @@ function addMonths(key, n){
 function buildForecast(all, sheetRows, todayKey){
   const apps = (all || []).filter(r => r.kind !== 'Laptops' && r.month && r.usd != null);
   const complete = [...new Set(apps.map(r => r.month))].filter(m => m < todayKey).sort();
-  const basis = complete.slice(-3);
+  const basis = [addMonths(todayKey, -3), addMonths(todayKey, -2), addMonths(todayKey, -1)];
   const horizon = Array.from({ length: FORECAST_MONTHS }, (_, i) => addMonths(todayKey, i));
   const byApp = new Map();
   apps.forEach(r => { if (!byApp.has(r.name)) byApp.set(r.name, []); byApp.get(r.name).push(r); });
   const rowInfo = new Map((sheetRows || []).filter(a => a.kind !== 'Laptops').map(a => [a.name, a]));
   for (const name of rowInfo.keys()) if (!byApp.has(name)) byApp.set(name, []);
 
-  const recurring = [], renewals = [];
+  // The recurring half is the same run-rate the Applications table and the
+  // KPI tile show, so the three never disagree.
+  const rates = trailingRunRateByApp(apps, todayKey);
+  const recurring = rates.filter(x => x.pattern === 'monthly' && x.m > 0).map(x => ({ name: x.name, dept: x.dept, perMonth: x.m, basis: x.basis }));
+  const isRecurring = new Set(rates.filter(x => x.pattern === 'monthly').map(x => x.name));
+  const renewals = [];
   for (const [name, rows] of byApp) {
+    if (isRecurring.has(name)) continue;
     rows.sort((a, b) => a.month.localeCompare(b.month));
     const past = rows.filter(r => r.month < todayKey && r.usd > 0);
     const latest = past[past.length - 1] || null;
     const info = rowInfo.get(name) || {};
     const cycle = (latest && latest.cycle) || info.cycle || 'Monthly';
     const cm = cycleMonths(cycle);
-    if (!cm) continue; // a one-time purchase does not recur
-
-    if (cm <= 1) {
-      // Monthly (a weekly app's cell is already the month's total). Not charged
-      // for two complete months running: treat as cancelled.
-      if (!latest || monthsBetween(latest.month, todayKey) > 2) continue;
-      // A new app has no months before it started; average the ones it has run.
-      const span = basis.filter(m => m >= past[0].month);
-      const vals = span.map(m => (past.find(r => r.month === m) || { usd: 0 }).usd);
-      const perMonth = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
-      if (perMonth > 0) recurring.push({ name, dept: latest.dept, perMonth, basis: span });
-      continue;
-    }
+    if (!cm) continue;   // a one-time purchase does not recur
+    if (cm <= 1) continue; // labelled monthly and not charged lately: lapsed
 
     // Annual, half-yearly, quarterly, multi-year: when is the next one due, and
     // what did it cost last time?
@@ -1592,13 +1588,18 @@ function drawOverview(pivoted, all){
   const rows = pivoted.map(g => {
     const months = ALL_MONTHS.filter(m => g[m] != null && m <= todayKey);
     const annual = ALL_MONTHS.filter(m => m >= from && m <= todayKey).reduce((s, m) => s + (g[m] || 0), 0);
-    const last = months[months.length - 1], prev = months[months.length - 2];
-    const change = last && prev && g[prev] > 0 ? (g[last] - g[prev]) / g[prev] * 100 : null;
+    const last = months[months.length - 1];
     const rr = rate.get(g.name);
+    // Month on month only means something for an app charged every month, and
+    // only between complete months: the part-billed current month against a
+    // full one read as a fall, and an annual bill against nothing as +10,278%.
+    const lastC = addMonths(todayKey, -1), prevC = addMonths(todayKey, -2);
+    const change = rr && rr.pattern === 'monthly' && g[prevC] > 0 ? ((g[lastC] || 0) - g[prevC]) / g[prevC] * 100 : null;
     const once = cycleMonths(g.cat) === 0;
     let stage = rr ? ['active', 'Active'] : once ? ['once', 'One-time'] : months.length ? ['lapsed', 'Not charged lately'] : ['none', 'Never charged'];
     if (g.kind === 'Laptops') stage = ['once', 'Hardware'];
-    return { g, annual, monthly: rr ? rr.m : (once ? 0 : null), change, last, renew: weeksLeft(g.renewalDate), stage };
+    const billed = rr && rr.pattern === 'monthly' && cycleMonths(g.cat) > 1 ? ' · charged monthly' : '';
+    return { g, annual, monthly: rr ? rr.m : (once ? 0 : null), change, last, billed, renew: weeksLeft(g.renewalDate), stage };
   });
   const key = ovSort.key, dir = ovSort.dir;
   rows.sort((a, b) => {
@@ -1609,13 +1610,13 @@ function drawOverview(pivoted, all){
   });
   const th = (k, label, num) => `<th class="${num?'num ':''}${ovSort.key===k?'sorted'+(ovSort.dir>0?' asc':''):''}" data-ov="${k}">${label}</th>`;
   $('#appsOverview').innerHTML = `<table><thead><tr>
-      ${th('name','App')}${th('dept','Department')}${th('annual','Annual cost',true)}${th('monthly','Monthly run-rate',true)}${th('change','vs previous month',true)}${th('renew','Renewal')}<th>Owner</th>${th('stage','Stage')}
+      ${th('name','App')}${th('dept','Department')}${th('annual','Annual cost',true)}${th('monthly','Monthly run-rate',true).replace('>Monthly run-rate<', ' title="Monthly apps: the average of the last three complete months. Annual, half-yearly and quarterly apps: the latest charge spread over the cycle.">Monthly run-rate<')}${th('change','vs previous month',true)}${th('renew','Renewal')}<th>Owner</th>${th('stage','Stage')}
     </tr></thead><tbody>${rows.map(r => `<tr data-name="${encodeURIComponent(r.g.name)}">
-      <td><div class="appcell"><span class="avatar" style="${avatarStyle(r.g.name)}">${initials(r.g.name)}</span><div><div class="nm">${r.g.name}</div><div class="sub">${r.g.cat || 'Monthly'}${r.g.kind==='Laptops'?' · hardware':''}</div></div></div></td>
+      <td><div class="appcell"><span class="avatar" style="${avatarStyle(r.g.name)}">${initials(r.g.name)}</span><div><div class="nm">${r.g.name}</div><div class="sub">${r.g.cat || 'Monthly'}${r.billed}${r.g.kind==='Laptops'?' · hardware':''}</div></div></div></td>
       <td><span class="chip">${r.g.dept || '—'}</span></td>
       <td class="num"><b>${fmtUSD(r.annual)}</b></td>
       <td class="num">${r.monthly == null ? '<span class="cap">—</span>' : fmtUSD(r.monthly)}</td>
-      <td class="num">${r.change == null ? '<span class="cap">—</span>' : `<span class="pill ${r.change > 0 ? 'up' : 'down'}">${r.change > 0 ? '▲' : '▼'} ${Math.abs(r.change).toFixed(0)}%</span>`}</td>
+      <td class="num">${r.change == null ? '<span class="cap">—</span>' : Math.abs(r.change) < 0.5 ? '<span class="chip">0%</span>' : `<span class="pill ${r.change > 0 ? 'up' : 'down'}">${r.change > 0 ? '▲' : '▼'} ${Math.abs(r.change).toFixed(0)}%</span>`}</td>
       <td><div>${r.renew.text}</div>${r.renew.note ? `<div class="weeks ${r.renew.cls}">${r.renew.note}</div>` : ''}</td>
       <td>${r.g.poc ? `<span class="avatar sm" style="${avatarStyle(r.g.poc)}" title="${r.g.poc}">${initials(r.g.poc)}</span>` : '<span class="cap">—</span>'}</td>
       <td><span class="stage ${r.stage[0]}">${r.stage[1]}</span></td>

@@ -779,7 +779,14 @@ api/
   large monthly chart with Spend / Apps vs Laptops / Forecast tabs, and the **Applications** table —
   one row per app with annual cost (trailing 12 months), monthly run-rate, change against the
   previous month, renewal date with weeks left, owner and stage (Active / Not charged lately /
-  Never charged / One-time). The old per-month pivot is the "Monthly breakdown" tab of that card.
+  Never charged / One-time). **The run-rate** (`trailingRunRateByApp`, also the KPI tile and the
+  Forecast tab's recurring half) uses complete months only and reads how an app bills from its
+  charges before its label: charged in two of the last three complete months (or labelled Monthly
+  and charged in one) → the average of those three months, a month with no charge counting as
+  nothing; otherwise the latest charge spread over its billing cycle. Cursor is labelled Yearly and
+  charged monthly, and dividing its last charge by twelve read $94; dbt's part-billed September
+  averaged in read 388 against a steady 531. "vs previous month" compares the last two complete
+  months and only for monthly-charged apps. The old per-month pivot is the "Monthly breakdown" tab of that card.
   Every action and modal from before is unchanged; `/` focuses the sidebar search.
 - **The Forecast tab is an estimate from the sheet, not a trend line.** The straight line it used
   to draw through every month's total was dragged towards zero by the part-billed current month
