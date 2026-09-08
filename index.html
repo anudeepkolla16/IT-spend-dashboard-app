@@ -1879,12 +1879,15 @@ function invResolveFolder(folderName, sheetIndex, mapping, aliases){
   const k = invNorm(folderName);
   const hit = name => (name && sheetIndex.has(invNorm(name))) ? sheetIndex.get(invNorm(name)) : null;
 
-  // 1. What a human confirmed in the import review beats everything.
+  // 1. The folder is named exactly like a row: that row, whatever an older
+  //    mapping says. "Laptop Repair" was mapped to Laptops Procurement before
+  //    the sheet had a Laptop Repair row of its own, and its five invoices
+  //    went to the wrong row for as long as the mapping outlived its reason.
+  if (sheetIndex.has(k)) return sheetIndex.get(k);
+
+  // 2. What a human confirmed in the import review.
   const mapped = hit(mapping && mapping[folderName]);
   if (mapped) return mapped;
-
-  // 2. The folder is named exactly like the row.
-  if (sheetIndex.has(k)) return sheetIndex.get(k);
 
   // 3. The curated vendor aliases the statement importer already uses — the
   // same knowledge that knows "Claude Api" is the API console row. Tried with
@@ -2150,6 +2153,11 @@ function drawInvoiceGrid(rows, months, todayKey){
       return `<td class="mark mark-${st}" title="${tip.replace(/"/g,'&quot;')}"><span>${label}</span></td>`;
     }).join('');
     const undated = row.undated.length ? ` <span class="chip" title="filed without a month subfolder">${row.undated.length} undated</span>` : '';
+    // Invoices dated before or after the sheet's months have no column to sit
+    // in, and "5 on file" beside a row of gaps reads as a bug until it says
+    // where the five went: Clickup's are all from 2025.
+    const outsideN = [...row.files.entries()].filter(([m]) => m < months[0] || m > months[months.length-1]).reduce((s,[,l]) => s + l.length, 0);
+    const outside = outsideN ? ` <span class="chip" title="${outsideN} invoice${outsideN===1?'':'s'} dated outside the sheet's months (${monthLabel(months[0])} – ${monthLabel(months[months.length-1])}), so no column here can show ${outsideN===1?'it':'them'}">${outsideN} outside ${months[0].slice(0,4)}</span>` : '';
     // The drill-down modal is built from the sheet row, so an app that only
     // exists in the archive has nothing to open. Leave it unclickable rather
     // than offering a click that silently does nothing.
@@ -2167,7 +2175,7 @@ function drawInvoiceGrid(rows, months, todayKey){
     const via = (row.folders||[]).filter(f => invNorm(f) !== invNorm(row.name));
     const viaChip = via.length ? ` <span class="chip" title="filed under ${via.join(', ').replace(/"/g,'&quot;')}">${via.join(', ')}</span>` : '';
     return `<tr${openable?` data-name="${encodeURIComponent(row.name)}"`:' style="cursor:default"'}>
-      <td class="stickycol">${row.name}${badge}${viaChip}${undated}</td>
+      <td class="stickycol">${row.name}${badge}${viaChip}${undated}${outside}</td>
       ${cells}
       <td class="num total">${row.fileCount||''}</td>
       <td class="fill"></td>

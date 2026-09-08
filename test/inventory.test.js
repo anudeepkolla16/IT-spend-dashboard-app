@@ -404,3 +404,61 @@ test('a scan that runs past its deadline says so instead of reporting false gaps
     assert.equal(inv.truncated, true);
   } finally { stub.restore(); }
 });
+
+// --- The invoice's own period dates it before its file name ---------------
+//
+// Slack's "July 26 invoice.pdf" is the Salesforce invoice dated 28 July for
+// service from 12 August 2026, and August is where the sheet charges it. The
+// name said July; the checklist showed August charged with no invoice and July
+// with an invoice nothing was charged for. Recheck Periods and the mail sync
+// both record the period they read, and the crawl now uses it.
+test('a period already read out of the PDF beats the file name, a subfolder beats both', async () => {
+  const stub = stubGraph({
+    index: {
+      periods: [
+        { path: `${ARCHIVE_PATH}/SLACK/July 26 invoice.pdf`, read: true, periodStart: '2026-08-12', periodEnd: '2027-02-11' },
+        // A contract term misread as a cycle: months away from the name, so ignored.
+        { path: `${ARCHIVE_PATH}/SLACK/March 2, 2026 invoice.pdf`, read: true, periodStart: '2027-03-01', periodEnd: '2028-03-01' },
+        // A subfolder is somebody's decision and still wins.
+        { path: `${ARCHIVE_PATH}/Adobe/July/adobe-jul.pdf`, read: true, periodStart: '2026-08-01', periodEnd: '2026-08-31' },
+      ],
+      entries: [
+        // Filed by the mail sync, which records the period it read.
+        { app: 'SLACK', month: '2026-04', file: 'Receipt-1.pdf', folder: `${ARCHIVE_PATH}/SLACK`, periodStart: '2026-04-01', periodEnd: '2026-04-30' },
+      ],
+    },
+    children: {
+      'root-inv': [folder('f-slack', 'SLACK'), folder('f-adobe', 'Adobe')],
+      'f-slack': [file('s1', 'July 26 invoice.pdf'), file('s2', 'March 2, 2026 invoice.pdf'), file('s3', 'Receipt-1.pdf')],
+      'f-adobe': [folder('f-adobe-jul', 'July')],
+      'f-adobe-jul': [file('a1', 'adobe-jul.pdf')],
+    },
+  });
+  try {
+    const inv = await buildInventory('tok', nextDrive());
+    const by = Object.fromEntries(inv.files.map(f => [f.name, f]));
+    assert.equal(by['July 26 invoice.pdf'].month, '2026-08');
+    assert.equal(by['July 26 invoice.pdf'].monthSource, 'period');
+    assert.equal(by['March 2, 2026 invoice.pdf'].month, '2026-03', 'a far period is ignored');
+    assert.equal(by['March 2, 2026 invoice.pdf'].monthSource, 'filename');
+    assert.equal(by['Receipt-1.pdf'].month, '2026-04', 'the mail sync\'s record dates a name that says nothing');
+    assert.equal(by['Receipt-1.pdf'].monthSource, 'period');
+    assert.equal(by['adobe-jul.pdf'].month, '2026-07');
+    assert.equal(by['adobe-jul.pdf'].monthSource, 'folder');
+    assert.equal(inv.datedFromPeriodCount, 2);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('periodsByPath keys the index the way the crawl builds paths', () => {
+  const { periodsByPath } = require('../lib/invoices/inventory');
+  const m = periodsByPath({
+    periods: [{ path: 'A/x.pdf', periodStart: '2026-01-01', periodEnd: '2026-01-31' }, { path: 'A/none.pdf', read: true }],
+    entries: [{ folder: 'A', file: 'y.pdf', periodStart: '2026-02-01' }],
+  });
+  assert.deepEqual(m.get('A/x.pdf'), { start: '2026-01-01', end: '2026-01-31' });
+  assert.deepEqual(m.get('A/y.pdf'), { start: '2026-02-01', end: '2026-02-01' });
+  assert.equal(m.has('A/none.pdf'), false);
+  assert.equal(periodsByPath(null).size, 0);
+});

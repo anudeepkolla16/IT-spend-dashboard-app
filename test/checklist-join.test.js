@@ -134,6 +134,15 @@ test('the mapping wins over name-matching, but only if it names a real row', () 
   assert.equal(resolve('Bubble', { Bubble: 'Deleted App' }), 'Bubble Starter');
 });
 
+test('a folder named exactly like a row is that row, whatever an older mapping says', () => {
+  // "Laptop Repair" was mapped to Laptops Procurement before the sheet had a
+  // Laptop Repair row; once it did, five invoices kept going to the wrong row.
+  assert.equal(resolve('Bubble Starter', { 'Bubble Starter': 'Claude Ai' }), 'Bubble Starter');
+  assert.equal(resolve('bubble starter', { 'bubble starter': 'Claude Ai' }), 'Bubble Starter');
+  // A folder that is NOT a row's exact name still follows the mapping.
+  assert.equal(resolve('Bubble', { Bubble: 'Claude Ai' }), 'Claude Ai');
+});
+
 test('a folder that is not an app at all stays unresolved', () => {
   // Real folders in the archive that are not subscriptions.
   for (const f of ['Courier bills', 'Laptop Repair', 'Laptops sold', 'Quotations']) {
