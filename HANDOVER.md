@@ -781,6 +781,18 @@ api/
   previous month, renewal date with weeks left, owner and stage (Active / Not charged lately /
   Never charged / One-time). The old per-month pivot is the "Monthly breakdown" tab of that card.
   Every action and modal from before is unchanged; `/` focuses the sidebar search.
+- **The Forecast tab is an estimate from the sheet, not a trend line.** The straight line it used
+  to draw through every month's total was dragged towards zero by the part-billed current month
+  and the budgeted months after it. Now (`buildForecast` in `index.html`): actuals are shown for
+  **complete months only** (apps, not laptops); the next six months, starting with the current one,
+  are **recurring apps at their average over the last three complete months** (an app that started
+  later is averaged over the months it has run; one not charged for two complete months is treated
+  as cancelled) **plus renewals in the month they fall** — the sheet's renewal date first, otherwise
+  the last charge plus one billing cycle, rolled forward past any date already gone — at the app's
+  last actual charge. Laptops and one-time purchases are not projected. The two parts are stacked
+  bars in the chart, and the breakdown under it names the renewals behind each month's figure. An
+  annual app the sheet lists with a renewal date but no charge yet is listed with no cost, so the
+  renewal is not forgotten even though the figure is unknown.
 - **Chart colours are a validated set, not decoration.** `COLORS` in `index.html` is the eight-slot
   categorical palette for the light surface (adjacent pairs ≥ ΔE 8 under colour-vision deficiency);
   slots 3–5 sit under 3:1 on white and so only appear beside a label (the donut legend). A
