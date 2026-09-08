@@ -371,6 +371,15 @@ charged, do we have the invoice?", so a file dated outside the sheet's period ha
 to. Such files are still counted and still listed — the *dated outside the sheet's months* pill opens
 them — they just do not widen the grid.
 
+**A folder named exactly like a sheet row is that row**, whatever the saved import mapping says.
+`Laptop Repair` was mapped to *Laptops Procurement* before the sheet had a Laptop Repair row, and its
+five invoices kept going to the wrong row for as long as the mapping outlived its reason. The mapping
+still settles folders whose names match no row (`Claude Api` → Anthropic).
+
+**Invoices dated outside the sheet's months** have no column to sit in, so their row says so — Clickup's
+five files are all from 2025, and "5 on file" beside a row of gaps read as a bug until the row said
+`4 outside 2026`.
+
 **Every pill on the card is a filter.** Clicking one narrows the view to exactly the things it
 counted, so each number can be opened up rather than taken on trust; clicking it again clears it. The
 file-level pills (*on file*, *no month to read*, *dated from the file name*, *dated outside the
@@ -413,12 +422,18 @@ visible rather than magic.
 **Coverage only counts months already billed.** Including the sheet's budgeted future months would
 report a shortfall that no amount of filing could ever close.
 
-**Where an invoice's month comes from.** Two sources, in this order:
+**Where an invoice's month comes from.** Three sources, in this order:
 
 1. **The month subfolder**, when there is one — somebody put the file there deliberately, and that beats
    anything inferred. They were named by hand over the years and are not consistent (`Aug-26` under one
    vendor, `July` under another, `2026-08` elsewhere); all are understood.
-2. **The file name**, when there is no month subfolder — which is most of the archive. Adobe, AWS and
+2. **The billing period read out of the PDF**, when one is on record — Recheck Periods caches every
+   period it reads in `_invoice-index.json`, and the mail sync records the period of each file it files.
+   Slack's `July 26 invoice.pdf` is dated 28 July for service from 12 August, and August is where the
+   sheet charges it; the name alone put it in July. A period more than two months from the name's month
+   is taken for a misread (a contract term) and ignored. The crawl never opens a PDF itself — run
+   **Recheck Periods** once and the periods are there for every file it could read.
+3. **The file name**, when there is neither — which is most of the archive. Adobe, AWS and
    Chargebee keep their invoices flat and put the month in the name: `jan 26.pdf`, `Apr-26.pdf`,
    `June 26.pdf`, `Aug 2026.pdf`. Reading only the subfolder left **220 of 472 invoices undated**, which
    the checklist showed as months charged with no invoice while the PDF sat right there.
