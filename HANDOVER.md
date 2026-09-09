@@ -653,7 +653,7 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 | `TARGET_USER_UPN` | Whose OneDrive holds the sheet + invoices (`anudeep.kolla@sarasanalytics.com`) |
 | `TARGET_FILE_PATH` | **Relative path** to the spend sheet, e.g. `Anudeep Excel sheets/Saras Apps & Subscriptions Purchase from Jan 26 .xlsx`. Must be a path, **never a share URL** (that causes a 400 "Resource not found for the segment 'root:'"). |
 | `SESSION_SECRET` | Signs the login session cookie |
-| `ALLOWED_EMAILS` | Comma-separated allowlist of who can sign in. Add/remove people here — no redeploy needed. |
+| `ALLOWED_EMAILS` | Comma-separated allowlist of who can sign in (`a@x.com,b@x.com`, case does not matter). Add/remove people here, then **redeploy** — like every env var, it is read at deployment. |
 | `PUBLIC_APP_URL` | `https://it-spend-dashboard-app.vercel.app` (used to build the OAuth redirect) |
 | `CRON_SECRET` | Authorizes the daily invoice-sync crons. Vercel auto-sends it as a Bearer token on scheduled runs. |
 | `INVOICE_MAILBOX` | Shared mailbox the invoice sync reads. Defaults to `invoices@sarasanalytics.com` (note the plural) if unset. |
@@ -732,7 +732,7 @@ the new path, relative to the OneDrive root, and redeploy.
 
 ## Common tasks
 
-**Add someone to the dashboard:** edit `ALLOWED_EMAILS` in Vercel (comma-separated). Effective immediately.
+**Add someone to the dashboard:** edit `ALLOWED_EMAILS` in Vercel (comma-separated), then redeploy (Deployments → ⋯ → Redeploy on the latest, or push any commit). It takes effect on that deployment; until then a newly added person is refused at sign-in with "isn't on the dashboard's access list".
 
 **Point at a different / renamed sheet:** update `TARGET_FILE_PATH` to the new relative path, then redeploy.
 
