@@ -38,6 +38,14 @@ test('"ignore" is an answer', () => {
   assert.deepStrictEqual(parseReply('p4 - ignore', ITEMS, APPS, NOW)[0], { id: 'P4', ignore: true, line: 'p4 - ignore' });
 });
 
+test('"all = ignore" closes every open question, and nothing else applies to all', () => {
+  const all = parseReply('all = ignore', ITEMS, APPS, NOW);
+  assert.deepStrictEqual(all.map(a => [a.id, a.ignore]), ITEMS.map(i => [i.id, true]));
+  assert.deepStrictEqual(parseReply('All: skip', ITEMS, APPS, NOW).map(a => a.id), ITEMS.map(i => i.id));
+  assert.deepStrictEqual(parseReply('all = Google Voice, Aug-26', ITEMS, APPS, NOW), [], 'one answer for every file is never right');
+  assert.match(describeQuestions(ITEMS), /`all = ignore` closes every open question/);
+});
+
 test('chat that is not an answer is left alone', () => {
   assert.deepStrictEqual(parseReply('thanks, looks good\nwill check tomorrow', ITEMS, APPS, NOW), []);
 });

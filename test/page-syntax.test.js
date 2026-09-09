@@ -23,3 +23,10 @@ test('every inline script in index.html parses', () => {
     );
   }
 });
+
+test('the pending card can close every open question at once', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(html, /<button class="btn ghost hidden" id="pendingIgnoreAll"/);
+  assert.match(html, /submitAnswers\(items\.map\(i => \(\{ id: i\.id, ignore: true \}\)\)/);
+  assert.match(html, /confirm\(`Ignore all /, 'never without asking');
+});

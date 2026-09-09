@@ -549,6 +549,7 @@ P12 = Google Voice
 P12 = 2                    (the second option the question listed)
 P12 = Google Voice, Aug-26
 P12 = ignore
+all = ignore
 ```
 
 A reply that does not read cleanly is reported back, never guessed at.
@@ -556,6 +557,12 @@ A reply that does not read cleanly is reported back, never guessed at.
 `?mode=inspect&path=<archive path>` on `/api/invoices/sync-cron` reads one archived PDF the way
 the sync does and returns the text, total, period, date and invoice number it saw — for an invoice
 the sync got wrong, that is the first thing to look at.
+
+**Ignore all.** The pending card's **✕ Ignore all** button (and `all = ignore` in Slack) closes every
+open question at once, after a confirmation: held files move to `_Ignored`, a cell question leaves the
+sheet as it is, nothing is written and nothing is remembered as a rule. For when the invoices have
+already been filed by hand and the questions are only noise. The mails stay marked as seen, so the
+same invoices are not asked about again.
 
 ### Slack
 

@@ -335,6 +335,7 @@
       <div id="pendingList"></div>
       <div class="filters" style="margin-top:10px">
         <div class="grow"></div>
+        <button class="btn ghost hidden" id="pendingIgnoreAll" title="Close every open question: held files move to _Ignored and nothing is written to the sheet">✕ Ignore all</button>
         <button class="btn ghost" id="pendingRefresh">↻ Refresh questions</button>
         <button class="btn ghost" id="rulesBtn">⚙ Filing rules</button>
       </div>
@@ -2923,6 +2924,8 @@ function renderPending(){
   const monthLabel = m => { if (!m) return ''; const [y, mm] = m.split('-'); return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(mm)-1] + '-' + y.slice(2); };
   const badge = $('#pendingBadge');
   if (badge) { badge.textContent = items.length; badge.classList.toggle('zero', !items.length); }
+  $('#pendingIgnoreAll').classList.toggle('hidden', !items.length);
+  $('#pendingIgnoreAll').textContent = `✕ Ignore all${items.length > 1 ? ` (${items.length})` : ''}`;
   status.textContent = items.length
     ? `${items.length} invoice${items.length === 1 ? '' : 's'} waiting.${pendingData.slackConfigured ? '' : ' (Slack DM is not set up: add SLACK_BOT_TOKEN and SLACK_DM_USER in Vercel to get these questions in Slack.)'}`
     : `Nothing waiting — every invoice the sync has seen is filed.${pendingData.slackConfigured ? '' : ' Slack DM is not set up: add SLACK_BOT_TOKEN and SLACK_DM_USER in Vercel to get reports and questions in Slack.'}`;
@@ -3032,6 +3035,18 @@ async function submitAnswers(answers, row){
 }
 
 $('#pendingRefresh').onclick = () => loadPending(false);
+// Every open question closed at once, the way a "P12 = ignore" reply closes
+// one: a held file moves to _Ignored, a cell question leaves the sheet as it
+// is, and nothing is written or remembered. For when the invoices have already
+// been filed by hand and the questions are only noise.
+$('#pendingIgnoreAll').onclick = () => {
+  const items = (pendingData && pendingData.items) || [];
+  if (!items.length) return;
+  const files = items.filter(i => i.kind !== 'cell').length, cells = items.length - files;
+  const what = [files ? `${files} held invoice${files === 1 ? '' : 's'} (moved to _Ignored, not filed, not counted)` : '', cells ? `${cells} cell question${cells === 1 ? '' : 's'} (the sheet stays as it is)` : ''].filter(Boolean).join(' and ');
+  if (!confirm(`Ignore all ${items.length} open question${items.length === 1 ? '' : 's'}?\n\nThat closes ${what}. Nothing is written to the sheet and nothing is remembered as a rule.`)) return;
+  submitAnswers(items.map(i => ({ id: i.id, ignore: true })), $('#pendingCard'));
+};
 $('#rulesBtn').onclick = () => {
   const ed = $('#rulesEditor');
   ed.classList.toggle('hidden');
