@@ -3016,7 +3016,7 @@ async function submitAnswers(answers, row){
     const r = json.result || {};
     const lines = [];
     (r.answered||[]).forEach(a => lines.push(`${a.id} ${a.file} → ${a.app} ${a.month}`));
-    (r.ignored||[]).forEach(i => lines.push(`${i.id} ${i.file} left out`));
+    (r.ignored||[]).forEach(i => lines.push(`${i.id} ${i.file} left out${i.gone ? ' (the held file was already gone)' : ''}`));
     (r.learned||[]).forEach(l => lines.push(`Remembered: ${l}`));
     const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2});
     (r.amountsWritten||[]).forEach(w => lines.push(`Spendings ${w.app} ${w.month} = ${fmt(w.amount)}`));

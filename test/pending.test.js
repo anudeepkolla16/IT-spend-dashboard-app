@@ -161,3 +161,39 @@ test('a question about a cell is answered keep, invoices, or a figure', () => {
   assert.match(text, /the sheet has 14,638\.00, the invoices on file come to 557\.28/);
   assert.match(text, /P8 = keep/);
 });
+
+// --- Ignoring must always close the question ---------------------------------
+//
+// "Ignore all" on fourteen questions failed on every one: _Ignored already held
+// files of those names from an earlier round, and one held file was no longer
+// in _Pending. Neither is a reason to leave the question open.
+test('a held file moving to _Ignored takes a numbered name on a clash, and a missing one is tolerated', async () => {
+  const { moveHeld } = require('../lib/invoices/pending');
+  const graph = require('../lib/graph');
+  const orig = { itemIdByPath: graph.itemIdByPath, ensureFolder: graph.ensureFolder, moveItem: graph.moveItem };
+  const moves = [];
+  graph.itemIdByPath = async (_t, _d, path) => (/gone/.test(path) ? null : 'item-1');
+  graph.ensureFolder = async () => 'parent-1';
+  graph.moveItem = async (_t, _d, id, parent, name, options) => { moves.push({ id, parent, name, options }); return { name: options && options.rename ? `${name.replace(/\.pdf$/, '')} 1.pdf` : name }; };
+  try {
+    const here = { heldPath: 'X/_Pending/P16-a.pdf', file: 'a.pdf' };
+    assert.strictEqual(await moveHeld('t', 'd', here, 'X/_Ignored', { rename: true }), 'X/_Ignored/a 1.pdf');
+    assert.deepStrictEqual(moves[0].options, { rename: true });
+    assert.strictEqual(await moveHeld('t', 'd', here, 'X/Vendor/Aug-26'), 'X/Vendor/Aug-26/a.pdf', 'filing into a month folder never renames');
+    assert.deepStrictEqual(moves[1].options, { rename: false });
+    const gone = { heldPath: 'X/_Pending/gone.pdf', file: 'gone.pdf' };
+    assert.strictEqual(await moveHeld('t', 'd', gone, 'X/_Ignored', { rename: true, tolerateMissing: true }), null);
+    await assert.rejects(() => moveHeld('t', 'd', gone, 'X/Vendor/Aug-26'), /no longer at/);
+  } finally {
+    Object.assign(graph, orig);
+  }
+});
+
+test('the ignore path in resolvePending renames on a clash and closes a question whose file is gone', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'mail-sync.js'), 'utf8');
+  assert.match(src, /pending\.moveHeld\(token, driveId, item, dest, \{ rename: true, tolerateMissing: true \}\)/);
+  const graph = fs.readFileSync(path.join(__dirname, '..', 'lib', 'graph.js'), 'utf8');
+  assert.match(graph, /conflictBehavior'\] = 'rename'/);
+});
