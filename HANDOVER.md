@@ -850,6 +850,23 @@ api/
   the app column pinned. `min-width:0` on cards and grid items is what stops a chart canvas holding
   a card — and the page — wider than the window after a resize; it was 726px of document against
   390px of window.
+- **"What changed" names the apps that moved the total**, between the two months that have finished,
+  ranked by the money that moved rather than by percentage — a 10,278% rise on $12 is not the story
+  and a $6,592 fall is. Apps that started or stopped show as "from nothing" / "to nothing"; moves
+  under a dollar are left out; the tail is summed rather than dropped. The card hides itself when
+  there is nothing to say. **There is no budget dataset**, so there is no variance, no full-year
+  forecast against plan and no "are we within plan?" tile; if an approved budget ever exists, that is
+  what unlocks them.
+- **A drill-down keeps the month it was opened from.** `openModal(name, month)` — from a missing-invoice
+  cell, a renewal, or a mover in What changed — titles itself with the month and answers it first:
+  the recorded charge and whether an invoice is on file, with links to the ones there are. Clicking
+  July's gap for AWS used to open the whole of AWS with every invoice it had ever had. A click on the
+  app name still opens it with no month.
+- **Invoice gaps are priced, not only counted.** One missing month at $25,000 and forty at $12 are not
+  the same problem, so the summary reads "N charged months with no invoice · $X unevidenced".
+- **Every chart canvas carries an `aria-label`**; the monthly chart's is rebuilt with each tab and
+  carries the same sentence as the caption plus the figures, since a canvas is opaque to a screen
+  reader. A full accessibility audit has still not been done.
 - **The Forecast tab is an estimate from the sheet, not a trend line.** The straight line it used
   to draw through every month's total was dragged towards zero by the part-billed current month
   and the budgeted months after it. Now (`buildForecast` in `index.html`): actuals are shown for

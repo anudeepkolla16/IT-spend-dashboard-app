@@ -241,3 +241,67 @@ test('nothing but the page itself is allowed to be wider than the window', () =>
   assert.match(html, /\.maint-toggle\{display:inline-flex/);
   assert.match(html, /\.toolbar\{order:4;flex-basis:100%;display:none\}/);
 });
+
+// --- The decision layer: what changed, and what a click means ---------------
+//
+// "The current landing page answers 'What is recorded?' better than 'What
+// should we do?'" — with no approved budget to compare against, what the sheet
+// can still answer is which apps moved the total, and which gaps are worth
+// chasing.
+
+const C = lift(['changeDrivers'], '// Which apps moved the total between the two months', '\nfunction renderChange(');
+
+test('what changed ranks apps by the money that moved, not by percentage', () => {
+  const pivot = [
+    { name: 'Google cloud', dept: 'Engineering', '2026-07': 41225.25, '2026-08': 34633.23 },
+    { name: 'Anthropic', dept: 'org', '2026-07': 13895.83, '2026-08': 16376.29 },
+    { name: 'Vercel', dept: 'Engineering', '2026-08': 21.25 },                 // new: from nothing
+    { name: 'Hex', dept: 'Consulting', '2026-07': 159.38 },                    // gone: to nothing
+    { name: 'Adobe', dept: 'Marketing', '2026-07': 37.16, '2026-08': 37.16 },  // flat
+    { name: 'Rounding', dept: 'IT', '2026-07': 10, '2026-08': 10.4 },          // below a dollar
+  ];
+  const { rows, total } = C.changeDrivers(pivot, '2026-07', '2026-08');
+  assert.deepStrictEqual(rows.map(r => r.name), ['Google cloud', 'Anthropic', 'Hex', 'Vercel'],
+    'biggest dollar move first — a 10,278% rise on $12 is not the story');
+  assert.strictEqual(Math.round(rows[0].delta), -6592);
+  assert.strictEqual(Math.round(rows[1].delta), 2480);
+  assert.strictEqual(rows.find(r => r.name === 'Vercel').from, 0, 'an app that started shows as from nothing');
+  assert.strictEqual(rows.find(r => r.name === 'Hex').to, 0);
+  assert.ok(!rows.some(r => r.name === 'Adobe'), 'a flat app is not a driver');
+  assert.ok(!rows.some(r => r.name === 'Rounding'), 'nor is a move under a dollar');
+  assert.strictEqual(Math.round(total), Math.round(rows.reduce((s, r) => s + r.delta, 0)));
+  assert.deepStrictEqual(C.changeDrivers([], '2026-07', '2026-08'), { rows: [], total: 0 });
+  assert.deepStrictEqual(C.changeDrivers(null, '2026-07', '2026-08').rows, []);
+});
+
+test('the card compares the two months that have finished, and is hidden with nothing to say', () => {
+  assert.match(html, /const to = realMonthKey\(-1\), from = realMonthKey\(-2\);/);
+  assert.match(html, /if \(!rows\.length\)\{ card\.classList\.add\('hidden'\); return; \}/);
+  assert.match(html, /the two months that have finished/);
+  assert.match(html, /smaller move\$\{rest\.length===1\?'':'s'\}/, 'the tail is accounted for, not dropped');
+});
+
+test('a drill-down keeps the month it was opened from', () => {
+  assert.match(html, /function openModal\(name, month\)\{/);
+  assert.match(html, /modalMonth = month \|\| null;/);
+  assert.match(html, /\$\('#modalTitle'\)\.textContent = g\.name \+ \(modalMonth \? ` · \$\{monthLabel\(modalMonth\)\}` : ''\)/);
+  assert.match(html, /recorded charge \$\{charge==null\?'none':fmtUSD\(charge\)\} · invoice status/);
+  // Every route in carries it: a checklist cell, a renewal, a mover.
+  assert.match(html, /const cell = e\.target\.closest\('td\.mark'\);\s*openModal\(decodeURIComponent\(tr\.dataset\.name\), cell \? cell\.dataset\.month : null\);/);
+  assert.match(html, /openModal\(decodeURIComponent\(row\.dataset\.name\), row\.dataset\.month\|\|null\)/);
+  assert.match(html, /openModal\(decodeURIComponent\(r\.dataset\.name\), r\.dataset\.month\)/);
+  assert.match(html, /modalAppName = null;\s*modalMonth = null;/, 'and closing clears it');
+});
+
+test('a missing invoice is reported with the charge behind it', () => {
+  assert.match(html, /missingValue \+= \(row\.sheet && row\.sheet\[m\]\) \|\| 0;/);
+  assert.match(html, /\$\{fmtUSD\(missingValue\)\} unevidenced/);
+});
+
+test('every chart carries a label a screen reader can read', () => {
+  for (const id of ['trendChart', 'deptChart', 'catChart', 'topChart', 'runrateChart', 'modalChart']) {
+    assert.match(html, new RegExp(`<canvas id="${id}" role="img" aria-label="[^"]+"`), `${id} is labelled`);
+  }
+  // The trend chart's label follows its tab and carries the figures.
+  assert.match(html, /\$\('#trendChart'\)\.setAttribute\('aria-label',/);
+});

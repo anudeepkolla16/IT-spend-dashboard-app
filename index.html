@@ -116,6 +116,20 @@
   th.stickycol{background:var(--panel2);z-index:3}
   td.total,th.total{border-left:2px solid var(--line2);font-weight:650}
   .tblwrap{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .modal-focus{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0 2px;font-size:13px}
+  .modal-focus b.ok{color:var(--good)} .modal-focus b.gap{color:var(--warn)}
+  .modal-focus-files{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
+  .modal-focus-files a{font-size:12px}
+  .chg-row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line);cursor:pointer}
+  .chg-row:last-child{border-bottom:0}
+  .chg-row:hover{background:var(--panel2)}
+  .chg-name{font-weight:600;font-size:13px}
+  .chg-dept{color:var(--muted);font-weight:500;font-size:11.5px;margin-left:7px}
+  .chg-from{color:var(--muted);font-size:12px;white-space:nowrap}
+  .chg-d{font-weight:700;font-size:13px;white-space:nowrap;min-width:92px;text-align:right}
+  .chg-d.up{color:var(--danger)} .chg-d.down{color:var(--good)}
+  .chg-foot{color:var(--muted);font-size:12px;padding:9px 6px 0}
+  @media(max-width:560px){.chg-row{grid-template-columns:1fr auto}.chg-from{display:none}}
   .forecast-note{margin-top:12px;border-top:1px solid var(--line);padding-top:10px;font-size:12px;color:var(--muted);display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px 16px}
   .forecast-note b{color:var(--txt);font-weight:600}
   .forecast-note .fm{display:flex;flex-direction:column;gap:2px}
@@ -408,27 +422,37 @@
           <button data-mode="forecast">Forecast</button>
         </div>
       </div>
-      <div class="chartwrap lg"><canvas id="trendChart"></canvas></div>
+      <div class="chartwrap lg"><canvas id="trendChart" role="img" aria-label="Monthly IT spend"></canvas></div>
       <div id="forecastNote" class="forecast-note hidden"></div>
+    </div>
+
+    <div class="card hidden" id="changeCard" style="order:3">
+      <div class="card-head">
+        <div>
+          <h3>What changed</h3>
+          <div class="cap" id="changeCap"></div>
+        </div>
+      </div>
+      <div id="changeList"></div>
     </div>
 
     <div class="grid" style="order:6">
       <div class="card">
         <h3>Spend by Billing Cycle</h3>
         <div class="cap">Monthly / Quarterly / Annual / One-time mix · actual spend to date</div>
-        <div class="chartwrap"><canvas id="catChart"></canvas></div>
+        <div class="chartwrap"><canvas id="catChart" role="img" aria-label="Actual spend to date by billing cycle"></canvas></div>
       </div>
       <div class="card">
         <h3>Top Apps by Spend</h3>
         <div class="cap">Highest actual spend per application, to date (in $)</div>
-        <div class="chartwrap"><canvas id="topChart"></canvas></div>
+        <div class="chartwrap"><canvas id="topChart" role="img" aria-label="Applications ranked by actual spend to date"></canvas></div>
       </div>
     </div>
 
     <div class="card" style="order:7">
       <h3>🔮 Annual Run-Rate Projection</h3>
       <div class="cap">What each app costs per year at its current rate. Monthly apps use a trailing 3-month average (smooths volatile cloud/API metering); annual, half-yearly and quarterly charges are spread over their billing cycle rather than counted every month. One-time purchases and cancelled apps are excluded.</div>
-      <div class="chartwrap sm"><canvas id="runrateChart"></canvas></div>
+      <div class="chartwrap sm"><canvas id="runrateChart" role="img" aria-label="Applications ranked by annualised run-rate"></canvas></div>
       <div id="runrateNote" class="cap" style="margin-top:10px"></div>
     </div>
 
@@ -519,7 +543,8 @@
         <button class="modal-close" id="modalClose">✕</button>
       </div>
       <div class="modal-meta" id="modalMeta"></div>
-      <div class="modal-chartwrap"><canvas id="modalChart"></canvas></div>
+      <div class="modal-focus hidden" id="modalFocus"></div>
+      <div class="modal-chartwrap"><canvas id="modalChart" role="img" aria-label="Monthly spend for the selected application"></canvas></div>
 
       <div class="modal-invoices">
         <div class="modal-invoices-head">
@@ -761,7 +786,7 @@ function drawRenewalsTab(){
     const urgency = past ? 'ok' : (x.days<=7 ? 'danger' : (x.days<=30 ? 'warn' : 'ok'));
     const when = x.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
     const label = past ? `${Math.abs(x.days)}d ago` : (x.days===0 ? 'today' : x.days+'d');
-    return `<div class="renewal-row" data-name="${encodeURIComponent(x.name)}"${past?' style="opacity:.55"':''}>
+    return `<div class="renewal-row" data-name="${encodeURIComponent(x.name)}" data-month="${x.date.getFullYear()}-${String(x.date.getMonth()+1).padStart(2,'0')}"${past?' style="opacity:.55"':''}>
       <div class="renewal-name">${x.name}<span class="renewal-dept">${x.dept}</span></div>
       <div class="renewal-when">
         <span class="renewal-cost">${x.cost?fmtUSD(x.cost):'—'}</span>
@@ -770,7 +795,7 @@ function drawRenewalsTab(){
       </div>
     </div>`;
   }).join('');
-  el.querySelectorAll('.renewal-row').forEach(row=>row.onclick=()=>openModal(decodeURIComponent(row.dataset.name)));
+  el.querySelectorAll('.renewal-row').forEach(row=>row.onclick=()=>openModal(decodeURIComponent(row.dataset.name), row.dataset.month||null));
 }
 // Scoped to this tab group on purpose: the Invoice Checklist card has its own
 // row of .tab-btn buttons, and an unscoped handler would clear both groups'
@@ -1312,7 +1337,7 @@ function renderKPIs(all){
       <div class="kmini"><div class="lab">Annualised run-rate</div><div class="val">${fmtUSD(annual)}</div></div>
     </div>
     <div class="ktile donut">
-      <div class="donutwrap"><canvas id="deptChart"></canvas><div class="center">Last 12<br>months by<br>department</div></div>
+      <div class="donutwrap"><canvas id="deptChart" role="img" aria-label="Spend by department over the last 12 months"></canvas><div class="center">Last 12<br>months by<br>department</div></div>
       <div class="donut-legend" id="deptLegend"></div>
     </div>
     <div class="ktiles-actions">
@@ -1481,6 +1506,10 @@ function renderTrend(all, mode){
     : trendMode === 'forecast' ? 'Apps spend for complete months, then a 6-month estimate: recurring apps at their recent average plus renewals in the month they fall. Laptops and one-off purchases are not projected.'
     : 'Monthly spend from the sheet — hover a month for the figure.' + dashNote;
 
+  // A canvas is opaque to a screen reader, so the label carries the same
+  // sentence the caption does, with the figures behind it.
+  $('#trendChart').setAttribute('aria-label',
+    `${$('#trendCap').textContent} ${labels.map((l, i) => `${l}: ${datasets.map(d => `${d.label} ${d.data[i]==null?'no figure':fmtUSD(d.data[i])}`).join(', ')}`).join('. ')}`);
   charts.trend = new Chart($('#trendChart'),{
     type:'line',
     data:{labels,datasets},
@@ -1517,6 +1546,42 @@ function groupSum(rows, key){
 // "Others". A donut is the part-to-whole form for this few segments; every
 // segment is named in the legend beside it, with its figure, so no colour
 // carries meaning on its own.
+// Which apps moved the total between the two months that have finished.
+//
+// "Spend is down 16%" is not something anyone can act on; "Google cloud is
+// down $6,592 and Anthropic up $2,480" is. Closed months only, for the reason
+// the headline tile gives: a month still being billed is not a comparison.
+function changeDrivers(pivot, from, to){
+  const rows = (pivot || [])
+    .map(g => ({ name: g.name, dept: g.dept, kind: g.kind, from: g[from] || 0, to: g[to] || 0 }))
+    .map(x => ({ ...x, delta: x.to - x.from }))
+    .filter(x => Math.round(Math.abs(x.delta)) >= 1)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  return { rows, total: rows.reduce((s, x) => s + x.delta, 0) };
+}
+
+function renderChange(){
+  const to = realMonthKey(-1), from = realMonthKey(-2);
+  const card = $('#changeCard');
+  const { rows, total } = changeDrivers(window.PIVOT_ALL || [], from, to);
+  if (!rows.length){ card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  const SHOWN = 8;
+  const top = rows.slice(0, SHOWN), rest = rows.slice(SHOWN);
+  const sign = n => (n >= 0 ? '+' : '−') + fmtUSD(Math.abs(n)).slice(1);
+  $('#changeCap').textContent = `${monthLabel(from)} to ${monthLabel(to)}, the two months that have finished · ${sign(total)} across ${rows.length} app${rows.length===1?'':'s'}`;
+  $('#changeList').innerHTML = top.map(x => `
+    <div class="chg-row" data-name="${encodeURIComponent(x.name)}" data-month="${to}">
+      <div><span class="chg-name">${x.name}</span><span class="chg-dept">${x.dept||'—'}</span></div>
+      <div class="chg-from">${x.from ? fmtUSD(x.from) : 'nothing'} → ${x.to ? fmtUSD(x.to) : 'nothing'}</div>
+      <div class="chg-d ${x.delta>=0?'up':'down'}">${sign(x.delta)}</div>
+    </div>`).join('')
+    + (rest.length ? `<div class="chg-foot">${rest.length} smaller move${rest.length===1?'':'s'}, ${sign(rest.reduce((s,x)=>s+x.delta,0))} between them</div>` : '');
+  $('#changeList').querySelectorAll('.chg-row').forEach(r => {
+    r.onclick = () => openModal(decodeURIComponent(r.dataset.name), r.dataset.month);
+  });
+}
+
 function renderDept(all){
   destroy('dept');
   const from = realMonthKey(-11), to = realMonthKey(0);
@@ -1690,6 +1755,7 @@ function draw(){
   $('#rowCount').textContent = `${pivoted.length} apps · ${fmtUSD(sum)}`;
   window.PIVOTED = pivoted;
   drawOverview(pivoted, all);
+  renderChange();
 }
 
 /* ---------------- applications overview ---------------- */
@@ -1927,14 +1993,19 @@ $('#loginReload').onclick = () => loadLogins(true);
 renderLogins();
 
 /* ---------------- per-app drill-down modal ---------------- */
-let modalAppName = null;
-function openModal(name){
+let modalAppName = null, modalMonth = null;
+// `month` is the context the drill-down was opened from — a missing-invoice
+// cell, a renewal, a mover in What changed. Clicking July's gap for AWS and
+// getting the whole of AWS with every invoice it has ever had answers a
+// question nobody asked; the month is now carried through and answered first.
+function openModal(name, month){
   // Found in the whole sheet: a renewal or an invoice cell must still open its
   // app while an unrelated Applications search is narrowing the table.
   const g = (window.PIVOT_ALL||window.PIVOTED||[]).find(x=>x.name===name);
   if (!g) return;
   modalAppName = name;
-  $('#modalTitle').textContent = g.name;
+  modalMonth = month || null;
+  $('#modalTitle').textContent = g.name + (modalMonth ? ` · ${monthLabel(modalMonth)}` : '');
   // Actual and planned are shown apart, and add up to the row's total: this is
   // the pair that read as a contradiction when one card said $0 and another
   // said $120 for the same app, the $120 sitting in a month not yet billed.
@@ -1956,6 +2027,24 @@ function openModal(name){
     <span><span class="cap">Renewal</span><br><b>${renewalText}</b></span>
     <span><span class="cap">Actual spend · to date</span><br><b>${fmtUSD(modalActual)}</b></span>
     ${modalPlanned ? `<span><span class="cap">Budgeted ahead</span><br><b>${fmtUSD(modalPlanned)}</b></span>` : ''}`;
+
+  // The month it was opened from, answered at the top: what the sheet records
+  // for it, and whether an invoice is on file.
+  const focus = $('#modalFocus');
+  if (modalMonth){
+    const charge = g[modalMonth];
+    const row = (typeof invBuildRows === 'function' && invData) ? invBuildRows().find(r => r.name === name) : null;
+    const files = row ? (row.files.get(modalMonth) || []) : [];
+    const status = files.length
+      ? `${files.length} invoice${files.length===1?'':'s'} on file`
+      : (invData ? 'Missing' : 'not scanned yet');
+    focus.classList.remove('hidden');
+    focus.innerHTML = `<div><b>${monthLabel(modalMonth)}</b> · recorded charge ${charge==null?'none':fmtUSD(charge)} · invoice status <b class="${files.length?'ok':'gap'}">${status}</b></div>`
+      + (files.length ? `<div class="modal-focus-files">${files.map(f => `<a href="${f.webUrl}" target="_blank" rel="noopener">${f.name}</a>`).join('')}</div>` : '');
+  } else {
+    focus.classList.add('hidden');
+    focus.innerHTML = '';
+  }
 
   destroy('modal');
   charts.modal = new Chart($('#modalChart'),{
@@ -1979,6 +2068,7 @@ function closeModal(){
   $('#modalOverlay').classList.remove('show');
   destroy('modal');
   modalAppName = null;
+  modalMonth = null;
 }
 $('#modalClose').onclick = closeModal;
 $('#modalOverlay').addEventListener('click', e=>{ if (e.target.id==='modalOverlay') closeModal(); });
@@ -2251,12 +2341,15 @@ function drawInvoices(){
   // Only months already billed count towards coverage. Counting the sheet's
   // budgeted future months would report a permanent shortfall that no amount
   // of filing could close.
-  let charged = 0, covered = 0, extra = 0;
+  // A count of missing invoices says how much filing is left; the value of the
+  // charges behind them says which ones matter. One missing month at $25,000
+  // and forty at $12 are not the same problem.
+  let charged = 0, covered = 0, extra = 0, missingValue = 0;
   for (const row of allRows){
     for (const m of months){
       const st = invCellState(row, m, todayKey);
       if (st === 'have'){ charged++; covered++; }
-      else if (st === 'missing') charged++;
+      else if (st === 'missing'){ charged++; missingValue += (row.sheet && row.sheet[m]) || 0; }
       else if (st === 'extra') extra++;
     }
   }
@@ -2281,7 +2374,7 @@ function drawInvoices(){
         : 'No charged months to reconcile',
       'Show only apps that have at least one invoice for a charged month'),
     pill('gaps', 'review', missing,
-      `${missing} charged month${missing===1?'':'s'} with no invoice`,
+      `${missing} charged month${missing===1?'':'s'} with no invoice${missingValue ? ` · ${fmtUSD(missingValue)} unevidenced` : ''}`,
       'Show only apps missing an invoice for a month they were charged for'),
     pill('extra', 'muted', extra,
       `${extra} month${extra===1?'':'s'} with an invoice but no charge in the sheet`,
@@ -2348,7 +2441,7 @@ function drawInvoiceGrid(rows, months, todayKey){
         n ? `${n} invoice${n===1?'':'s'} on file` : 'no invoice on file',
       ].join(' — ');
       const label = st === 'have' && n > 1 ? String(n) : INV_GLYPH[st];
-      return `<td class="mark mark-${st}" title="${tip.replace(/"/g,'&quot;')}"><span>${label}</span></td>`;
+      return `<td class="mark mark-${st}" data-month="${m}" title="${tip.replace(/"/g,'&quot;')}"><span>${label}</span></td>`;
     }).join('');
     const undated = row.undated.length ? ` <span class="chip" title="filed without a month subfolder">${row.undated.length} undated</span>` : '';
     // Invoices dated before or after the sheet's months have no column to sit
@@ -2382,7 +2475,10 @@ function drawInvoiceGrid(rows, months, todayKey){
 
   el.innerHTML = `<div class="inv-grid"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   el.querySelectorAll('tr[data-name]').forEach(tr=>{
-    tr.onclick = () => openModal(decodeURIComponent(tr.dataset.name));
+    tr.onclick = (e) => {
+      const cell = e.target.closest('td.mark');
+      openModal(decodeURIComponent(tr.dataset.name), cell ? cell.dataset.month : null);
+    };
   });
 }
 
