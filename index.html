@@ -133,6 +133,7 @@
   select:focus,input:focus,textarea:focus{outline:2px solid rgba(42,120,214,.35);outline-offset:1px;border-color:var(--accent)}
   .hidden{display:none}
   .foot{color:var(--faint);font-size:11.5px;text-align:center;padding:26px 0 8px}
+  .mtd{font-size:10px;font-weight:600;background:var(--chip);color:var(--muted);border-radius:5px;padding:1px 5px;margin-left:5px;text-transform:none;letter-spacing:0}
   .pill{font-size:11px;padding:2px 8px;border-radius:20px;white-space:nowrap;font-weight:600}
   .pill.up{background:var(--danger-soft);color:var(--danger)}
   .pill.down{background:var(--good-soft);color:var(--good)}
@@ -379,12 +380,12 @@
     <div class="grid" style="order:6">
       <div class="card">
         <h3>Spend by Billing Cycle</h3>
-        <div class="cap">Monthly / Quarterly / Annual / One-time mix</div>
+        <div class="cap">Monthly / Quarterly / Annual / One-time mix · actual spend to date</div>
         <div class="chartwrap"><canvas id="catChart"></canvas></div>
       </div>
       <div class="card">
         <h3>Top Apps by Spend</h3>
-        <div class="cap">Highest total spend per application (all-time, in $)</div>
+        <div class="cap">Highest actual spend per application, to date (in $)</div>
         <div class="chartwrap"><canvas id="topChart"></canvas></div>
       </div>
     </div>
@@ -1112,6 +1113,33 @@ function build(){
 function monthTotals(rows){
   const m = {}; rows.forEach(r => { if(!r.month) return; m[r.month]=(m[r.month]||0)+r.usd; }); return m;
 }
+
+/* ---------------- what "spend" means ----------------
+   The sheet keeps actual charges for months already billed and budgeted
+   figures for months still ahead in the same columns, so adding a row up
+   mixes money spent with money planned. That is how one app read $0 under
+   "Annual cost" and $120 under "Total (all-time)": the 120 sat in a month
+   that has not happened. Four measures, one implementation, named wherever
+   they are shown:
+     actual    charges up to and including this month (this month partial)
+     closed    the same, but only months that have finished
+     mtd       this month so far, on its own
+     planned   budgeted months still ahead, never billed
+   Annualised recurring cost is a different thing again — it comes from
+   trailingRunRateByApp, which normalises a billing cycle — and is always
+   labelled as a run-rate, never as spend. */
+function spendIn(rows, test){
+  let sum = 0;
+  for (const r of rows || []) if (r.month && test(r.month)) sum += (r.usd || 0);
+  return sum;
+}
+function actualSpend(rows, todayKey){ const t = todayKey || realMonthKey(0); return spendIn(rows, m => m <= t); }
+function closedSpend(rows, todayKey){ const t = todayKey || realMonthKey(0); return spendIn(rows, m => m < t); }
+function mtdSpend(rows, todayKey){ const t = todayKey || realMonthKey(0); return spendIn(rows, m => m === t); }
+function plannedSpend(rows, todayKey){ const t = todayKey || realMonthKey(0); return spendIn(rows, m => m > t); }
+// Rows whose month has been billed — every chart that shows "spend" uses these,
+// so none of them counts a budget as money out the door.
+const billedRows = (rows, todayKey) => (rows || []).filter(r => r.month && r.month <= (todayKey || realMonthKey(0)));
 function latestRowsPerApp(apps){
   const byApp = {};
   apps.forEach(a => { if (!byApp[a.name] || a.month > byApp[a.name].month) byApp[a.name]=a; });
@@ -1184,22 +1212,29 @@ function renderKPIs(all){
   const months = Object.keys(totals).sort();
   const thisKey = realMonthKey(0), prevKey = realMonthKey(-1);
   const hasThisMonth = Object.prototype.hasOwnProperty.call(totals, thisKey);
-  const totalAll = all.reduce((s,r)=>s+r.usd,0);
-  const thisMonth = totals[thisKey] || 0;
-  const lastMonth = totals[prevKey] || 0;
-  const mom = lastMonth ? ((thisMonth-lastMonth)/lastMonth*100) : 0;
+  const toDate = actualSpend(all, thisKey);
+  const planned = plannedSpend(all, thisKey);
+  const thisMonth = mtdSpend(all, thisKey);
   const rr = monthlyRunRate(apps);
   const annual = rr*12;
   const activeApps = latestActualRowsPerApp(apps).length;
   const tracked = (window.SHEET_ROWS || []).filter(a => a.kind !== 'Laptops').length || new Set(apps.map(a=>a.name)).size;
-  const lapTotal = laps.reduce((s,r)=>s+r.usd,0);
-  const momPill = hasThisMonth && lastMonth
-    ? `<span class="pill ${mom>=0?'up':'down'}">${mom>=0?'▲':'▼'} ${Math.abs(mom).toFixed(0)}% vs ${monthLabel(prevKey)}</span>`
-    : (hasThisMonth ? 'this month' : 'not entered in the sheet yet');
+  const lapTotal = actualSpend(laps, thisKey);
+  const billedMonths = months.filter(m => m <= thisKey).length;
+  // The month in progress is compared against nothing: a part-billed September
+  // against a whole August read as a 62% saving, in green, on the 16th. The
+  // trend that IS honest is the last month that finished against the one
+  // before it, so that is what the tile reports.
+  const prev2Key = realMonthKey(-2);
+  const lastClosed = totals[prevKey] || 0, prevClosed = totals[prev2Key] || 0;
+  const closedMom = prevClosed ? ((lastClosed - prevClosed) / prevClosed * 100) : null;
+  const closedLine = lastClosed
+    ? `${monthLabel(prevKey)} closed at ${fmtUSD(lastClosed)}${closedMom === null ? '' : ` · <span class="pill ${closedMom>=0?'up':'down'}">${closedMom>=0?'▲':'▼'} ${Math.abs(closedMom).toFixed(0)}% vs ${monthLabel(prev2Key)}</span>`}`
+    : (hasThisMonth ? '' : 'not entered in the sheet yet');
 
   $('#kpis').innerHTML = `
     <div class="ktile accent">
-      <div><div class="lab">Total spend · all-time</div><div class="val">${fmtUSD(totalAll)}</div><div class="hint">${months.length} month${months.length===1?'':'s'} of data · ${fmtUSD(lapTotal)} of it hardware</div></div>
+      <div><div class="lab">Actual spend · to date</div><div class="val">${fmtUSD(toDate)}</div><div class="hint">${billedMonths} month${billedMonths===1?'':'s'} billed · ${fmtUSD(lapTotal)} of it hardware${planned ? ` · ${fmtUSD(planned)} budgeted ahead, not yet billed` : ''}</div></div>
       <div class="kmini"><div class="lab">Monthly run-rate</div><div class="val">${fmtUSD(rr)}</div></div>
     </div>
     <div class="ktile">
@@ -1207,11 +1242,11 @@ function renderKPIs(all){
       <div class="kmini"><div class="lab">Not charged recently</div><div class="val">${Math.max(0, tracked - activeApps)}</div></div>
     </div>
     <div class="ktile">
-      <div><div class="lab">Spend · ${monthLabel(thisKey)}</div><div class="val">${fmtUSD(thisMonth)}</div><div class="hint">${momPill}</div></div>
-      <div class="kmini"><div class="lab">Projected annual run-rate</div><div class="val">${fmtUSD(annual)}</div></div>
+      <div><div class="lab">Spend · ${monthLabel(thisKey)} <span class="mtd">month to date</span></div><div class="val">${fmtUSD(thisMonth)}</div><div class="hint">${closedLine}</div></div>
+      <div class="kmini"><div class="lab">Annualised run-rate</div><div class="val">${fmtUSD(annual)}</div></div>
     </div>
     <div class="ktile donut">
-      <div class="donutwrap"><canvas id="deptChart"></canvas><div class="center">Annual<br>cost by<br>department</div></div>
+      <div class="donutwrap"><canvas id="deptChart"></canvas><div class="center">Last 12<br>months by<br>department</div></div>
       <div class="donut-legend" id="deptLegend"></div>
     </div>
     <div class="ktiles-actions">
@@ -1318,9 +1353,22 @@ function renderTrend(all, mode){
   const months = [...new Set(all.filter(r=>r.month).map(r=>r.month))].sort();
   const totalSeries = months.map(m=>(appsM[m]||0)+(lapsM[m]||0));
   const label = (m, first) => monthLabel(m).replace(/ \d{4}$/, m.endsWith('-01') || m === first ? ' ' + m.slice(0,4) : '');
-  const line = (label, data, color, fill) => ({
+  // Past the last month that finished, the sheet is no longer reporting spend:
+  // the current month is part-billed and everything after it is a budget. Drawn
+  // solid to there and dashed beyond, because a solid line falling to zero in a
+  // future month reads as a collapse in spending rather than as months that
+  // have not been billed yet.
+  const todayKey = realMonthKey(0);
+  const closedEnd = months.reduce((n, m) => (m < todayKey ? n + 1 : n), 0);   // count of closed months
+  const basis = m => (m < todayKey ? 'actual' : m === todayKey ? 'month to date' : 'budgeted, not yet billed');
+  // `flat` is for the Forecast tab, whose actual series already stops at the
+  // last closed month and is followed by bars — it is indexed over its own
+  // month list, so the marks below would land on the wrong points.
+  const line = (label, data, color, fill, flat) => ({
     type:'line', label, data, borderColor: color, backgroundColor: fill, fill: true, tension: .35, borderWidth: 2,
-    pointRadius: 0, pointHitRadius: 16, pointHoverRadius: 5, pointHoverBackgroundColor: color, pointHoverBorderColor: '#ffffff', pointHoverBorderWidth: 2,
+    pointRadius: flat ? 0 : (ctx) => (ctx.dataIndex === closedEnd - 1 || months[ctx.dataIndex] === todayKey ? 3 : 0),
+    ...(flat ? {} : { segment: { borderDash: (ctx) => (ctx.p0DataIndex >= closedEnd - 1 ? [5, 4] : undefined) } }),
+    pointHitRadius: 16, pointHoverRadius: 5, pointHoverBackgroundColor: color, pointHoverBorderColor: '#ffffff', pointHoverBorderWidth: 2,
   });
 
   let labels, datasets, stacked = false, afterBody = null;
@@ -1330,7 +1378,7 @@ function renderTrend(all, mode){
     labels = f.complete.concat(fMonths).map(m => label(m, f.complete[0] || fMonths[0]));
     const nulls = n => Array.from({ length: n }, () => null);
     datasets = [
-      line('Apps spend (actual)', f.complete.map(m => appsM[m] || 0).concat(nulls(fMonths.length)), SERIES.apps, 'rgba(42,120,214,.12)'),
+      line('Apps spend (actual)', f.complete.map(m => appsM[m] || 0).concat(nulls(fMonths.length)), SERIES.apps, 'rgba(42,120,214,.12)', true),
       { type:'bar', label:'Recurring apps (run-rate)', data: nulls(f.complete.length).concat(f.months.map(x => x.recurring)), backgroundColor:'rgba(42,120,214,.45)', stack:'estimate', ...BAR },
       { type:'bar', label:'Renewals due', data: nulls(f.complete.length).concat(f.months.map(x => x.renewalTotal)), backgroundColor: SERIES.renewals, stack:'estimate', ...BAR },
     ];
@@ -1350,11 +1398,16 @@ function renderTrend(all, mode){
     datasets = trendMode === 'split'
       ? [line('Apps', months.map(m=>appsM[m]||0), SERIES.apps, 'rgba(42,120,214,.10)'), line('Laptops', months.map(m=>lapsM[m]||0), SERIES.laptops, 'rgba(235,104,52,.08)')]
       : [line('Total spend', totalSeries, SERIES.apps, 'rgba(42,120,214,.12)')];
+    afterBody = (items) => {
+      const m = months[items[0].dataIndex];
+      return m && m >= todayKey ? [basis(m)] : [];
+    };
   }
+  const dashNote = ` Solid to ${monthLabel(months[Math.max(0, closedEnd - 1)] || todayKey)}, the last month that finished; dashed after it, where ${monthLabel(todayKey)} is still being billed and later months are budgets, not charges.`;
   $('#trendCap').textContent = trendMode === 'split'
-    ? 'Apps and subscriptions against laptops and hardware, month by month'
+    ? 'Apps and subscriptions against laptops and hardware, month by month.' + dashNote
     : trendMode === 'forecast' ? 'Apps spend for complete months, then a 6-month estimate: recurring apps at their recent average plus renewals in the month they fall. Laptops and one-off purchases are not projected.'
-    : 'Actual and planned monthly spend from the sheet — hover a month for the figure';
+    : 'Monthly spend from the sheet — hover a month for the figure.' + dashNote;
 
   charts.trend = new Chart($('#trendChart'),{
     type:'line',
@@ -1413,7 +1466,7 @@ function renderDept(all){
 }
 function renderCat(all){
   destroy('cat');
-  const g = groupSum(all,'cat').slice(0,10);
+  const g = groupSum(billedRows(all),'cat').slice(0,10);
   const total = g.reduce((s,x)=>s+x[1],0)||1;
   charts.cat = new Chart($('#catChart'),{
     type:'bar',
@@ -1425,7 +1478,8 @@ function renderCat(all){
 }
 function renderTop(apps){
   destroy('top');
-  const g={}; apps.forEach(r=>{g[r.name]=(g[r.name]||0)+r.usd;});
+  // Actual charges only: a budgeted month still ahead is not spend.
+  const g={}; billedRows(apps).forEach(r=>{g[r.name]=(g[r.name]||0)+r.usd;});
   const top = Object.entries(g).sort((a,b)=>b[1]-a[1]).slice(0,12);
   charts.top = new Chart($('#topChart'),{
     type:'bar',
@@ -1479,39 +1533,42 @@ $('#tbl tbody').addEventListener('click', e=>{
 $('#tblCards').addEventListener('click', e=>{
   const card = e.target.closest('.appcard[data-name]'); if (card) openModal(decodeURIComponent(card.dataset.name));
 });
-function draw(){
-  const all=window.MODEL||[];
-  const t=$('#fType').value, d=$('#fDept').value, q=$('#fSearch').value.toLowerCase();
-  let rows=all.filter(r=>(!t||r.kind===t)&&(!d||r.dept===d)&&
-    (!q||(r.name+(r.poc||'')+r.cat).toLowerCase().includes(q)));
-
-  // pivot: one row per app name, spend broken out by month.
-  //
-  // Seeded from every row the sheet holds, not only the ones with spend: an app
-  // that is set up but has never been charged — Zapier, Posthog, Sprinto and
-  // four others — has no records at all, and listing only what has money in it
-  // silently dropped seven of the sheet's seventy-one apps. They come through
-  // with empty months and a zero total, which is exactly what the sheet says
-  // about them, and is worth seeing: a monthly subscription with nothing ever
-  // charged against it is a question.
+// One row per app name, spend broken out by month. `filt` narrows it to what
+// the Applications filters ask for; called with no filter it is the whole
+// sheet.
+//
+// Both are needed, and keeping them apart is the point. The Invoices tab
+// reconciles charges against filed invoices, and it was reading whatever the
+// Applications search had left behind: a search matching nothing emptied the
+// pivot, so every charge in the sheet vanished, coverage read "0 of 0 · 100%"
+// and 232 months turned into "invoice but no charge". Reconciliation is a
+// property of the data, never of what someone has typed into another section.
+//
+// Seeded from every row the sheet holds, not only the ones with spend: an app
+// that is set up but has never been charged — Zapier, Posthog, Sprinto and
+// four others — has no records at all, and listing only what has money in it
+// silently dropped seven of the sheet's seventy-one apps. They come through
+// with empty months and a zero total, which is exactly what the sheet says
+// about them, and is worth seeing: a monthly subscription with nothing ever
+// charged against it is a question.
+function buildPivot(all, filt){
+  const t = (filt && filt.t) || '', d = (filt && filt.d) || '', q = (filt && filt.q) || '';
   const groups = {};
   (window.SHEET_ROWS || []).forEach(a=>{
-    // The same filters the records obey, so a search or a department still
-    // narrows to what was asked for.
     if (t && a.kind !== t) return;
     if (d && a.dept !== d) return;
     if (q && !((a.name+(a.poc||'')+(a.cycle||'')).toLowerCase().includes(q))) return;
     groups[a.name] = { name:a.name, kind:a.kind, dept:a.dept, cat:a.cycle, cur:a.cur, poc:a.poc, renewalDate:a.renewalDate, total:0 };
   });
-  rows.forEach(r=>{
+  (all||[]).filter(r=>(!t||r.kind===t)&&(!d||r.dept===d)&&
+    (!q||(r.name+(r.poc||'')+r.cat).toLowerCase().includes(q))).forEach(r=>{
     if (!groups[r.name]) groups[r.name] = {name:r.name, kind:r.kind, dept:r.dept, cat:r.cat, cur:r.cur, poc:r.poc, renewalDate:r.renewalDate, total:0};
     const g = groups[r.name];
     if (r.month) g[r.month] = (g[r.month]||0) + r.usd;
     g.total += r.usd;
     if (r.month >= (g._latestMonth||'')) { g._latestMonth = r.month; g.kind=r.kind; g.dept=r.dept; g.cat=r.cat; g.cur=r.cur; g.poc=r.poc; g.renewalDate=r.renewalDate; }
   });
-  let pivoted = Object.values(groups);
-
+  const pivoted = Object.values(groups);
   // cost-spike detection: flag a month where spend jumped >30% vs the app's prior month
   pivoted.forEach(g=>{
     g._spikes = {};
@@ -1522,6 +1579,15 @@ function draw(){
       if (v!=null) prev = v;
     });
   });
+  return pivoted;
+}
+
+function draw(){
+  const all=window.MODEL||[];
+  const t=$('#fType').value, d=$('#fDept').value, q=$('#fSearch').value.toLowerCase();
+  // The whole sheet, for anything that must not move when a filter does.
+  window.PIVOT_ALL = buildPivot(all, {});
+  let pivoted = (t || d || q) ? buildPivot(all, { t, d, q }) : window.PIVOT_ALL.slice();
 
   pivoted.sort((a,b)=>{
     let x=a[sortKey], y=b[sortKey];
@@ -1609,9 +1675,9 @@ function drawOverview(pivoted, all){
     if (typeof va === 'string' || typeof vb === 'string') return String(va).localeCompare(String(vb)) * dir;
     return ((va || 0) - (vb || 0)) * dir;
   });
-  const th = (k, label, num) => `<th class="${num?'num ':''}${ovSort.key===k?'sorted'+(ovSort.dir>0?' asc':''):''}" data-ov="${k}">${label}</th>`;
+  const th = (k, label, num, title) => `<th class="${num?'num ':''}${ovSort.key===k?'sorted'+(ovSort.dir>0?' asc':''):''}" data-ov="${k}"${title?` title="${title.replace(/"/g,'&quot;')}"`:''}>${label}</th>`;
   $('#appsOverview').innerHTML = `<table><thead><tr>
-      ${th('name','App')}${th('dept','Department')}${th('annual','Annual cost',true)}${th('monthly','Monthly run-rate',true).replace('>Monthly run-rate<', ' title="Monthly apps: the average of the last three complete months. Annual, half-yearly and quarterly apps: the latest charge spread over the cycle.">Monthly run-rate<')}${th('change','vs previous month',true)}${th('renew','Renewal')}<th>Owner</th>${th('stage','Stage')}
+      ${th('name','App')}${th('dept','Department')}${th('annual','Spend · last 12 mo',true,'Actual charges in the twelve months ending with the current one. A month still ahead in the sheet is a budget and is not counted here.')}${th('monthly','Monthly run-rate',true,'Monthly apps: the average of the last three complete months. Annual, half-yearly and quarterly apps: the latest charge spread over the cycle.')}${th('change','vs previous month',true,'The last two months that finished, and only for apps charged every month.')}${th('renew','Renewal')}<th>Owner</th>${th('stage','Stage')}
     </tr></thead><tbody>${rows.map(r => `<tr data-name="${encodeURIComponent(r.g.name)}">
       <td><div class="appcell"><span class="avatar" style="${avatarStyle(r.g.name)}">${initials(r.g.name)}</span><div><div class="nm">${r.g.name}</div><div class="sub">${r.g.cat || 'Monthly'}${r.billed}${r.g.kind==='Laptops'?' · hardware':''}</div></div></div></td>
       <td><span class="chip">${r.g.dept || '—'}</span></td>
@@ -1749,10 +1815,21 @@ renderLogins();
 /* ---------------- per-app drill-down modal ---------------- */
 let modalAppName = null;
 function openModal(name){
-  const g = (window.PIVOTED||[]).find(x=>x.name===name);
+  // Found in the whole sheet: a renewal or an invoice cell must still open its
+  // app while an unrelated Applications search is narrowing the table.
+  const g = (window.PIVOT_ALL||window.PIVOTED||[]).find(x=>x.name===name);
   if (!g) return;
   modalAppName = name;
   $('#modalTitle').textContent = g.name;
+  // Actual and planned are shown apart, and add up to the row's total: this is
+  // the pair that read as a contradiction when one card said $0 and another
+  // said $120 for the same app, the $120 sitting in a month not yet billed.
+  const modalToday = realMonthKey(0);
+  let modalActual = 0, modalPlanned = 0;
+  for (const m of ALL_MONTHS) {
+    const v = g[m]; if (v == null) continue;
+    if (m <= modalToday) modalActual += v; else modalPlanned += v;
+  }
   const renewal = parseRenewal(g.renewalDate);
   const renewalText = renewal
     ? `${renewal.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}${renewal.recurring?' (monthly billing)':''}`
@@ -1763,7 +1840,8 @@ function openModal(name){
     <span><span class="cap">POC</span><br><b>${g.poc||'—'}</b></span>
     <span><span class="cap">Cycle</span><br><b>${g.cat}</b></span>
     <span><span class="cap">Renewal</span><br><b>${renewalText}</b></span>
-    <span><span class="cap">Total (all-time)</span><br><b>${fmtUSD(g.total)}</b></span>`;
+    <span><span class="cap">Actual spend · to date</span><br><b>${fmtUSD(modalActual)}</b></span>
+    ${modalPlanned ? `<span><span class="cap">Budgeted ahead</span><br><b>${fmtUSD(modalPlanned)}</b></span>` : ''}`;
 
   destroy('modal');
   charts.modal = new Chart($('#modalChart'),{
@@ -1915,7 +1993,8 @@ function invResolveFolder(folderName, sheetIndex, mapping, aliases){
 
 // One row per app: the sheet's amounts joined to the archive's files.
 function invBuildRows(){
-  const pivoted = window.PIVOTED || [];
+  // The whole sheet, never the filtered view — see buildPivot.
+  const pivoted = window.PIVOT_ALL || window.PIVOTED || [];
   const mapping = (invData && invData.mapping) || {};
   const aliases = (invData && invData.aliases) || {};
   // Resolve against every row the sheet holds, not only the ones with spend in
@@ -2068,7 +2147,9 @@ function drawInvoices(){
     }
   }
   const missing = charged - covered;
-  const pct = charged ? Math.round(covered/charged*100) : 100;
+  // No charged month is not full coverage. Reporting 100% off an empty
+  // denominator is how a reconciliation view says "all clear" about nothing.
+  const pct = charged ? Math.round(covered/charged*100) : null;
 
   const outside = ((invData.files)||[]).filter(f => f.month && !monthSet.has(f.month)).length;
   const unmatched = (window.INV_UNRESOLVED||[]).length;
@@ -2081,7 +2162,9 @@ function drawInvoices(){
 
   $('#invSummary').innerHTML = [
     pill('covered', 'auto', covered || 1,
-      `${covered} of ${charged} charged months have an invoice · ${pct}%`,
+      charged
+        ? `${covered} of ${charged} charged months have an invoice · ${pct}%`
+        : 'No charged months to reconcile',
       'Show only apps that have at least one invoice for a charged month'),
     pill('gaps', 'review', missing,
       `${missing} charged month${missing===1?'':'s'} with no invoice`,

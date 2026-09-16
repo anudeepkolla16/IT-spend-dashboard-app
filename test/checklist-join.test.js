@@ -204,11 +204,10 @@ test('an app with no spend is still listed, with its own details', () => {
     'and seeds the pivot from them, so a row with no spend still appears');
   // They must obey the same filters, or a department or a search would show
   // apps it was not asked for.
-  // Search forward from the seed block: `rows.forEach(r=>{` also appears earlier
-  // in the file, and slicing to that one gives an empty range that asserts nothing.
+  // Search forward from the seed block to where the records are folded in.
   const seedStart = html.indexOf('(window.SHEET_ROWS || []).forEach');
   assert.ok(seedStart > -1, 'the pivot no longer seeds from the sheet rows — this test is stale');
-  const seed = html.slice(seedStart, html.indexOf('rows.forEach(r=>{', seedStart));
+  const seed = html.slice(seedStart, html.indexOf('(all||[]).filter(', seedStart));
   assert.ok(seed.length > 0 && seed.length < 2000, 'the seed block was not isolated');
   for (const guard of ['a.kind !== t', 'a.dept !== d', 'a.poc']) {
     assert.ok(seed.includes(guard), `the seeded rows must honour the ${guard} filter`);

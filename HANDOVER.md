@@ -810,6 +810,28 @@ api/
   averaged in read 388 against a steady 531. "vs previous month" compares the last two complete
   months and only for monthly-charged apps. The old per-month pivot is the "Monthly breakdown" tab of that card.
   Every action and modal from before is unchanged; `/` focuses the sidebar search.
+- **Actual, planned and run-rate are three different measures, and every card names which one it is
+  showing.** The sheet keeps actual charges for months already billed and budgeted figures for months
+  still ahead in the same columns, so adding a row up mixes money spent with money planned — which is
+  how one app read `$0` under "Annual cost" and `$120` under "Total (all-time)", the 120 sitting in a
+  month that has not happened. `spendIn` in `index.html` defines four measures used everywhere:
+  **actual** (up to and including this month), **closed** (finished months only), **month to date**,
+  and **planned** (budgeted, never billed). Actual + planned accounts for every dated figure exactly
+  once. Annualised recurring cost is a fourth thing, comes from `trailingRunRateByApp`, and is always
+  labelled a run-rate, never spend. The Applications column is "Spend · last 12 mo", the drill-down
+  shows actual and budgeted apart, and the two small charts count billed months only.
+- **A filter in one section never changes what another section counts.** `buildPivot(all, filt)`
+  builds the pivot; `draw()` keeps the unfiltered one on `window.PIVOT_ALL` and a narrowed copy for
+  the table. The invoice checklist and the app drill-down read `PIVOT_ALL`. They used to read the
+  filtered pivot, so an Applications search matching nothing emptied it: every recorded charge
+  vanished, coverage read "0 of 0 charged months · 100%", 232 months became "invoice but no charge",
+  and the wrong summary stayed up until an invoice filter was touched. An empty denominator now reads
+  "No charged months to reconcile", never 100%.
+- **An incomplete period is never reported as a saving.** The month in progress is labelled *month to
+  date* and compared against nothing; the trend the tile reports is the last month that finished
+  against the one before it. On the monthly chart the line is solid to the last closed month and
+  dashed after it, with the basis in the tooltip — a solid line falling to zero in a future month read
+  as a collapse in spending rather than as months nobody has billed yet.
 - **The Forecast tab is an estimate from the sheet, not a trend line.** The straight line it used
   to draw through every month's total was dragged towards zero by the part-billed current month
   and the budgeted months after it. Now (`buildForecast` in `index.html`): actuals are shown for
