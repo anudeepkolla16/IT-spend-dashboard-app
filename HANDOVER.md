@@ -843,6 +843,15 @@ api/
 - **A renewal total says how much of itself is known.** Four renewals totalling `$3,174` read as the
   whole exposure while one of them had never been charged and carried no figure, so the heading is
   "N renewals · $X known value, M still to price".
+- **Applications has a "By vendor" tab** grouping rows under the supplier actually being paid: four
+  Google products, three Anthropic, three LinkedIn. Read app by app, nobody can see that Google is the
+  largest single relationship in the estate, which is the figure that matters in a renegotiation.
+  `VENDOR_FAMILIES` is a curated map because no string matching joins "Claude Ai" to "Anthropic";
+  anything unlisted is its own vendor. `CLOUD_AI` is likewise a named list, and the view prints which
+  vendors it counted rather than asking anyone to trust the label. **Per-project, per-user and
+  utilisation figures are not there and must not be inferred** — they need the providers' own billing
+  and usage exports. Same for licence utilisation: purchased-versus-active seats needs seat and
+  activity data, and missing invoices are not evidence of an unused licence.
 - **Each sidebar destination is a route**, so a view can be bookmarked, pasted to a colleague and
   reached with Back. `#/overview`, `#/applications`, `#/renewals`, `#/invoices`, `#/questions`,
   `#/rules`, `#/passwords`; an unknown route falls back to the overview. Every card declares its page
