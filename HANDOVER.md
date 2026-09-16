@@ -843,6 +843,17 @@ api/
 - **A renewal total says how much of itself is known.** Four renewals totalling `$3,174` read as the
   whole exposure while one of them had never been charged and carried no figure, so the heading is
   "N renewals · $X known value, M still to price".
+- **Each sidebar destination is a route**, so a view can be bookmarked, pasted to a colleague and
+  reached with Back. `#/overview`, `#/applications`, `#/renewals`, `#/invoices`, `#/questions`,
+  `#/rules`, `#/passwords`; an unknown route falls back to the overview. Every card declares its page
+  with `data-page` (one card serves both `questions` and `rules`), and `showPage` hides only content —
+  it is scoped to `main [data-page]` because the nav buttons carry the attribute too, and hiding those
+  hid the navigation itself. The Applications filters ride in the query (`#/applications?q=aws&dept=Marketing`),
+  written with `replaceState` so typing does not push a history entry per keystroke; a link that names
+  filters applies them, while moving between pages leaves what someone typed alone. **The startup call
+  to `showPage` is the last statement in the script on purpose** — it reads `let` state declared
+  further down, and calling it earlier died in the temporal dead zone and took the whole dashboard
+  with it.
 - **Below 1000px the sidebar is hidden, so a compact nav replaces it** — `buildMobNav` clones the
   sidebar's own buttons (and mirrors the open-questions count), so a destination added to one is a
   destination in both. The four archive-maintenance actions fold behind **⋯ Maintenance** at those

@@ -75,7 +75,7 @@ test('a workbook without the sheet fails with a message that names the tabs', ()
 
 test('the dashboard has a Password sidebar item that fetches the sheet on demand', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-  assert.match(html, /<button class="nav-item" data-goto="loginsCard">[^<]*<span class="ico">🔑<\/span>Password<\/button>/);
+  assert.match(html, /<button class="nav-item" data-page="passwords">[^<]*<span class="ico">🔑<\/span>Password<\/button>/);
   assert.match(html, /<div class="card" id="loginsCard"/);
   assert.match(html, /\/api\/spend-data\?sheet=logins/);
   // Only on demand: the poll that feeds the dashboard must not carry logins.
