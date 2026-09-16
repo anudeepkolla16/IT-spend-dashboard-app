@@ -518,6 +518,7 @@
         </div>
         <div class="chart-tabs" id="appsTabs">
           <button data-tab="overview" class="active">Overview</button>
+          <button data-tab="vendor">By vendor</button>
           <button data-tab="monthly">Monthly breakdown</button>
         </div>
       </div>
@@ -534,6 +535,7 @@
         <table id="tbl"><thead></thead><tbody></tbody></table>
       </div>
       <div class="cardlist" id="tblCards"></div>
+      <div id="appsVendor" class="hidden"></div>
     </div>
   </div>
 
@@ -1758,6 +1760,7 @@ function draw(){
   window.PIVOTED = pivoted;
   drawOverview(pivoted, all);
   renderChange();
+  if (appsTab === 'vendor') drawVendors();
   // Keep the address bar honest about what is on screen, without a history
   // entry per keystroke: replaceState does not fire hashchange.
   if (currentPage === 'applications' && routeApplied){
@@ -1855,10 +1858,100 @@ function setAppsTab(tab){
   appsTab = tab;
   $('#appsTabs').querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   $('#appsOverview').classList.toggle('hidden', tab !== 'overview');
+  $('#appsVendor').classList.toggle('hidden', tab !== 'vendor');
   document.querySelector('#appsCard .tblwrap').classList.toggle('hidden', tab !== 'monthly');
   $('#tblCards').classList.toggle('on', tab === 'monthly');
+  if (tab === 'vendor') drawVendors();
 }
 $('#appsTabs').querySelectorAll('button').forEach(b => b.onclick = () => setAppsTab(b.dataset.tab));
+
+/* ---------------- the portfolio by vendor ----------------
+   Several rows of the sheet are one supplier: four Google products, three
+   Anthropic ones, three LinkedIn. Read app by app, nobody can see that Google
+   is the largest single relationship in the estate, which is the number that
+   matters in a renegotiation.
+
+   The families are listed rather than guessed. "Claude Ai" does not resemble
+   "Anthropic" and no amount of string matching would join them, so a curated
+   map is the honest mechanism; anything unlisted is its own vendor. Same for
+   the cloud-and-AI flag: which apps count is a judgement, so the view names
+   every app it counted instead of asking anyone to trust a label. */
+const VENDOR_FAMILIES = {
+  Google:      ['Google cloud', 'GOOGLE ADS', 'Google Voice', 'Google Workspace'],
+  Anthropic:   ['Anthropic(Api Console)', 'Claude Ai', 'Claude Ai Max 6 Accounts'],
+  LinkedIn:    ['Linkedin', 'Linkedin Recuit', 'Linkedin Sales Navigator(Factors ai)'],
+  Salesforce:  ['SLACK'],
+  Microsoft:   ['MICROSOFT(Tata Tele)'],
+  Amazon:      ['AWS'],
+  Atlassian:   ['JetBrains'],
+};
+const CLOUD_AI = [
+  'Google cloud', 'AWS', 'Render', 'Vercel',                                  // infrastructure
+  'Anthropic(Api Console)', 'Claude Ai', 'Claude Ai Max 6 Accounts', 'OPENAI', // models
+  'Cursor pro', 'windsurf', 'ElevenLabs',                                     // AI tooling
+];
+const vendNorm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const VENDOR_BY_APP = new Map();
+for (const [vendor, apps] of Object.entries(VENDOR_FAMILIES)) for (const a of apps) VENDOR_BY_APP.set(vendNorm(a), vendor);
+const CLOUD_AI_KEYS = new Set(CLOUD_AI.map(vendNorm));
+const vendorOf = (app) => VENDOR_BY_APP.get(vendNorm(app)) || String(app || '').trim();
+const isCloudAi = (app) => CLOUD_AI_KEYS.has(vendNorm(app));
+
+// One row per supplier: what it costs, what it runs at, and what share of the
+// estate it is. `rates` is the same run-rate the rest of the dashboard uses.
+function buildVendorRows(pivot, rates, todayKey){
+  const rate = new Map((rates || []).map(r => [r.name, r.m]));
+  const from = addMonths(todayKey, -11);
+  const byVendor = new Map();
+  for (const g of pivot || []){
+    if (g.kind === 'Laptops') continue;
+    const vendor = vendorOf(g.name);
+    if (!byVendor.has(vendor)) byVendor.set(vendor, { vendor, apps: [], spend: 0, run: 0, cloudAi: false });
+    const v = byVendor.get(vendor);
+    let spend = 0;
+    for (const m of ALL_MONTHS) if (m >= from && m <= todayKey && g[m] != null) spend += g[m];
+    v.apps.push(g.name);
+    v.spend += spend;
+    v.run += rate.get(g.name) || 0;
+    if (isCloudAi(g.name)) v.cloudAi = true;
+  }
+  const rows = [...byVendor.values()].sort((a, b) => b.spend - a.spend);
+  const total = rows.reduce((s, r) => s + r.spend, 0);
+  for (const r of rows) r.share = total ? r.spend / total : 0;
+  return { rows, total };
+}
+
+let vendorCloudOnly = false;
+function drawVendors(){
+  const todayKey = realMonthKey(0);
+  const apps = (window.MODEL || []).filter(r => r.kind === 'Apps');
+  const { rows, total } = buildVendorRows(window.PIVOT_ALL || [], trailingRunRateByApp(apps, todayKey), todayKey);
+  const shown = vendorCloudOnly ? rows.filter(r => r.cloudAi) : rows;
+  const shownTotal = shown.reduce((s, r) => s + r.spend, 0);
+  const cloudRows = rows.filter(r => r.cloudAi);
+  const cloudSpend = cloudRows.reduce((s, r) => s + r.spend, 0);
+
+  $('#appsVendor').innerHTML = `
+    <div class="cap" style="margin-bottom:10px">
+      Applications grouped by the supplier actually being paid, over the last 12 months.
+      <b>${fmtUSD(cloudSpend)}</b> of ${fmtUSD(total)} is cloud and AI (${total?Math.round(cloudSpend/total*100):0}%).
+      <button class="btn ghost" id="vendCloud" style="margin-left:8px">${vendorCloudOnly ? '↩ Show every vendor' : '☁ Cloud &amp; AI only'}</button>
+    </div>
+    <div class="loginwrap"><table><thead><tr>
+      <th>Vendor</th><th>Applications</th><th class="num">Spend · last 12 mo</th><th class="num">Monthly run-rate</th><th class="num">Share</th>
+    </tr></thead><tbody>${shown.map(r => `
+      <tr>
+        <td><b>${r.vendor}</b>${r.cloudAi ? ' <span class="chip">cloud / AI</span>' : ''}${r.apps.length>1?` <span class="chip">${r.apps.length} products</span>`:''}</td>
+        <td class="cap">${r.apps.join(' · ')}</td>
+        <td class="num"><b>${fmtUSD(r.spend)}</b></td>
+        <td class="num">${r.run ? fmtUSD(r.run) : '<span class="cap">—</span>'}</td>
+        <td class="num">${(r.share*100).toFixed(1)}%</td>
+      </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">No vendors match</td></tr>'}</tbody>
+      <tfoot><tr><th>${shown.length} vendor${shown.length===1?'':'s'}</th><th></th><th class="num">${fmtUSD(shownTotal)}</th><th></th><th class="num">${total?(shownTotal/total*100).toFixed(1):0}%</th></tr></tfoot>
+    </table></div>
+    <div class="cap" style="margin-top:10px">Cloud and AI counts ${cloudRows.length} vendor${cloudRows.length===1?'':'s'}: ${cloudRows.map(r=>r.vendor).join(', ') || 'none'}. Per-project, per-user and utilisation figures need the providers' own billing and usage exports, which the sheet does not hold.</div>`;
+  $('#vendCloud').onclick = () => { vendorCloudOnly = !vendorCloudOnly; drawVendors(); };
+}
 
 /* ---------------- routing ----------------
    The sidebar looked like page navigation but scrolled one long document, and

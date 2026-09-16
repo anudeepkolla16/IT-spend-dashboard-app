@@ -367,3 +367,75 @@ test('navigating writes history, and filters stay in the URL', () => {
   assert.ok(call > html.indexOf('let loginRows'), 'the startup call sits after the state it reads');
   assert.ok(call > html.indexOf('let charts'));
 });
+
+// --- Vendor consolidation and the cloud/AI cut -------------------------------
+//
+// "Consolidate applications under parent vendors — especially where multiple
+// products or accounts belong to Google, Anthropic, or another supplier."
+// Cloud and AI is the same data cut differently; per-project and utilisation
+// figures need the providers' exports, which the sheet does not hold.
+
+const V = (() => {
+  const a = html.indexOf('const VENDOR_FAMILIES = {'), b = html.indexOf('let vendorCloudOnly');
+  return new Function(`
+    const ALL_MONTHS = ['2025-09','2026-07','2026-08','2026-09'];
+    function addMonths(key, n){ const [y,m] = key.split('-').map(Number); const d = new Date(y, m-1+n, 1); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+    ${html.slice(a, b)}
+    ; return { vendorOf, isCloudAi, buildVendorRows, VENDOR_FAMILIES, CLOUD_AI };`)();
+})();
+
+test('several rows of one supplier read as one relationship', () => {
+  assert.strictEqual(V.vendorOf('Google cloud'), 'Google');
+  assert.strictEqual(V.vendorOf('GOOGLE ADS'), 'Google');
+  assert.strictEqual(V.vendorOf('Google Voice'), 'Google');
+  // "Claude Ai" does not resemble "Anthropic"; only a curated map joins them.
+  assert.strictEqual(V.vendorOf('Claude Ai'), 'Anthropic');
+  assert.strictEqual(V.vendorOf('Anthropic(Api Console)'), 'Anthropic');
+  assert.strictEqual(V.vendorOf('SLACK'), 'Salesforce');
+  // Spelling, case and punctuation in the sheet do not decide it.
+  assert.strictEqual(V.vendorOf('google  cloud'), 'Google');
+  assert.strictEqual(V.vendorOf('Render '), 'Render', 'an unlisted app is its own vendor, trimmed');
+  assert.strictEqual(V.vendorOf(''), '');
+});
+
+test('the cloud and AI cut is a named list, not an inference', () => {
+  assert.strictEqual(V.isCloudAi('Google cloud'), true);
+  assert.strictEqual(V.isCloudAi('Anthropic(Api Console)'), true);
+  assert.strictEqual(V.isCloudAi('Cursor pro'), true);
+  assert.strictEqual(V.isCloudAi('GOOGLE ADS'), false, 'advertising is not cloud spend');
+  assert.strictEqual(V.isCloudAi('Adobe'), false);
+  // The view names every app it counted rather than asking anyone to trust it.
+  assert.match(html, /Cloud and AI counts \$\{cloudRows\.length\}/);
+  assert.match(html, /need the providers' own billing and usage exports, which the sheet does not hold/);
+});
+
+test('a vendor row totals its products, over the last 12 months only', () => {
+  const pivot = [
+    { name: 'Google cloud', kind: 'Apps', '2026-07': 41225.25, '2026-08': 34633.23, '2025-09': 9999 },
+    { name: 'GOOGLE ADS', kind: 'Apps', '2026-08': 2196.54 },
+    { name: 'Claude Ai', kind: 'Apps', '2026-08': 1000 },
+    { name: 'Adobe', kind: 'Apps', '2026-08': 37.16 },
+    { name: 'Laptops Procurement', kind: 'Laptops', '2026-08': 6143.59 },
+  ];
+  const rates = [{ name: 'Google cloud', m: 38182 }, { name: 'GOOGLE ADS', m: 1500 }, { name: 'Adobe', m: 37.16 }];
+  const { rows, total } = V.buildVendorRows(pivot, rates, '2026-09');
+
+  const google = rows.find(r => r.vendor === 'Google');
+  assert.deepStrictEqual(google.apps, ['Google cloud', 'GOOGLE ADS']);
+  assert.strictEqual(google.spend, 41225.25 + 34633.23 + 2196.54, 'the 2025 month is outside the window');
+  assert.strictEqual(google.run, 38182 + 1500, 'and the run-rate is the one the rest of the dashboard uses');
+  assert.strictEqual(google.cloudAi, true, 'one cloud product makes the relationship a cloud one');
+
+  assert.ok(!rows.some(r => r.vendor === 'Laptops Procurement'), 'hardware is not a subscription vendor');
+  assert.strictEqual(rows[0].vendor, 'Google', 'biggest relationship first');
+  assert.strictEqual(Math.round(total), Math.round(rows.reduce((s, r) => s + r.spend, 0)));
+  assert.ok(Math.abs(rows.reduce((s, r) => s + r.share, 0) - 1) < 1e-9, 'shares account for the whole estate');
+  assert.deepStrictEqual(V.buildVendorRows([], [], '2026-09'), { rows: [], total: 0 });
+});
+
+test('the vendor view is a tab on Applications and redraws with the data', () => {
+  assert.match(html, /<button data-tab="vendor">By vendor<\/button>/);
+  assert.match(html, /\$\('#appsVendor'\)\.classList\.toggle\('hidden', tab !== 'vendor'\)/);
+  assert.match(html, /if \(tab === 'vendor'\) drawVendors\(\);/);
+  assert.match(html, /if \(appsTab === 'vendor'\) drawVendors\(\);/, 'and again when the sheet reloads');
+});
