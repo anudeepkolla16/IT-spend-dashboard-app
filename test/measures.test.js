@@ -221,7 +221,7 @@ test('a compact nav is cloned from the sidebar, so the two cannot list different
   assert.match(html, /<nav class="mobnav" id="mobNav" aria-label="Sections"><\/nav>/);
   assert.match(html, /document\.querySelectorAll\('\.side \.nav-item'\)\.forEach\(src => \{/,
     'built from the sidebar itself, never a second hand-written list');
-  assert.match(html, /b\.onclick = \(\) => \{ src\.click\(\); syncMobNav\(\); \};/);
+  assert.match(html, /b\.onclick = \(\) => src\.click\(\);/, 'a clone delegates to its sidebar button, so both route the same way');
   assert.match(html, /@media\(max-width:1000px\)\{[\s\S]*?\.mobnav\{display:flex/);
   // The pending count is mirrored, not recomputed.
   assert.match(html, /mirror\.textContent = badge\.textContent/);
@@ -304,4 +304,66 @@ test('every chart carries a label a screen reader can read', () => {
   }
   // The trend chart's label follows its tab and carries the figures.
   assert.match(html, /\$\('#trendChart'\)\.setAttribute\('aria-label',/);
+});
+
+// --- Real routes -------------------------------------------------------------
+//
+// "The sidebar looks like page navigation, but it jumps between sections of one
+// large document… The URL remained unchanged during navigation, limiting
+// bookmarking and sharing."
+
+const ROUTER = (() => {
+  const a = html.indexOf('const PAGES = {'), b = html.indexOf('function routeTo(');
+  return new Function(`${html.slice(a, b)}; return { PAGES, DEFAULT_PAGE, parseRoute, routeQuery };`)();
+})();
+
+test('every sidebar destination is a route, and an unknown one falls back', () => {
+  assert.deepStrictEqual(Object.keys(ROUTER.PAGES),
+    ['overview', 'applications', 'renewals', 'invoices', 'questions', 'rules', 'passwords']);
+  // The sidebar lists exactly those, in that order.
+  const nav = [...html.matchAll(/<button class="nav-item[^"]*" data-page="([a-z]+)"/g)].map(m => m[1]);
+  assert.deepStrictEqual(nav, Object.keys(ROUTER.PAGES), 'the nav and the router cannot list different places');
+
+  assert.strictEqual(ROUTER.parseRoute('#/invoices').page, 'invoices');
+  assert.strictEqual(ROUTER.parseRoute('#/nonsense').page, ROUTER.DEFAULT_PAGE);
+  assert.strictEqual(ROUTER.parseRoute('').page, ROUTER.DEFAULT_PAGE);
+  assert.strictEqual(ROUTER.parseRoute(null).page, ROUTER.DEFAULT_PAGE);
+  assert.strictEqual(ROUTER.parseRoute('#/applications').page, 'applications');
+  // A route carries the Applications filters.
+  const { page, params } = ROUTER.parseRoute('#/applications?q=aws&dept=Marketing&type=Apps');
+  assert.strictEqual(page, 'applications');
+  assert.deepStrictEqual([params.get('q'), params.get('dept'), params.get('type')], ['aws', 'Marketing', 'Apps']);
+  // Every page has a title and a one-line description.
+  for (const [name, p] of Object.entries(ROUTER.PAGES)) {
+    assert.ok(p.title && p.sub, `${name} names itself`);
+  }
+});
+
+test('each card declares its page, and the router only hides content', () => {
+  for (const [id, page] of [['kpis', 'overview'], ['trendCard', 'overview'], ['changeCard', 'overview'],
+                            ['appsCard', 'applications'], ['renewalsCard', 'renewals'],
+                            ['invoiceCard', 'invoices'], ['loginsCard', 'passwords']]) {
+    assert.match(html, new RegExp(`id="${id}"[^>]*data-page="[^"]*${page}`), `${id} belongs to ${page}`);
+  }
+  assert.match(html, /id="pendingCard" data-page="questions rules"/, 'one card can serve two routes');
+  // Scoped to main: the nav buttons carry data-page too, and hiding those hid
+  // the navigation itself.
+  assert.match(html, /document\.querySelectorAll\('main \[data-page\]'\)/);
+  assert.ok(!/document\.querySelectorAll\('\[data-page\]'\)\.forEach\(el =>/.test(html));
+});
+
+test('navigating writes history, and filters stay in the URL', () => {
+  assert.match(html, /if \(replace\) history\.replaceState\(null, '', hash\); else location\.hash = hash;/);
+  assert.match(html, /window\.addEventListener\('hashchange'/);
+  assert.match(html, /if \(routeApplied && \[\.\.\.params\.keys\(\)\]\.length\)\{ applyRouteParams\(params\); draw\(\); \}/,
+    'a pasted link sets filters; moving between pages leaves them alone');
+  assert.match(html, /if \(location\.hash !== hash\) history\.replaceState\(null, '', hash\);/,
+    'typing in a filter must not push a history entry per keystroke');
+  assert.match(html, /document\.title = `\$\{PAGES\[name\]\.title\} · Saras IT Spend`/);
+  // The initial route runs last: showPage reads `let` state declared further
+  // down the script, and calling it earlier died in the temporal dead zone,
+  // taking the whole dashboard with it.
+  const call = html.lastIndexOf('showPage(parseRoute(location.hash).page);');
+  assert.ok(call > html.indexOf('let loginRows'), 'the startup call sits after the state it reads');
+  assert.ok(call > html.indexOf('let charts'));
 });

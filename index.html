@@ -146,6 +146,7 @@
   select,.filters input,input[data-month],input[data-amount]{background:var(--panel);border:1px solid var(--line2);color:var(--txt);border-radius:8px;padding:7px 10px;font-size:12.5px;font-family:inherit}
   select:focus,input:focus,textarea:focus{outline:2px solid rgba(42,120,214,.35);outline-offset:1px;border-color:var(--accent)}
   .hidden{display:none}
+  .offpage{display:none!important}
   .foot{color:var(--faint);font-size:11.5px;text-align:center;padding:26px 0 8px}
   .mtd{font-size:10px;font-weight:600;background:var(--chip);color:var(--muted);border-radius:5px;padding:1px 5px;margin-left:5px;text-transform:none;letter-spacing:0}
   .pill{font-size:11px;padding:2px 8px;border-radius:20px;white-space:nowrap;font-weight:600}
@@ -336,14 +337,14 @@
   <div class="brand"><span class="mark">S</span>Saras IT Spend</div>
   <label class="side-search">🔍 <input id="sideSearch" placeholder="Search for apps" /><kbd>/</kbd></label>
   <div class="nav-sec">Discover</div>
-  <button class="nav-item active" data-goto="top"><span class="ico">▦</span>Overview</button>
-  <button class="nav-item" data-goto="appsCard"><span class="ico">▤</span>Applications</button>
-  <button class="nav-item" data-goto="renewalsCard"><span class="ico">📅</span>Renewals</button>
-  <button class="nav-item" data-goto="invoiceCard"><span class="ico">🧾</span>Invoices</button>
+  <button class="nav-item active" data-page="overview"><span class="ico">▦</span>Overview</button>
+  <button class="nav-item" data-page="applications"><span class="ico">▤</span>Applications</button>
+  <button class="nav-item" data-page="renewals"><span class="ico">📅</span>Renewals</button>
+  <button class="nav-item" data-page="invoices"><span class="ico">🧾</span>Invoices</button>
   <div class="nav-sec">Manage</div>
-  <button class="nav-item" data-goto="pendingCard"><span class="ico">❓</span>Needs your answer<span class="badge zero" id="pendingBadge">0</span></button>
-  <button class="nav-item" id="navRules"><span class="ico">⚙</span>Filing rules</button>
-  <button class="nav-item" data-goto="loginsCard"><span class="ico">🔑</span>Password</button>
+  <button class="nav-item" data-page="questions"><span class="ico">❓</span>Needs your answer<span class="badge zero" id="pendingBadge">0</span></button>
+  <button class="nav-item" data-page="rules" id="navRules"><span class="ico">⚙</span>Filing rules</button>
+  <button class="nav-item" data-page="passwords"><span class="ico">🔑</span>Password</button>
   <div class="side-foot">
     <div class="who" id="whoami"></div>
     <div class="sub"><span class="dot" id="syncDot"></span><span id="syncLabel">Connecting to SharePoint…</span></div>
@@ -353,8 +354,8 @@
 <nav class="mobnav" id="mobNav" aria-label="Sections"></nav>
 <header class="topbar" id="top">
   <div>
-    <h1>Expenses</h1>
-    <div class="sub">Apps, subscriptions and hardware · from the SharePoint sheet · all figures in $ (USD)</div>
+    <h1 id="pageTitle">Overview</h1>
+    <div class="sub" id="pageSub">Apps, subscriptions and hardware · from the SharePoint sheet · all figures in $ (USD)</div>
   </div>
   <div class="grow"></div>
   <button class="btn ghost maint-toggle" id="maintToggle" aria-expanded="false">⋯ Maintenance</button>
@@ -376,9 +377,9 @@
   <div id="loading" class="skeleton">Loading spend data from SharePoint…</div>
 
   <div id="dash" class="hidden">
-    <div class="kstrip" id="kpis"></div>
+    <div class="kstrip" id="kpis" data-page="overview"></div>
 
-    <div class="card" id="pendingCard" style="order:4">
+    <div class="card" id="pendingCard" data-page="questions rules" style="order:4">
       <h3>❓ Needs your answer</h3>
       <div class="cap">Invoices the sync would not file without asking — no rule names the sender, the vendor bills several rows and nothing in the invoice picks one, or nothing says which month it bills. Answer here or in your Slack DM: the file moves into its folder, the month is totalled and ticked, and the answer is remembered as a rule.</div>
       <div id="pendingStatus" class="cap" style="margin:8px 0"></div>
@@ -400,7 +401,7 @@
       </div>
     </div>
 
-    <div class="card" id="renewalsCard" style="order:5">
+    <div class="card" id="renewalsCard" data-page="renewals" style="order:5">
       <h3>📅 Upcoming Renewals</h3>
       <div class="cap">Yearly renewals in the next 6 months, and every monthly renewal in the current month, with expected cost (click a row for full detail)</div>
       <div class="tabs" id="renewalTabs">
@@ -410,7 +411,7 @@
       <div class="renewals" id="renewalsList"></div>
     </div>
 
-    <div class="card" id="trendCard" style="order:2">
+    <div class="card" id="trendCard" data-page="overview" style="order:2">
       <div class="card-head">
         <div>
           <h3>Monthly IT expenses</h3>
@@ -426,7 +427,7 @@
       <div id="forecastNote" class="forecast-note hidden"></div>
     </div>
 
-    <div class="card hidden" id="changeCard" style="order:3">
+    <div class="card hidden" id="changeCard" data-page="overview" style="order:3">
       <div class="card-head">
         <div>
           <h3>What changed</h3>
@@ -436,7 +437,7 @@
       <div id="changeList"></div>
     </div>
 
-    <div class="grid" style="order:6">
+    <div class="grid" data-page="overview" style="order:6">
       <div class="card">
         <h3>Spend by Billing Cycle</h3>
         <div class="cap">Monthly / Quarterly / Annual / One-time mix · actual spend to date</div>
@@ -449,14 +450,14 @@
       </div>
     </div>
 
-    <div class="card" style="order:7">
+    <div class="card" data-page="overview" style="order:7">
       <h3>🔮 Annual Run-Rate Projection</h3>
       <div class="cap">What each app costs per year at its current rate. Monthly apps use a trailing 3-month average (smooths volatile cloud/API metering); annual, half-yearly and quarterly charges are spread over their billing cycle rather than counted every month. One-time purchases and cancelled apps are excluded.</div>
       <div class="chartwrap sm"><canvas id="runrateChart" role="img" aria-label="Applications ranked by annualised run-rate"></canvas></div>
       <div id="runrateNote" class="cap" style="margin-top:10px"></div>
     </div>
 
-    <div class="card" id="invoiceCard" style="order:8">
+    <div class="card" id="invoiceCard" data-page="invoices" style="order:8">
       <h3>🧾 Invoice Checklist</h3>
       <div class="cap">Which invoices are actually on file, per app and per month, set against the months the sheet records a charge for. Click a cell to open that app's invoices.</div>
       <div class="tabs" id="invTabs">
@@ -489,7 +490,7 @@
       </div>
     </div>
 
-    <div class="card" id="loginsCard" style="order:9">
+    <div class="card" id="loginsCard" data-page="passwords" style="order:9">
       <h3>🔑 Passwords</h3>
       <div class="cap">The workbook's <b>Invoices mail id</b> sheet: where each app's invoices arrive, and the login used to fetch them. Passwords stay hidden until you reveal them.</div>
       <div class="filters">
@@ -509,7 +510,7 @@
       <div id="loginTable"></div>
     </div>
 
-    <div class="card" id="appsCard" style="order:3">
+    <div class="card" id="appsCard" data-page="applications" style="order:3">
       <div class="card-head">
         <div>
           <h3>Applications</h3>
@@ -1171,6 +1172,7 @@ function build(){
   renderTop(all.filter(r=>r.kind==='Apps'));
   renderRunRate(all.filter(r=>r.kind==='Apps'));
   setupTable(all);
+  if (!routeApplied){ routeApplied = true; applyRouteParams(parseRoute(location.hash).params); draw(); }
   // The checklist joins the archive to the sheet, so it can only be drawn once
   // setupTable has populated ALL_MONTHS and window.PIVOTED.
   drawInvoices();
@@ -1756,6 +1758,12 @@ function draw(){
   window.PIVOTED = pivoted;
   drawOverview(pivoted, all);
   renderChange();
+  // Keep the address bar honest about what is on screen, without a history
+  // entry per keystroke: replaceState does not fire hashchange.
+  if (currentPage === 'applications' && routeApplied){
+    const hash = `#/applications${routeQuery()}`;
+    if (location.hash !== hash) history.replaceState(null, '', hash);
+  }
 }
 
 /* ---------------- applications overview ---------------- */
@@ -1852,6 +1860,89 @@ function setAppsTab(tab){
 }
 $('#appsTabs').querySelectorAll('button').forEach(b => b.onclick = () => setAppsTab(b.dataset.tab));
 
+/* ---------------- routing ----------------
+   The sidebar looked like page navigation but scrolled one long document, and
+   the URL never changed: nothing could be bookmarked or sent to a colleague,
+   and Back left the dashboard entirely. Each destination is now a route —
+   #/applications, #/invoices — with the Applications filters carried in the
+   query so a narrowed view is shareable too.
+
+   Hash routes rather than paths: the app is one static file behind an auth
+   gate, and a real path would need a rewrite for every route plus a server
+   round trip to show a section that is already loaded. */
+const PAGES = {
+  overview:     { title: 'Overview',           sub: 'Actual spend, what moved it, and where the money goes · all figures in $ (USD)' },
+  applications: { title: 'Applications',       sub: 'Every app the sheet tracks: what it costs, what it runs at, when it renews, who owns it' },
+  renewals:     { title: 'Renewals',           sub: 'What renews next, what it is expected to cost, and what still needs pricing' },
+  invoices:     { title: 'Invoices',           sub: 'Which recorded charges have an invoice on file, and which do not' },
+  questions:    { title: 'Needs your answer',  sub: 'Invoices the sync would not file without asking' },
+  rules:        { title: 'Filing rules',       sub: 'Which row an invoice belongs to, and how the sync decides' },
+  passwords:    { title: 'Passwords',          sub: 'Where each app sends its invoices, and the login used to fetch them' },
+};
+const DEFAULT_PAGE = 'overview';
+let currentPage = null, routeApplied = false;
+
+// "#/applications?q=aws&dept=Marketing" -> { page, params }
+function parseRoute(hash){
+  const raw = String(hash || '').replace(/^#\/?/, '');
+  const [name, query] = raw.split('?');
+  const page = PAGES[name] ? name : DEFAULT_PAGE;
+  return { page, params: new URLSearchParams(query || '') };
+}
+// The Applications filters, so a narrowed view survives a reload and a paste.
+function routeQuery(){
+  const q = new URLSearchParams();
+  const search = ($('#fSearch') || {}).value || '';
+  const dept = ($('#fDept') || {}).value || '';
+  const type = ($('#fType') || {}).value || '';
+  if (search) q.set('q', search);
+  if (dept) q.set('dept', dept);
+  if (type) q.set('type', type);
+  const s = q.toString();
+  return s ? '?' + s : '';
+}
+function routeTo(page, { replace } = {}){
+  const hash = `#/${page}${page === 'applications' ? routeQuery() : ''}`;
+  if (location.hash === hash) { showPage(page); return; }
+  if (replace) history.replaceState(null, '', hash); else location.hash = hash;
+}
+function showPage(page){
+  const name = PAGES[page] ? page : DEFAULT_PAGE;
+  currentPage = name;
+  // Scoped to the content: the nav buttons carry data-page too, and hiding
+  // those hid the navigation itself.
+  document.querySelectorAll('main [data-page]').forEach(el => {
+    el.classList.toggle('offpage', !el.dataset.page.split(' ').includes(name));
+  });
+  document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === name));
+  syncMobNav();
+  $('#pageTitle').textContent = PAGES[name].title;
+  $('#pageSub').textContent = PAGES[name].sub;
+  document.title = `${PAGES[name].title} · Saras IT Spend`;
+  // A chart sized while its page was hidden has no width of its own to keep.
+  for (const id of Object.keys(charts)) { try { charts[id].resize(); } catch {} }
+  if (name === 'passwords' && !loginRows && !loginLoading) loadLogins(false);
+  if (name === 'rules' && $('#rulesEditor') && $('#rulesEditor').classList.contains('hidden')) $('#rulesBtn').click();
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+window.addEventListener('hashchange', () => {
+  const { page, params } = parseRoute(location.hash);
+  // A link that names filters sets them — a pasted URL only changes the hash
+  // when the app is already open, so nothing else would apply them. Moving
+  // between pages carries no query and leaves what someone typed alone.
+  if (routeApplied && [...params.keys()].length){ applyRouteParams(params); draw(); }
+  showPage(page);
+});
+
+// Filters land in the URL, and a shared URL restores them.
+function applyRouteParams(params){
+  const set = (sel, v) => { const el = $(sel); if (el && v != null) el.value = v; };
+  set('#fSearch', params.get('q') || '');
+  set('#sideSearch', params.get('q') || '');
+  set('#fDept', params.get('dept') || '');
+  set('#fType', params.get('type') || '');
+}
+
 /* ---------------- sidebar, and the same nav for narrow screens ---------------- */
 // Cloned from the sidebar rather than written out again: a destination added
 // to one is a destination in both, and they cannot drift apart.
@@ -1870,14 +1961,15 @@ function buildMobNav(){
       n.dataset.mirror = 'pending';
       b.appendChild(n);
     }
-    b.onclick = () => { src.click(); syncMobNav(); };
+    b.onclick = () => src.click();
     nav.appendChild(b);
   });
 }
 function syncMobNav(){
   const srcs = [...document.querySelectorAll('.side .nav-item')];
-  [...$('#mobNav').children].forEach((b, i) => b.classList.toggle('active', !!srcs[i] && srcs[i].classList.contains('active')));
-  const badge = $('#pendingBadge'), mirror = $('#mobNav').querySelector('[data-mirror="pending"]');
+  const nav = $('#mobNav'); if (!nav) return;
+  [...nav.children].forEach((b, i) => b.classList.toggle('active', !!srcs[i] && srcs[i].classList.contains('active')));
+  const badge = $('#pendingBadge'), mirror = nav.querySelector('[data-mirror="pending"]');
   if (badge && mirror){ mirror.textContent = badge.textContent; mirror.classList.toggle('zero', badge.classList.contains('zero')); }
 }
 $('#maintToggle').onclick = () => {
@@ -1885,24 +1977,15 @@ $('#maintToggle').onclick = () => {
   $('#maintToggle').setAttribute('aria-expanded', String(open));
 };
 
-document.querySelectorAll('.nav-item[data-goto]').forEach(b => b.onclick = () => {
-  const el = document.getElementById(b.dataset.goto);
-  if (b.dataset.goto === 'loginsCard' && !loginRows) loadLogins(false);
-  if (el) el.scrollIntoView({ behavior: 'smooth', block: b.dataset.goto === 'top' ? 'start' : 'start' });
-  document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x === b));
-  syncMobNav();
-});
+document.querySelectorAll('.nav-item[data-page]').forEach(b => b.onclick = () => routeTo(b.dataset.page));
 buildMobNav();
-$('#navRules').onclick = () => {
-  document.getElementById('pendingCard').scrollIntoView({ behavior: 'smooth' });
-  if ($('#rulesEditor').classList.contains('hidden')) $('#rulesBtn').click();
-};
 $('#sideSearch').oninput = () => {
   $('#fSearch').value = $('#sideSearch').value;
   $('#fSearch').dispatchEvent(new Event('input'));
   if (appsTab !== 'overview') setAppsTab('overview');
+  if (currentPage !== 'applications') routeTo('applications');
 };
-$('#sideSearch').onfocus = () => document.getElementById('appsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+$('#sideSearch').onfocus = () => { if (currentPage !== 'applications') routeTo('applications'); };
 document.addEventListener('keydown', e => {
   if (e.key === '/' && !/input|textarea|select/i.test(document.activeElement.tagName)) { e.preventDefault(); $('#sideSearch').focus(); }
 });
@@ -3362,6 +3445,12 @@ $('#rulesSave').onclick = async () => {
   }
 };
 loadPending(true);
+
+// Last, deliberately: showPage reads state (`charts`, `loginRows`) that `let`
+// declares further down this script, and calling it any earlier dies in the
+// temporal dead zone — taking the rest of the script, and so the whole
+// dashboard, with it.
+showPage(parseRoute(location.hash).page);
 </script>
 </body>
 </html>
