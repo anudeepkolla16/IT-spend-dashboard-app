@@ -832,6 +832,24 @@ api/
   against the one before it. On the monthly chart the line is solid to the last closed month and
   dashed after it, with the basis in the tooltip — a solid line falling to zero in a future month read
   as a collapse in spending rather than as months nobody has billed yet.
+- **Contract status, billing status and forecast eligibility are kept apart.** The sheet records a
+  cancellation in the renewal column in its own words — Hex and windsurf both read "cancled after
+  june" — and nothing was reading it, so both were reported *Active* with a monthly run-rate.
+  `isCancelled` reads that column; a cancelled row is **Cancelled** in the table and carries no
+  run-rate. An app first charged in the current month is **active**, not lapsed: three empty complete
+  months before it existed are not evidence of a lapse (Zapier). "Active subscriptions" now counts
+  exactly the apps carrying a run-rate — the same set the forecast projects — so the headline, the
+  run-rate and the forecast describe one population instead of three (65 / 58 / 42).
+- **A renewal total says how much of itself is known.** Four renewals totalling `$3,174` read as the
+  whole exposure while one of them had never been charged and carried no figure, so the heading is
+  "N renewals · $X known value, M still to price".
+- **Below 1000px the sidebar is hidden, so a compact nav replaces it** — `buildMobNav` clones the
+  sidebar's own buttons (and mirrors the open-questions count), so a destination added to one is a
+  destination in both. The four archive-maintenance actions fold behind **⋯ Maintenance** at those
+  widths, KPI tiles go to one column below 560px, and wide tables scroll inside their own card with
+  the app column pinned. `min-width:0` on cards and grid items is what stops a chart canvas holding
+  a card — and the page — wider than the window after a resize; it was 726px of document against
+  390px of window.
 - **The Forecast tab is an estimate from the sheet, not a trend line.** The straight line it used
   to draw through every month's total was dragged towards zero by the part-billed current month
   and the budgeted months after it. Now (`buildForecast` in `index.html`): actuals are shown for

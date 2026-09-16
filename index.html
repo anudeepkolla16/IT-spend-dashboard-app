@@ -154,7 +154,7 @@
   .appcell .sub{color:var(--faint);font-size:11px;margin-top:1px}
   .stage{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12px}
   .stage::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor}
-  .stage.active{color:var(--good)} .stage.lapsed{color:var(--danger)} .stage.none{color:var(--faint)} .stage.once{color:var(--violet)}
+  .stage.active{color:var(--good)} .stage.lapsed{color:var(--danger)} .stage.none{color:var(--faint)} .stage.once{color:var(--violet)} .stage.ended{color:var(--muted)}
   .weeks{font-size:11px;font-weight:600;margin-top:1px}
   .weeks.ok{color:var(--good)} .weeks.soon{color:var(--warn)} .weeks.over{color:var(--danger)} .weeks.mute{color:var(--faint)}
   .ov th.sorted::after{content:' ↓';color:var(--accent)}
@@ -273,13 +273,46 @@
   .appcard-nums{display:flex;gap:20px;margin-top:8px}
   .appcard-nums .cap{margin-bottom:2px;display:block}
 
+  /* The section nav for every width where the sidebar is hidden. Built from the
+     sidebar's own buttons so the two can never list different places. */
+  .mobnav{display:none}
+  .maint-toggle{display:none}
+
+  /* A grid or flex item defaults to min-width:auto, so a canvas that has not
+     been told to shrink yet keeps its old width and drags the card — and the
+     page — wider than the window. It showed up on resize: 390px of window
+     against 726px of document. */
+  .card,.grid>*,.kstrip>*{min-width:0}
+  canvas{max-width:100%}
+  /* Wide content scrolls inside its own box, never the page. */
+  #invChecklist,#appsOverview,.loginwrap{overflow-x:auto}
+
   @media(max-width:1200px){.kstrip{grid-template-columns:1fr 1fr 1fr}.ktile.donut{grid-column:span 2}}
-  @media(max-width:1000px){.side{display:none}.grid{grid-template-columns:1fr}}
+  @media(max-width:1000px){
+    .side{display:none}.grid{grid-template-columns:1fr}
+    .mobnav{display:flex;gap:6px;overflow-x:auto;position:sticky;top:0;z-index:30;background:rgba(243,244,247,.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:9px 14px;border-bottom:1px solid var(--line);scrollbar-width:none}
+    .mobnav::-webkit-scrollbar{display:none}
+    .mobnav button{flex:0 0 auto;background:var(--panel);border:1px solid var(--line2);color:var(--muted);border-radius:999px;padding:6px 13px;font:600 12.5px inherit;font-family:inherit;cursor:pointer;white-space:nowrap}
+    .mobnav button.active{background:var(--accent-soft);color:var(--accent-ink);border-color:transparent}
+    .mobnav .badge{margin-left:6px;background:var(--warn-soft);color:var(--warn);border-radius:9px;padding:0 5px;font-size:11px}
+    .mobnav .badge.zero{display:none}
+    .topbar{position:static;padding-top:12px}
+    .topbar h1{font-size:20px}
+    /* The four maintenance actions are for the person tidying the archive, not
+       for the person reading the numbers: folded away until asked for. */
+    .maint-toggle{display:inline-flex;order:3}
+    .toolbar{order:4;flex-basis:100%;display:none}
+    .toolbar.open{display:flex}
+  }
   @media(max-width:700px){
     .kstrip{grid-template-columns:1fr 1fr}.ktile.donut{grid-column:span 2}
     .tblwrap{display:none}
     .cardlist.on{display:flex;flex-direction:column;gap:8px}
-    main,.topbar{padding-left:14px;padding-right:14px}
+    main,.topbar,.mobnav{padding-left:14px;padding-right:14px}
+  }
+  @media(max-width:560px){
+    .kstrip{grid-template-columns:1fr}.ktile.donut{grid-column:auto}
+    .ktiles-actions{grid-template-columns:1fr}
   }
 </style>
 </head>
@@ -303,13 +336,15 @@
   </div>
 </aside>
 <div class="content">
+<nav class="mobnav" id="mobNav" aria-label="Sections"></nav>
 <header class="topbar" id="top">
   <div>
     <h1>Expenses</h1>
     <div class="sub">Apps, subscriptions and hardware · from the SharePoint sheet · all figures in $ (USD)</div>
   </div>
   <div class="grow"></div>
-  <div class="toolbar">
+  <button class="btn ghost maint-toggle" id="maintToggle" aria-expanded="false">⋯ Maintenance</button>
+  <div class="toolbar" id="toolbar">
     <button class="btn ghost" id="fixTotalsBtn">🧮 Check Totals</button>
     <button class="btn ghost" id="periodsBtn" title="Re-read every archived invoice's billing period and re-file the ones that were filed by their arrival date">🗓 Recheck Periods</button>
     <button class="btn ghost" id="amountsBtn">💰 Update Amounts</button>
@@ -710,9 +745,16 @@ function drawRenewalsTab(){
 
   const monthName = new Date().toLocaleDateString('en-US',{month:'long',year:'numeric'});
   const total = items.reduce((s,x)=>s+(x.cost||0),0);
+  // An expected total is only as complete as the charges behind it. Four
+  // renewals totalling $3,174 read as the whole exposure while one of them had
+  // never been charged and carried no figure at all.
+  const unpriced = items.filter(x => !x.cost).length;
+  const value = total
+    ? ` · ${fmtUSD(total)} known value${unpriced ? `, ${unpriced} still to price` : ''}`
+    : (unpriced ? ` · ${unpriced} with no charge on record to price ${unpriced===1?'it':'them'}` : '');
   const head = renewalsTab === 'monthly'
-    ? `${items.length} renewal${items.length===1?'':'s'} in ${monthName}${total?` · ${fmtUSD(total)} expected`:''}`
-    : `${items.length} renewal${items.length===1?'':'s'} in the next 6 months${total?` · ${fmtUSD(total)} expected`:''}`;
+    ? `${items.length} renewal${items.length===1?'':'s'} in ${monthName}${value}`
+    : `${items.length} renewal${items.length===1?'':'s'} in the next 6 months${value}`;
 
   el.innerHTML = `<div class="cap" style="padding:2px 4px 8px">${head}</div>` + items.map(x=>{
     const past = x.days < 0;
@@ -1176,6 +1218,12 @@ function monthsBetween(fromKey, toKey){
 //            information there is), spread over the cycle. Overdue by more than
 //            a cycle and a month, it is gone.
 // A one-time purchase has no run-rate.
+// The sheet records a cancellation in the renewal column, in its own words:
+// Hex and windsurf both read "cancled after june". A row saying that was still
+// reported Active with a monthly run-rate, because nothing looked at it.
+const CANCELLED_RE = /\bcanc\w*l\w*d\b|\bterminated\b|\bended\b/i;
+const isCancelled = (renewalText) => CANCELLED_RE.test(String(renewalText || ''));
+
 function trailingRunRateByApp(apps, today){
   const todayKey = today || realMonthKey(0);
   const window = [addMonths(todayKey, -3), addMonths(todayKey, -2), addMonths(todayKey, -1)];
@@ -1187,11 +1235,22 @@ function trailingRunRateByApp(apps, today){
   return Object.entries(byApp).map(([name, rows]) => {
     rows.sort((a, b) => a.month.localeCompare(b.month));
     const latest = rows[rows.length - 1];
+    if (isCancelled(latest.renewalDate)) return null; // the sheet says it is over
     const cm = cycleMonths(latest.cycle);
     if (!cm) return null; // one-time purchase
     const at = m => rows.find(r => r.month === m);
     const charged = window.filter(m => at(m) && at(m).usd > 0).length;
     const monthlyLabel = cm <= 1;
+    // Charged for the first time this month: three empty complete months are
+    // not evidence of a lapse, they are evidence it had not started. Zapier's
+    // only charge is this month's, and it was being reported "not charged
+    // lately" on the strength of the months before it existed.
+    // Monthly only: an annual bill that landed this month is still spread over
+    // its cycle by the branch below, not read as a monthly cost.
+    const thisMonth = at(todayKey);
+    if (monthlyLabel && !charged && thisMonth && thisMonth.usd > 0) {
+      return { name, dept: latest.dept, m: thisMonth.usd, cycle: latest.cycle, pattern: 'monthly', basis: [todayKey], latest: todayKey, newThisMonth: true };
+    }
     if (charged >= 2 || (monthlyLabel && charged >= 1)) {
       const span = window.filter(m => m >= rows[0].month);
       const avg = span.reduce((s, m) => s + ((at(m) || {}).usd || 0), 0) / (span.length || 1);
@@ -1215,10 +1274,17 @@ function renderKPIs(all){
   const toDate = actualSpend(all, thisKey);
   const planned = plannedSpend(all, thisKey);
   const thisMonth = mtdSpend(all, thisKey);
-  const rr = monthlyRunRate(apps);
+  // One population, counted once. "Active" used to mean "charged at some point
+  // in the past", so the headline said 65 while the run-rate beneath it was
+  // built from 58 and the forecast from 42, with nothing explaining the drop.
+  // Active now means exactly the apps that carry a run-rate — the same set the
+  // forecast projects — so the three figures describe the same thing.
+  const rates = trailingRunRateByApp(apps);
+  const rr = rates.reduce((s, x) => s + x.m, 0);
   const annual = rr*12;
-  const activeApps = latestActualRowsPerApp(apps).length;
+  const activeApps = rates.length;
   const tracked = (window.SHEET_ROWS || []).filter(a => a.kind !== 'Laptops').length || new Set(apps.map(a=>a.name)).size;
+  const endedApps = (window.SHEET_ROWS || []).filter(a => a.kind !== 'Laptops' && isCancelled(a.renewalDate)).length;
   const lapTotal = actualSpend(laps, thisKey);
   const billedMonths = months.filter(m => m <= thisKey).length;
   // The month in progress is compared against nothing: a part-billed September
@@ -1238,8 +1304,8 @@ function renderKPIs(all){
       <div class="kmini"><div class="lab">Monthly run-rate</div><div class="val">${fmtUSD(rr)}</div></div>
     </div>
     <div class="ktile">
-      <div><div class="lab">Active subscriptions</div><div class="val">${activeApps}</div><div class="hint">of ${tracked} apps tracked</div></div>
-      <div class="kmini"><div class="lab">Not charged recently</div><div class="val">${Math.max(0, tracked - activeApps)}</div></div>
+      <div><div class="lab">Active subscriptions</div><div class="val">${activeApps}</div><div class="hint">of ${tracked} apps tracked · the same set the run-rate and forecast use${endedApps?` · ${endedApps} cancelled in the sheet`:''}</div></div>
+      <div class="kmini"><div class="lab">Not charged lately</div><div class="val">${Math.max(0, tracked - activeApps - endedApps)}</div></div>
     </div>
     <div class="ktile">
       <div><div class="lab">Spend · ${monthLabel(thisKey)} <span class="mtd">month to date</span></div><div class="val">${fmtUSD(thisMonth)}</div><div class="hint">${closedLine}</div></div>
@@ -1258,6 +1324,12 @@ function renderKPIs(all){
 }
 
 function destroy(id){ if(charts[id]){charts[id].destroy(); delete charts[id];} }
+// Chart.js resizes on its own, but only once its container has already been
+// laid out smaller — and the container could not get smaller while the canvas
+// was holding it open. With min-width:0 in place this keeps them in step.
+window.addEventListener('resize', () => {
+  for (const id of Object.keys(charts)) { try { charts[id].resize(); } catch {} }
+});
 Chart.defaults.color = '#6b7385';
 Chart.defaults.borderColor = 'rgba(21,26,36,.08)';
 Chart.defaults.font.family = "'Inter','Segoe UI',system-ui,Arial";
@@ -1663,9 +1735,17 @@ function drawOverview(pivoted, all){
     const lastC = addMonths(todayKey, -1), prevC = addMonths(todayKey, -2);
     const change = rr && rr.pattern === 'monthly' && g[prevC] > 0 ? ((g[lastC] || 0) - g[prevC]) / g[prevC] * 100 : null;
     const once = cycleMonths(g.cat) === 0;
-    let stage = rr ? ['active', 'Active'] : once ? ['once', 'One-time'] : months.length ? ['lapsed', 'Not charged lately'] : ['none', 'Never charged'];
+    // Three states, kept apart: what the contract says (cancelled), what the
+    // charges say (charged lately or not), and whether it feeds the run-rate.
+    const cancelled = isCancelled(g.renewalDate);
+    let stage = cancelled ? ['ended', 'Cancelled']
+      : rr ? ['active', 'Active']
+      : once ? ['once', 'One-time']
+      : months.length ? ['lapsed', 'Not charged lately'] : ['none', 'Never charged'];
     if (g.kind === 'Laptops') stage = ['once', 'Hardware'];
-    const billed = rr && rr.pattern === 'monthly' && cycleMonths(g.cat) > 1 ? ' · charged monthly' : '';
+    const billed = cancelled ? ' · cancelled in the sheet'
+      : rr && rr.newThisMonth ? ' · first charged this month'
+      : rr && rr.pattern === 'monthly' && cycleMonths(g.cat) > 1 ? ' · charged monthly' : '';
     return { g, annual, monthly: rr ? rr.m : (once ? 0 : null), change, last, billed, renew: weeksLeft(g.renewalDate), stage };
   });
   const key = ovSort.key, dir = ovSort.dir;
@@ -1706,13 +1786,47 @@ function setAppsTab(tab){
 }
 $('#appsTabs').querySelectorAll('button').forEach(b => b.onclick = () => setAppsTab(b.dataset.tab));
 
-/* ---------------- sidebar ---------------- */
+/* ---------------- sidebar, and the same nav for narrow screens ---------------- */
+// Cloned from the sidebar rather than written out again: a destination added
+// to one is a destination in both, and they cannot drift apart.
+function buildMobNav(){
+  const nav = $('#mobNav');
+  nav.innerHTML = '';
+  document.querySelectorAll('.side .nav-item').forEach(src => {
+    const b = document.createElement('button');
+    b.textContent = src.textContent.replace(/\d+$/, '').trim();
+    b.className = src.classList.contains('active') ? 'active' : '';
+    const badge = src.querySelector('.badge');
+    if (badge){
+      const n = document.createElement('span');
+      n.className = 'badge' + (badge.classList.contains('zero') ? ' zero' : '');
+      n.textContent = badge.textContent;
+      n.dataset.mirror = 'pending';
+      b.appendChild(n);
+    }
+    b.onclick = () => { src.click(); syncMobNav(); };
+    nav.appendChild(b);
+  });
+}
+function syncMobNav(){
+  const srcs = [...document.querySelectorAll('.side .nav-item')];
+  [...$('#mobNav').children].forEach((b, i) => b.classList.toggle('active', !!srcs[i] && srcs[i].classList.contains('active')));
+  const badge = $('#pendingBadge'), mirror = $('#mobNav').querySelector('[data-mirror="pending"]');
+  if (badge && mirror){ mirror.textContent = badge.textContent; mirror.classList.toggle('zero', badge.classList.contains('zero')); }
+}
+$('#maintToggle').onclick = () => {
+  const open = $('#toolbar').classList.toggle('open');
+  $('#maintToggle').setAttribute('aria-expanded', String(open));
+};
+
 document.querySelectorAll('.nav-item[data-goto]').forEach(b => b.onclick = () => {
   const el = document.getElementById(b.dataset.goto);
   if (b.dataset.goto === 'loginsCard' && !loginRows) loadLogins(false);
   if (el) el.scrollIntoView({ behavior: 'smooth', block: b.dataset.goto === 'top' ? 'start' : 'start' });
   document.querySelectorAll('.nav-item').forEach(x => x.classList.toggle('active', x === b));
+  syncMobNav();
 });
+buildMobNav();
 $('#navRules').onclick = () => {
   document.getElementById('pendingCard').scrollIntoView({ behavior: 'smooth' });
   if ($('#rulesEditor').classList.contains('hidden')) $('#rulesBtn').click();
@@ -3006,7 +3120,7 @@ function renderPending(){
   const apps = pendingData.apps || [];
   const monthLabel = m => { if (!m) return ''; const [y, mm] = m.split('-'); return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(mm)-1] + '-' + y.slice(2); };
   const badge = $('#pendingBadge');
-  if (badge) { badge.textContent = items.length; badge.classList.toggle('zero', !items.length); }
+  if (badge) { badge.textContent = items.length; badge.classList.toggle('zero', !items.length); syncMobNav(); }
   $('#pendingIgnoreAll').classList.toggle('hidden', !items.length);
   $('#pendingIgnoreAll').textContent = `✕ Ignore all${items.length > 1 ? ` (${items.length})` : ''}`;
   status.textContent = items.length

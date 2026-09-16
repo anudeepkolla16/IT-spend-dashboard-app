@@ -135,3 +135,109 @@ test('the spend chart is solid to the last closed month and dashed after it', ()
   // The Forecast tab's own actual series is indexed over its own months.
   assert.match(html, /line\('Apps spend \(actual\)'[^\n]*, true\)/);
 });
+
+// --- D. status, charges and forecast eligibility are three different things --
+//
+// The review found windsurf and Hex reported Active with a monthly run-rate
+// while the sheet's renewal column read "cancled after june"; Zapier reported
+// "not charged lately" with a charge this month; and the headline counted 65
+// active subscriptions while the run-rate under it was built from 58 and the
+// forecast from 42.
+
+const S = lift(['isCancelled', 'trailingRunRateByApp', 'monthlyRunRate'],
+  '// The sheet records a cancellation in the renewal column',
+  '\nfunction renderKPIs(',
+  `const realMonthKey = () => '${TODAY}';
+   function addMonths(key, n){ const [y,m] = key.split('-').map(Number); const d = new Date(y, m-1+n, 1); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+   function monthsBetween(a,b){ const [fy,fm]=a.split('-').map(Number), [ty,tm]=b.split('-').map(Number); return (ty-fy)*12+(tm-fm); }
+   function cycleMonths(c){ c=String(c||'Monthly').toLowerCase(); if(c.includes('one'))return 0; const n=c.match(/(\\d+)\\s*year/); if(n)return +n[1]*12; if(c.includes('half'))return 6; if(c.includes('quarter'))return 3; if(c.includes('year')||c.includes('annual'))return 12; return 1; }`);
+
+test('the sheet\'s own words for a cancellation are read', () => {
+  for (const text of ['cancled after june', 'Cancled after june', 'cancelled', 'Canceled 1 Aug', 'terminated', 'ended in June']) {
+    assert.strictEqual(S.isCancelled(text), true, `"${text}" is a cancellation`);
+  }
+  for (const text of ['', null, '1st of every month', '9/19/2027', '2026-09-19', 'monthly']) {
+    assert.strictEqual(S.isCancelled(text), false, `"${text}" is not`);
+  }
+});
+
+const app = (name, month, usd, cycle, renewalDate) => ({ name, month, usd, cycle: cycle || 'Monthly', dept: 'IT', renewalDate: renewalDate || '' });
+
+test('a cancelled subscription carries no run-rate, whatever its charges say', () => {
+  const rows = [
+    app('windsurf', '2026-06', 255, 'Monthly', 'Cancled after june'),
+    app('windsurf', '2026-07', 255, 'Monthly', 'Cancled after june'),
+    app('windsurf', '2026-08', 255, 'Monthly', 'Cancled after june'),
+    app('Hex', '2026-07', 159.38, 'Monthly', 'cancled after june'),
+    app('Hex', '2026-08', 159.38, 'Monthly', 'cancled after june'),
+    app('Adobe', '2026-07', 37.16), app('Adobe', '2026-08', 37.16),
+  ];
+  const by = Object.fromEntries(S.trailingRunRateByApp(rows, TODAY).map(x => [x.name, x]));
+  assert.ok(!by['windsurf'], 'three months of charges do not make a cancelled app active');
+  assert.ok(!by['Hex']);
+  assert.ok(by['Adobe'], 'an app with no cancellation note is unaffected');
+  // Adobe started in July, so it averages over the two months it has run.
+  assert.strictEqual(S.monthlyRunRate(rows), 37.16, 'the run-rate is only the live ones');
+});
+
+test('an app first charged this month is active, not lapsed', () => {
+  // Zapier: nothing in the three complete months because it had not started.
+  const zapier = S.trailingRunRateByApp([app('Zapier', '2026-09', 31.86)], TODAY);
+  assert.strictEqual(zapier.length, 1);
+  assert.strictEqual(zapier[0].m, 31.86);
+  assert.strictEqual(zapier[0].newThisMonth, true);
+  assert.deepStrictEqual(zapier[0].basis, [TODAY]);
+  // An annual bill landing this month is still spread over its cycle.
+  const sprinto = S.trailingRunRateByApp([app('Sprinto', '2026-09', 25000, 'Annual')], TODAY);
+  assert.strictEqual(sprinto[0].pattern, 'cycle');
+  assert.strictEqual(Math.round(sprinto[0].m), Math.round(25000 / 12));
+  assert.ok(!sprinto[0].newThisMonth);
+  // An app genuinely not charged for three complete months is still lapsed.
+  assert.deepStrictEqual(S.trailingRunRateByApp([app('Gone', '2026-05', 31.86)], TODAY), []);
+});
+
+test('active, run-rate and forecast describe one population', () => {
+  assert.match(html, /const rates = trailingRunRateByApp\(apps\);/);
+  assert.match(html, /const rr = rates\.reduce\(\(s, x\) => s \+ x\.m, 0\);/);
+  assert.match(html, /const activeApps = rates\.length;/, 'active is exactly the set carrying a run-rate');
+  assert.match(html, /the same set the run-rate and forecast use/);
+  assert.match(html, /cancelled in the sheet/);
+  assert.match(html, /\['ended', 'Cancelled'\]/, 'the table separates contract status from billing status');
+  assert.match(html, /first charged this month/);
+});
+
+// --- F. a renewal total says how much of itself is known ---------------------
+
+test('the renewal total says how many renewals still need pricing', () => {
+  assert.match(html, /const unpriced = items\.filter\(x => !x\.cost\)\.length;/);
+  assert.match(html, /known value\$\{unpriced \? `, \$\{unpriced\} still to price` : ''\}/);
+  assert.match(html, /with no charge on record to price/);
+  assert.ok(!/\$\{fmtUSD\(total\)\} expected/.test(html), 'an unqualified "expected" total is gone');
+});
+
+// --- E. the sidebar is hidden below 1000px; something has to replace it ------
+
+test('a compact nav is cloned from the sidebar, so the two cannot list different places', () => {
+  assert.match(html, /<nav class="mobnav" id="mobNav" aria-label="Sections"><\/nav>/);
+  assert.match(html, /document\.querySelectorAll\('\.side \.nav-item'\)\.forEach\(src => \{/,
+    'built from the sidebar itself, never a second hand-written list');
+  assert.match(html, /b\.onclick = \(\) => \{ src\.click\(\); syncMobNav\(\); \};/);
+  assert.match(html, /@media\(max-width:1000px\)\{[\s\S]*?\.mobnav\{display:flex/);
+  // The pending count is mirrored, not recomputed.
+  assert.match(html, /mirror\.textContent = badge\.textContent/);
+  assert.match(html, /badge\.classList\.toggle\('zero', !items\.length\); syncMobNav\(\);/);
+});
+
+test('nothing but the page itself is allowed to be wider than the window', () => {
+  // 390px of window against 726px of document, after a resize: a canvas kept
+  // its old width because min-width:auto let it hold the card open.
+  assert.match(html, /\.card,\.grid>\*,\.kstrip>\*\{min-width:0\}/);
+  assert.match(html, /canvas\{max-width:100%\}/);
+  assert.match(html, /#invChecklist,#appsOverview,\.loginwrap\{overflow-x:auto\}/);
+  assert.match(html, /charts\[id\]\.resize\(\)/, 'charts follow the window down as well as up');
+  // One column of KPI tiles on a phone, not two-plus-one.
+  assert.match(html, /@media\(max-width:560px\)\{\s*\.kstrip\{grid-template-columns:1fr\}/);
+  // The archive-maintenance actions fold away on the widths that need the room.
+  assert.match(html, /\.maint-toggle\{display:inline-flex/);
+  assert.match(html, /\.toolbar\{order:4;flex-basis:100%;display:none\}/);
+});
