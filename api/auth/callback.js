@@ -49,10 +49,26 @@ module.exports = async (req, res) => {
     const email = String(claims.preferred_username || claims.email || '').toLowerCase().trim();
     const name = claims.name || email;
 
+    // Two different refusals wearing one message. "Nobody is on the list" and
+    // "you are not on the list" need different things done about them, and the
+    // page said neither, so a missing ALLOWED_EMAILS looked exactly like a
+    // misspelled address. Nothing was logged either, leaving the owner to guess
+    // from the other end. Both are named now, and both leave a line in the
+    // runtime logs — the address alone, which is already on the refused
+    // person's own screen, never the list itself.
     const allowed = (ALLOWED_EMAILS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-    if (!allowed.length || !allowed.includes(email)) {
-      return htmlError(res, 403, `Signed in as <b>${email}</b>, but this account isn't on the dashboard's access list. Ask the dashboard owner to add you.`);
+    if (!allowed.length) {
+      console.warn(`auth: refused ${email} — ALLOWED_EMAILS is empty on this deployment`);
+      return htmlError(res, 403, `Signed in as <b>${email}</b>, but this deployment has no access list at all: <code>ALLOWED_EMAILS</code> is empty.
+        Nobody can sign in until it is set in Vercel <b>and the app redeployed</b> — env vars are read at deploy time, so setting one changes nothing on its own.`);
     }
+    if (!allowed.includes(email)) {
+      console.warn(`auth: refused ${email} — not among the ${allowed.length} addresses this deployment allows`);
+      return htmlError(res, 403, `Signed in as <b>${email}</b>, but that address is not on the dashboard's access list (${allowed.length} on it).
+        Microsoft signs you in under that exact address, so that is the string that has to be on the list — an alias or a differently spelled
+        address of the same mailbox will not match. Ask the dashboard owner to add it, and to redeploy afterwards.`);
+    }
+    console.log(`auth: signed in ${email}`);
 
     const session = sign({ email, name, exp: Date.now() + SESSION_TTL_MS });
     res.setHeader('Set-Cookie', [
