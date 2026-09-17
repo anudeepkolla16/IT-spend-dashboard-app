@@ -1,4 +1,4 @@
-const { verify, parseCookies } = require('../../lib/session');
+const { verify, parseCookies, canEdit } = require('../../lib/session');
 
 module.exports = async (req, res) => {
   const cookies = parseCookies(req.headers.cookie);
@@ -8,5 +8,5 @@ module.exports = async (req, res) => {
     res.status(200).json({ authenticated: false });
     return;
   }
-  res.status(200).json({ authenticated: true, email: session.email, name: session.name });
+  res.status(200).json({ authenticated: true, email: session.email, name: session.name, canEdit: canEdit(session.email) });
 };

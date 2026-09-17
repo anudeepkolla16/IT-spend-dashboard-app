@@ -148,6 +148,15 @@
   .hidden{display:none}
   .offpage{display:none!important}
   .foot{color:var(--faint);font-size:11.5px;text-align:center;padding:26px 0 8px}
+  td.editable{cursor:text;position:relative}
+  td.editable:hover{box-shadow:inset 0 0 0 1px var(--accent);border-radius:4px}
+  td.editing{padding:2px 4px}
+  td.editing input{width:100%;min-width:74px;text-align:right;font:inherit;font-size:12px;border:1px solid var(--accent);border-radius:5px;padding:4px 6px;background:var(--panel);color:var(--txt)}
+  td.saving{opacity:.5}
+  .edit-note{margin-top:10px;font-size:12px;padding:8px 10px;border-radius:8px;background:var(--panel2);border:1px solid var(--line)}
+  .edit-note.bad{background:var(--danger-soft);color:var(--danger);border-color:transparent}
+  .edit-field{display:inline-flex;align-items:center;gap:6px}
+  .edit-field input{font:inherit;font-size:12.5px;border:1px solid var(--line2);border-radius:6px;padding:3px 6px;background:var(--panel);color:var(--txt);max-width:190px}
   .mtd{font-size:10px;font-weight:600;background:var(--chip);color:var(--muted);border-radius:5px;padding:1px 5px;margin-left:5px;text-transform:none;letter-spacing:0}
   .pill{font-size:11px;padding:2px 8px;border-radius:20px;white-space:nowrap;font-weight:600}
   .pill.up{background:var(--danger-soft);color:var(--danger)}
@@ -815,8 +824,13 @@ document.querySelectorAll('#renewalTabs .tab-btn').forEach(btn=>btn.onclick=()=>
   try{
     const me = await (await fetch('/api/auth/me', {cache:'no-store'})).json();
     $('#whoami').innerHTML = me.authenticated
-      ? `${me.name} · <a href="/api/auth/logout" style="color:var(--muted)">Logout</a>`
+      ? `${me.name}${me.canEdit ? ' <span class="chip" title="Your account may edit the sheet from here">editor</span>' : ''} · <a href="/api/auth/logout" style="color:var(--muted)">Logout</a>`
       : '';
+    // Whether the controls are shown; never whether an edit is allowed. The
+    // handler checks the session itself, because a page cannot enforce this.
+    window.CAN_EDIT = !!me.canEdit;
+    document.body.classList.toggle('can-edit', !!me.canEdit);
+    if (window.MODEL) draw();
   }catch{}
 })();
 
@@ -831,7 +845,7 @@ async function syncFromApi(manual){
     appRows = (json.rows||[]).map(r => ({
       kind:r.kind||'Apps', month:r.month, name:r.name, dept:r.dept||'Unassigned',
       cat:r.cycle||'Monthly', cycle:r.cycle||'Monthly', cur:r.cur||'USD', amt:Number(r.amt)||0,
-      status:'Active', poc:r.poc||'', renewalDate:r.renewalDate||''
+      status:'Active', poc:r.poc||'', renewalDate:r.renewalDate||'', paymentMethod:r.paymentMethod||''
     }));
     // Every app row the sheet carries, including ones with no amounts yet. The
     // pivot only ever sees rows with money in them, so without this a row that
@@ -1669,6 +1683,10 @@ function setupTable(all){
 }
 // registered once (not per-sync) since #tbl tbody / #tblCards persist across re-syncs
 $('#tbl tbody').addEventListener('click', e=>{
+  // For an editor a month cell is an edit, not a drill-down: without this the
+  // same click would open the modal on top of the input it just created. The
+  // rest of the row still opens the app.
+  if (e.target.closest('td.editable, td.editing')) return;
   const tr = e.target.closest('tr[data-name]'); if (tr) openModal(decodeURIComponent(tr.dataset.name));
 });
 $('#tblCards').addEventListener('click', e=>{
@@ -1699,15 +1717,15 @@ function buildPivot(all, filt){
     if (t && a.kind !== t) return;
     if (d && a.dept !== d) return;
     if (q && !((a.name+(a.poc||'')+(a.cycle||'')).toLowerCase().includes(q))) return;
-    groups[a.name] = { name:a.name, kind:a.kind, dept:a.dept, cat:a.cycle, cur:a.cur, poc:a.poc, renewalDate:a.renewalDate, total:0 };
+    groups[a.name] = { name:a.name, kind:a.kind, dept:a.dept, cat:a.cycle, cur:a.cur, poc:a.poc, renewalDate:a.renewalDate, pay:a.paymentMethod||'', total:0 };
   });
   (all||[]).filter(r=>(!t||r.kind===t)&&(!d||r.dept===d)&&
     (!q||(r.name+(r.poc||'')+r.cat).toLowerCase().includes(q))).forEach(r=>{
-    if (!groups[r.name]) groups[r.name] = {name:r.name, kind:r.kind, dept:r.dept, cat:r.cat, cur:r.cur, poc:r.poc, renewalDate:r.renewalDate, total:0};
+    if (!groups[r.name]) groups[r.name] = {name:r.name, kind:r.kind, dept:r.dept, cat:r.cat, cur:r.cur, poc:r.poc, renewalDate:r.renewalDate, pay:r.paymentMethod||'', total:0};
     const g = groups[r.name];
     if (r.month) g[r.month] = (g[r.month]||0) + r.usd;
     g.total += r.usd;
-    if (r.month >= (g._latestMonth||'')) { g._latestMonth = r.month; g.kind=r.kind; g.dept=r.dept; g.cat=r.cat; g.cur=r.cur; g.poc=r.poc; g.renewalDate=r.renewalDate; }
+    if (r.month >= (g._latestMonth||'')) { g._latestMonth = r.month; g.kind=r.kind; g.dept=r.dept; g.cat=r.cat; g.cur=r.cur; g.poc=r.poc; g.renewalDate=r.renewalDate; g.pay=r.paymentMethod||''; }
   });
   const pivoted = Object.values(groups);
   // cost-spike detection: flag a month where spend jumped >30% vs the app's prior month
@@ -1739,7 +1757,7 @@ function draw(){
   $('#tbl tbody').innerHTML = pivoted.map(g=>`<tr data-name="${encodeURIComponent(g.name)}">
     <td><span class="chip">${g.kind}</span></td><td class="stickycol">${g.name}</td>
     <td>${g.dept}</td><td>${g.poc||'—'}</td><td>${g.cat}</td><td>${g.cur}</td>
-    ${ALL_MONTHS.map(m=>`<td class="num ${g._spikes[m]?'spike':''}" title="${g._spikes[m]?'>30% jump vs prior month':''}">${fmtCell(g[m])}</td>`).join('')}
+    ${ALL_MONTHS.map(m=>`<td class="num ${g._spikes[m]?'spike':''}${window.CAN_EDIT?' editable':''}"${window.CAN_EDIT?` data-edit-app="${encodeURIComponent(g.name)}" data-edit-month="${m}"`:''} title="${g._spikes[m]?'>30% jump vs prior month':(window.CAN_EDIT?'Click to edit this month in the sheet':'')}">${fmtCell(g[m])}</td>`).join('')}
     <td class="num total">${fmtUSD(g.total)}</td></tr>`).join('')
     || `<tr><td colspan="${6+ALL_MONTHS.length+1}" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>`;
 
@@ -1952,6 +1970,99 @@ function drawVendors(){
     <div class="cap" style="margin-top:10px">Cloud and AI counts ${cloudRows.length} vendor${cloudRows.length===1?'':'s'}: ${cloudRows.map(r=>r.vendor).join(', ') || 'none'}. Per-project, per-user and utilisation figures need the providers' own billing and usage exports, which the sheet does not hold.</div>`;
   $('#vendCloud').onclick = () => { vendorCloudOnly = !vendorCloudOnly; drawVendors(); };
 }
+
+/* ---------------- editing the sheet from here ----------------
+   The workbook stays the system of record: an edit is one Graph write to one
+   cell, recorded in the audit log with who made it and what was there before.
+   `window.CAN_EDIT` decides whether the controls appear; it decides nothing
+   about whether a write is allowed, which the handler settles from the session
+   on every request.
+
+   A saved amount is locked, because the invoice sync totals a month from the
+   PDFs on file and would otherwise offer to revise a figure typed here
+   straight back down. */
+async function saveEdit(payload){
+  const res = await fetch('/api/amounts', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'edit', ...payload }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+  return json;
+}
+function editNote(host, text, bad){
+  if (!host) return;
+  let el = host.querySelector(':scope > .edit-note');
+  if (!el){ el = document.createElement('div'); el.className = 'edit-note'; host.appendChild(el); }
+  el.className = 'edit-note' + (bad ? ' bad' : '');
+  el.textContent = text;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.remove(), bad ? 12000 : 6000);
+}
+
+// Click a month cell in the breakdown, type, press Enter. Escape leaves it as
+// it was; so does clicking away without changing anything.
+function beginCellEdit(td){
+  if (!window.CAN_EDIT || td.classList.contains('editing')) return;
+  const app = decodeURIComponent(td.dataset.editApp), month = td.dataset.editMonth;
+  const original = td.textContent.trim();
+  const started = original === '—' || original === '' ? '' : original.replace(/[$,]/g, '');
+  td.classList.add('editing');
+  td.innerHTML = `<input type="text" inputmode="decimal" aria-label="${app} ${monthLabel(month)} amount" value="${started}" />`;
+  const input = td.querySelector('input');
+  input.focus(); input.select();
+
+  let done = false;
+  const restore = (text) => { done = true; td.classList.remove('editing', 'saving'); td.textContent = text; };
+  const commit = async () => {
+    if (done) return;
+    const typed = input.value.trim();
+    if (typed === started){ restore(original); return; }
+    done = true;
+    td.classList.remove('editing'); td.classList.add('saving');
+    td.textContent = typed === '' ? '—' : typed;
+    try{
+      const r = await saveEdit({ app, month, amount: typed });
+      td.classList.remove('saving');
+      td.textContent = r.after === '' ? '—' : fmtCell(Number(r.after));
+      editNote($('#appsCard'), `${app} · ${monthLabel(month)}: ${r.before == null ? 'nothing' : fmtUSD(r.before)} → ${r.after === '' ? 'cleared' : fmtUSD(Number(r.after))} in ${r.address}.${r.lock && r.lock.locked ? ' The invoice sync will leave this figure alone.' : ''}`);
+      syncFromApi(true);
+    }catch(err){
+      td.classList.remove('saving');
+      td.textContent = original;
+      editNote($('#appsCard'), `Could not save ${app} ${monthLabel(month)}: ${err.message}`, true);
+    }
+  };
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter'){ e.preventDefault(); commit(); }
+    else if (e.key === 'Escape'){ e.preventDefault(); restore(original); }
+  };
+  input.onblur = () => commit();
+}
+document.addEventListener('click', (e) => {
+  const td = e.target.closest && e.target.closest('td.editable[data-edit-app]');
+  if (td) beginCellEdit(td);
+});
+
+// The same for one detail of one app, from its drill-down.
+function editableField(app, field, label, value){
+  if (!window.CAN_EDIT) return `<b>${value || '—'}</b>`;
+  return `<span class="edit-field"><input data-field="${field}" data-app="${encodeURIComponent(app)}" value="${String(value == null ? '' : value).replace(/"/g, '&quot;')}" aria-label="${label}" title="${label}" /></span>`;
+}
+document.addEventListener('keydown', async (e) => {
+  const input = e.target.closest && e.target.closest('.edit-field input[data-field]');
+  if (!input || e.key !== 'Enter') return;
+  e.preventDefault();
+  const app = decodeURIComponent(input.dataset.app), field = input.dataset.field;
+  input.disabled = true;
+  try{
+    const r = await saveEdit({ app, field, value: input.value });
+    editNote($('.modal'), `${app}: ${field} was ${r.before || 'empty'}, now ${r.shown}.`);
+    syncFromApi(true);
+  }catch(err){
+    editNote($('.modal'), `Could not save: ${err.message}`, true);
+  }finally{ input.disabled = false; }
+});
 
 /* ---------------- routing ----------------
    The sidebar looked like page navigation but scrolled one long document, and
@@ -2197,10 +2308,11 @@ function openModal(name, month){
     : (g.renewalDate || '—');
   $('#modalMeta').innerHTML = `
     <span><span class="cap">Type</span><br><b>${g.kind}</b></span>
-    <span><span class="cap">Department</span><br><b>${g.dept}</b></span>
-    <span><span class="cap">POC</span><br><b>${g.poc||'—'}</b></span>
-    <span><span class="cap">Cycle</span><br><b>${g.cat}</b></span>
-    <span><span class="cap">Renewal</span><br><b>${renewalText}</b></span>
+    <span><span class="cap">Department</span><br>${editableField(g.name, 'dept', 'Department', g.dept)}</span>
+    <span><span class="cap">POC</span><br>${editableField(g.name, 'poc', 'POC', g.poc)}</span>
+    <span><span class="cap">Cycle</span><br>${editableField(g.name, 'cycle', 'Billing frequency — Monthly, Quarterly, Half Yearly, Annual, or One-time', g.cat)}</span>
+    <span><span class="cap">Renewal${window.CAN_EDIT?' <span class="mtd">as the sheet writes it</span>':''}</span><br>${window.CAN_EDIT ? editableField(g.name, 'renewalDate', 'Renewal date', g.renewalDate) : `<b>${renewalText}</b>`}</span>
+    <span><span class="cap">Payment method</span><br>${editableField(g.name, 'paymentMethod', 'Payment method', g.pay)}</span>
     <span><span class="cap">Actual spend · to date</span><br><b>${fmtUSD(modalActual)}</b></span>
     ${modalPlanned ? `<span><span class="cap">Budgeted ahead</span><br><b>${fmtUSD(modalPlanned)}</b></span>` : ''}`;
 

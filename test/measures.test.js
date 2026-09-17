@@ -439,3 +439,81 @@ test('the vendor view is a tab on Applications and redraws with the data', () =>
   assert.match(html, /if \(tab === 'vendor'\) drawVendors\(\);/);
   assert.match(html, /if \(appsTab === 'vendor'\) drawVendors\(\);/, 'and again when the sheet reloads');
 });
+
+// --- Editing the sheet from the dashboard ------------------------------------
+//
+// "can we also have a feature to edit in the dashboard directly only for my id"
+//
+// The controls are the owner's alone, and the page showing them is a courtesy,
+// not the gate: api/amounts edit settles that from the session on every write
+// (test/edit.test.js). What these pin is that the page never offers an edit it
+// has not been told to offer, and never loses a figure while saving one.
+
+const E = (() => {
+  const a = html.indexOf('function editableField(app, field, label, value){');
+  const b = html.indexOf("document.addEventListener('keydown'", a);
+  return { src: html.slice(a, b), fn: (canEdit) => new Function(`
+    const window = { CAN_EDIT: ${canEdit} };
+    ${html.slice(a, b)}
+    ; return editableField;`)() };
+})();
+
+test('a signed-in user who is not an editor is shown no way to edit', () => {
+  // Month cells: the class, the data the handler reads, and the hint all hang
+  // off CAN_EDIT, so a non-editor's table is exactly the table it always was.
+  assert.match(html, /\$\{window\.CAN_EDIT\?' editable':''\}/);
+  assert.match(html, /\$\{window\.CAN_EDIT\?` data-edit-app="\$\{encodeURIComponent\(g\.name\)\}" data-edit-month="\$\{m\}"`:''\}/);
+  assert.match(html, /if \(!window\.CAN_EDIT \|\| td\.classList\.contains\('editing'\)\) return;/);
+  assert.strictEqual(E.fn(false)('AWS', 'poc', 'POC', 'Ajay'), '<b>Ajay</b>');
+  assert.strictEqual(E.fn(false)('AWS', 'poc', 'POC', ''), '<b>—</b>');
+  // And the flag comes from the server's answer about this session, not from
+  // anything the page decides for itself.
+  assert.match(html, /window\.CAN_EDIT = !!me\.canEdit;/);
+  assert.match(html, /document\.body\.classList\.toggle\('can-edit'/);
+});
+
+test('an editable field carries the app and value it will send', () => {
+  const out = E.fn(true)('Google cloud', 'renewalDate', 'Renewal date', '3rd of every month');
+  assert.match(out, /data-field="renewalDate"/);
+  assert.match(out, /data-app="Google%20cloud"/, 'a name with a space survives the round trip');
+  assert.match(out, /value="3rd of every month"/);
+  // A quote in the value must not end the attribute and let the rest through.
+  assert.match(E.fn(true)('X', 'poc', 'POC', 'a" onfocus="boom'), /value="a&quot; onfocus=&quot;boom"/);
+  assert.ok(!/value="a" onfocus="boom"/.test(E.fn(true)('X', 'poc', 'POC', 'a" onfocus="boom')));
+});
+
+test('a month cell is an edit, and the rest of the row is still a drill-down', () => {
+  // Both listeners see the same click; without this the modal opened on top of
+  // the input the click had just created.
+  assert.match(html, /if \(e\.target\.closest\('td\.editable, td\.editing'\)\) return;\s*\n\s*const tr = e\.target\.closest\('tr\[data-name\]'\); if \(tr\) openModal/);
+});
+
+test('a refused edit puts the figure back and says why', () => {
+  const src = html.slice(html.indexOf('function beginCellEdit(td){'), html.indexOf('document.addEventListener(\'click\', (e) => {\n  const td'));
+  // One attempt per commit: Enter commits and Escape restores, and both set
+  // `done` so the blur that follows cannot send the same edit a second time.
+  assert.match(src, /let done = false;/);
+  assert.match(src, /const commit = async \(\) => \{\s*\n\s*if \(done\) return;/);
+  assert.match(src, /if \(typed === started\)\{ restore\(original\); return; \}/, 'typing nothing new is not a write');
+  assert.match(src, /catch\(err\)\{[\s\S]*td\.textContent = original;[\s\S]*Could not save/);
+  assert.match(src, /syncFromApi\(true\)/, 'a saved cell is re-read from the sheet, not assumed');
+  // Escape leaves the cell as it was found.
+  assert.match(src, /else if \(e\.key === 'Escape'\)\{ e\.preventDefault\(\); restore\(original\); \}/);
+});
+
+test('payment method reaches the drill-down, the sheet column and all', () => {
+  // The sheet records which card paid for a row, and it was the one detail the
+  // drill-down could not show: the page dropped the column on the way in, so
+  // there was nothing to render or edit. (Currency is not inferred from it —
+  // every amount in this workbook is USD.)
+  assert.match(html, /paymentMethod:r\.paymentMethod\|\|''/);
+  assert.match(html, /pay:a\.paymentMethod\|\|''/);
+  assert.match(html, /editableField\(g\.name, 'paymentMethod', 'Payment method', g\.pay\)/);
+  const P2 = lift(['buildPivot'], 'function buildPivot(all, filt){', '\nfunction draw()', `
+    const ALL_MONTHS = ['2026-07','2026-08','2026-09'];
+    const window = {};
+    window.SHEET_ROWS = [{ name:'Adobe', kind:'Apps', dept:'IT', cycle:'Monthly', cur:'USD', poc:'', renewalDate:'', paymentMethod:'HDFC card' }];`);
+  const rows = P2.buildPivot([{ name:'AWS', month:'2026-08', usd:10, kind:'Apps', dept:'IT', cat:'Monthly', cur:'USD', poc:'', renewalDate:'', paymentMethod:'Amex' }], {});
+  assert.strictEqual(rows.find(r => r.name === 'AWS').pay, 'Amex', 'from a charged row');
+  assert.strictEqual(rows.find(r => r.name === 'Adobe').pay, 'HDFC card', 'and from a row with no charges yet');
+});

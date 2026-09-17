@@ -607,6 +607,53 @@ sheet** (or wait a minute; the page caches it for 60 s).
 - The page is behind the same SSO gate as everything else (`middleware.js`);
   anyone who can open the dashboard can open this page.
 
+## ✏️ Editing the sheet from the dashboard
+
+The workbook is still the system of record; this only saves opening it. An edit
+is **one Graph write to one cell**, into the live sheet, recorded in the audit
+log (`_amount-log.json`) with who made it, the cell address and what was there
+before.
+
+**Who can:** only the addresses in `EDITOR_EMAILS`. Unset, it is
+`TARGET_USER_UPN` — the sheet's owner and nobody else. Being on
+`ALLOWED_EMAILS` lets someone *read* the dashboard; it does not let them write.
+The controls only appear for an editor, but that is courtesy, not the gate:
+`api/amounts` re-decides from the signed-in session on every request, so a
+non-editor who conjures the request gets 403 and the sheet is untouched.
+
+**What can be edited**
+
+| Where | What |
+|---|---|
+| Applications → Monthly breakdown | any month's amount — click the cell, type, **Enter**. **Esc** leaves it alone, and so does clicking away without changing anything. Empty clears the cell. |
+| An app's drill-down | Department, POC, Billing frequency, Renewal date, Payment method |
+
+Renewal date is edited **as the sheet writes it** — "3rd of every month" and
+"10/21/2026" are both fine, and the dashboard re-reads whichever form you leave.
+
+Billing frequency is the one field that is not a single cell. The sheet has no
+Cycle column: `api/spend-data` derives what the dashboard shows from
+**Recurring/Onetime** and **FREQUENCY**, and "one" in the first wins. So saving
+"One-time" writes Recurring/Onetime, saving "Annual" writes FREQUENCY — and
+clears a stale "Onetime" next to it, which otherwise would have swallowed the
+change. Both cells appear in the audit log.
+
+**A saved amount is locked.** The invoice sync totals a month from the PDFs on
+file, so a figure typed here would otherwise be offered straight back down as a
+correction. Saving writes a lock into `_vendor-rules.json` (`locks[]`, with a
+note naming you and the date) and the sync leaves that cell alone from then on.
+Clearing the cell drops the lock, and the sync resumes owning that month.
+
+**What it refuses** (nothing is written, the old figure comes back and the page
+says why): anything that is not a number, a negative, more than 10,000,000, a
+text field longer than its limit, an app the sheet does not list, the Total row,
+and the app-name column — renaming a row would break the mapping from invoice
+folders to sheet rows, so rename it in Excel.
+
+**Where to look afterwards:** the change is in the sheet immediately, the
+dashboard re-reads it, and `_amount-log.json` keeps the before/after with
+`attribution: "dashboard-edit"`.
+
 ## 🧹 Tidy Archive
 
 Filing drifts. A whole vendor folder gets dragged inside another and its month
@@ -654,6 +701,7 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 | `TARGET_FILE_PATH` | **Relative path** to the spend sheet, e.g. `Anudeep Excel sheets/Saras Apps & Subscriptions Purchase from Jan 26 .xlsx`. Must be a path, **never a share URL** (that causes a 400 "Resource not found for the segment 'root:'"). |
 | `SESSION_SECRET` | Signs the login session cookie |
 | `ALLOWED_EMAILS` | Comma-separated allowlist of who can sign in (`a@x.com,b@x.com`, case does not matter). Add/remove people here, then **redeploy** — like every env var, it is read at deployment. |
+| `EDITOR_EMAILS` | Comma-separated list of who may **edit** the sheet from the dashboard. Unset = `TARGET_USER_UPN` alone. Being on `ALLOWED_EMAILS` only grants reading. |
 | `PUBLIC_APP_URL` | `https://it-spend-dashboard-app.vercel.app` (used to build the OAuth redirect) |
 | `CRON_SECRET` | Authorizes the daily invoice-sync crons. Vercel auto-sends it as a Bearer token on scheduled runs. |
 | `INVOICE_MAILBOX` | Shared mailbox the invoice sync reads. Defaults to `invoices@sarasanalytics.com` (note the plural) if unset. |
@@ -760,7 +808,7 @@ index.html                     Single-page dashboard (UI + all client logic)
 middleware.js                  Auth gate: requires a valid SSO session; lets /api/auth/* and the cron through
 vercel.json                    Function timeouts, the daily cron schedule, no-cache headers for the HTML
 lib/
-  session.js                   Signs/verifies the session cookie
+  session.js                   Signs/verifies the session cookie; who may sign in, and who may edit (canEdit)
   graph.js                     Shared Microsoft Graph helpers (token, drive, list, upload, share resolve)
   excel.js                     Graph Excel API helpers — in-place cell writes, sheet/grid location
   statement.js                 Parses Finance's statement workbook into transactions
@@ -778,6 +826,7 @@ lib/
   invoices/inventory.js        Crawls the invoice archive for the checklist tab (month folders, per-file totals)
                                (the archive's location comes from graph.js's resolveArchiveRoot)
   amounts/{preview,apply,log}.js  The amount-import handlers, behind api/amounts.js
+  amounts/edit.js              One owner-typed cell → one Graph write, locked and logged (behind api/amounts.js)
 api/
   spend-data.js                Reads + parses the Excel sheet → JSON the dashboard renders (60s cache);
                                `?sheet=logins` returns the Invoices mail id sheet for the Password page
