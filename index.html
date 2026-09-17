@@ -44,7 +44,11 @@
   .nav-item .badge{margin-left:auto;background:var(--warn-soft);color:var(--warn);border-radius:10px;padding:0 7px;font-size:11px;font-weight:700;min-width:20px;text-align:center}
   .nav-item .badge.zero{background:var(--chip);color:var(--faint)}
   .side-foot{margin-top:auto;border-top:1px solid var(--line);padding:12px 8px 2px;display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
-  .side-foot .who{font-weight:600;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* The row wraps rather than truncating: with the name, the editor chip and
+     Logout on one nowrap line, Logout was the part that fell off the end. Only
+     the name is allowed to be clipped. */
+  .side-foot .who{font-weight:600;color:var(--txt);display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+  .side-foot .who-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
   .side-foot .sub{display:flex;align-items:flex-start;gap:7px;line-height:1.35}
   .side-foot .sub .dot{margin-top:5px;flex:0 0 7px}
   .content{flex:1;min-width:0}
@@ -61,7 +65,11 @@
   .btn.ghost{background:var(--panel);color:var(--txt);border-color:var(--line2)}
   .btn.ghost:hover{border-color:var(--accent);color:var(--accent-ink);filter:none}
   .btn.primary{background:var(--accent)}
-  main{padding:8px 28px 10px;max-width:1440px}
+  /* The page is as tall as the window, so a short page (Renewals, Passwords)
+     puts its footnote at the bottom instead of stranding it halfway up with a
+     field of empty grey underneath. */
+  main{padding:8px 28px 10px;max-width:1440px;flex:1 1 auto;min-width:0;min-height:100vh;display:flex;flex-direction:column}
+  #dash{flex:1 1 auto}
   .banner{background:var(--danger-soft);border:1px solid rgba(200,49,47,.35);color:#8f1f1e;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:16px;display:none}
   #dash{display:flex;flex-direction:column}
 
@@ -115,7 +123,18 @@
   th.stickycol,td.stickycol{position:sticky;left:0;background:var(--panel);z-index:1}
   th.stickycol{background:var(--panel2);z-index:3}
   td.total,th.total{border-left:2px solid var(--line2);font-weight:650}
-  .tblwrap{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  /* The month totals ride at the bottom of the scroller: 73 rows of a column
+     you cannot add up in your head are what the row is for, so it has to stay
+     in view while you scroll them. */
+  tfoot td{position:sticky;bottom:0;background:var(--panel2);border-top:2px solid var(--line2);border-bottom:0;font-weight:650;z-index:2}
+  tfoot td.stickycol{left:0;z-index:4}
+  tfoot td.mtd-col{color:var(--muted)}
+  tfoot .foot-lbl{color:var(--muted);font-weight:600}
+  /* Every scroller is sized from the window rather than a fixed 460px: on a
+     laptop screen that left a third of the page empty below a table that was
+     still scrolling. The clamp keeps a usable floor on a short window and stops
+     the rows stretching absurdly on a very tall one. */
+  .tblwrap{max-height:clamp(320px,calc(100vh - 330px),1100px);overflow:auto;border:1px solid var(--line);border-radius:10px}
   .modal-focus{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0 2px;font-size:13px}
   .modal-focus b.ok{color:var(--good)} .modal-focus b.gap{color:var(--warn)}
   .modal-focus-files{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
@@ -134,7 +153,7 @@
   .forecast-note b{color:var(--txt);font-weight:600}
   .forecast-note .fm{display:flex;flex-direction:column;gap:2px}
   .forecast-note .fm .cap{font-size:11px}
-  .loginwrap{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .loginwrap{max-height:clamp(320px,calc(100vh - 360px),1200px);overflow:auto;border:1px solid var(--line);border-radius:10px}
   .loginwrap th{cursor:default}
   .loginwrap td{vertical-align:top}
   .pw{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.03em;user-select:all}
@@ -147,7 +166,33 @@
   select:focus,input:focus,textarea:focus{outline:2px solid rgba(42,120,214,.35);outline-offset:1px;border-color:var(--accent)}
   .hidden{display:none}
   .offpage{display:none!important}
-  .foot{color:var(--faint);font-size:11.5px;text-align:center;padding:26px 0 8px}
+  .foot{color:var(--faint);font-size:11.5px;text-align:center;padding:26px 0 8px;margin-top:auto}
+  /* The single card on a page takes the height that is left, and hands it to
+     whichever scroller it holds. min-height:0 on both: a flex child defaults to
+     min-content, which would let the table push the card past the window
+     instead of scrolling inside it. */
+  /* …and when that is the whole page, the window is the frame: the content
+     column stops growing, the card takes what is left and the table scrolls
+     inside it, so the sidebar, the page header and the footnote all stay put
+     and nothing scrolls the page itself.
+
+     Only where there is room for it. On a phone, or a window too short to hold
+     a header and a useful number of rows, the page scrolls as it always did —
+     framing there would leave a table three rows tall. */
+  @media (min-width:901px) and (min-height:620px){
+    body.page-fill .content{height:100vh;display:flex;flex-direction:column}
+    body.page-fill main{flex:1 1 auto;min-height:0;overflow:hidden}
+    #dash{min-height:0}
+    .card.fill{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+    .card.fill .tblwrap,.card.fill .loginwrap,.card.fill .renewals,.card.fill .inv-grid,.card.fill .inv-files,.card.fill .ov{
+      max-height:none;flex:1 1 auto;min-height:0;overflow:auto}
+    /* A scroller that is not the card's own child needs its wrapper to pass the
+       height through, or the table runs off the bottom of the card. `:not(.hidden)`
+       because an id beats .hidden on specificity — without it these would reappear
+       when their tab is not the one showing. */
+    .card.fill > #loginTable:not(.hidden),.card.fill > #invChecklist:not(.hidden),.card.fill > #invFiles:not(.hidden),.card.fill > #pendingList:not(.hidden){
+      display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+  }
   td.editable{cursor:text;position:relative}
   td.editable:hover{box-shadow:inset 0 0 0 1px var(--accent);border-radius:4px}
   td.editing{padding:2px 4px}
@@ -188,7 +233,7 @@
   .tabs{display:flex;gap:6px;margin-bottom:10px}
   .tab-btn{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
   .tab-btn.active{background:var(--accent-soft);color:var(--accent-ink);border-color:transparent}
-  .renewals{display:flex;flex-direction:column;gap:2px;max-height:260px;overflow:auto}
+  .renewals{display:flex;flex-direction:column;gap:2px;max-height:clamp(240px,calc(100vh - 330px),900px);overflow:auto}
   .renewal-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 4px;border-bottom:1px solid var(--line);font-size:12.5px}
   .renewal-row:last-child{border-bottom:none}
   .renewal-name{font-weight:600}
@@ -237,7 +282,7 @@
   .amt-pill.clickable.on::after{content:' ✕';opacity:.7}
   .inv-focusnote{color:var(--muted);font-size:12px;margin-bottom:10px}
   .inv-focusnote button{background:none;border:0;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
-  .inv-grid{max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .inv-grid{max-height:clamp(300px,calc(100vh - 380px),1000px);overflow:auto;border:1px solid var(--line);border-radius:10px}
   .inv-grid table{font-size:11.5px}
   .inv-grid td.mark{text-align:center;font-weight:700;cursor:pointer;width:34px}
   .inv-grid th.fill,.inv-grid td.fill{width:100%;padding:0}
@@ -249,7 +294,7 @@
   .mark-none span{color:var(--muted);opacity:.35}
   .inv-legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:11.5px;color:var(--muted)}
   .inv-legend b{font-weight:700;margin-right:4px}
-  .inv-files{display:flex;flex-direction:column;gap:2px;max-height:460px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px 10px}
+  .inv-files{display:flex;flex-direction:column;gap:2px;max-height:clamp(300px,calc(100vh - 380px),1000px);overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px 10px}
   .inv-file{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--line);font-size:12px}
   .inv-file:last-child{border-bottom:none}
   .inv-file .who{font-weight:600;min-width:150px}
@@ -541,7 +586,7 @@
       </div>
       <div class="ov" id="appsOverview"></div>
       <div class="tblwrap hidden">
-        <table id="tbl"><thead></thead><tbody></tbody></table>
+        <table id="tbl"><thead></thead><tbody></tbody><tfoot></tfoot></table>
       </div>
       <div class="cardlist" id="tblCards"></div>
       <div id="appsVendor" class="hidden"></div>
@@ -824,7 +869,7 @@ document.querySelectorAll('#renewalTabs .tab-btn').forEach(btn=>btn.onclick=()=>
   try{
     const me = await (await fetch('/api/auth/me', {cache:'no-store'})).json();
     $('#whoami').innerHTML = me.authenticated
-      ? `${me.name}${me.canEdit ? ' <span class="chip" title="Your account may edit the sheet from here">editor</span>' : ''} · <a href="/api/auth/logout" style="color:var(--muted)">Logout</a>`
+      ? `<span class="who-name">${me.name}</span>${me.canEdit ? '<span class="chip" title="Your account may edit the sheet from here">editor</span>' : ''}<a href="/api/auth/logout" style="color:var(--muted)">Logout</a>`
       : '';
     // Whether the controls are shown; never whether an edit is allowed. The
     // handler checks the session itself, because a page cannot enforce this.
@@ -1170,8 +1215,14 @@ $('#exportBtn').onclick = () => {
     ...ALL_MONTHS.map(m => g[m] ? Math.round(g[m]*100)/100 : ''),
     Math.round(g.total*100)/100
   ]);
+  // The same Total row the table shows, so the export is not a figure short of
+  // what it was exported from.
+  const ft = breakdownTotals(rows);
+  const totalRow = rows.length ? [['', 'Total', `${rows.length} apps`, '', '', '',
+    ...ALL_MONTHS.map(m => ft.countByMonth[m] ? Math.round(ft.byMonth[m]*100)/100 : ''),
+    Math.round(ft.grand*100)/100]] : [];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...data]), 'Spend');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...data, ...totalRow]), 'Spend');
   const stamp = new Date().toISOString().slice(0,10);
   XLSX.writeFile(wb, `Saras_App_Spend_${stamp}.xlsx`);
 };
@@ -1741,6 +1792,32 @@ function buildPivot(all, filt){
   return pivoted;
 }
 
+// Column sums for the monthly breakdown's footer. Kept apart from draw() so a
+// test can add the same numbers up without a page to render them into.
+//
+// Not monthTotals(), which already exists and answers a different question: it
+// takes the raw rows and returns a month → sum map for the trend chart. Two
+// functions of one name in one script is the later one silently winning.
+function breakdownTotals(rows){
+  const byMonth = {}, countByMonth = {};
+  for (const m of ALL_MONTHS){
+    let sum = 0, n = 0;
+    for (const g of rows || []){
+      const v = g[m];
+      if (v == null) continue;      // no figure is not a zero: the app was not charged
+      sum += v; n++;
+    }
+    byMonth[m] = sum; countByMonth[m] = n;
+  }
+  // The grand total sits under the Total column, so it is that column added up,
+  // not the month cells added up. They are the same figure whenever every
+  // charge carries a month, which the sheet's own layout guarantees — but a row
+  // whose month could not be read would otherwise go missing from the one
+  // number a reader checks the column against.
+  const grand = (rows || []).reduce((sum, g) => sum + (g.total || 0), 0);
+  return { byMonth, countByMonth, grand };
+}
+
 function draw(){
   const all=window.MODEL||[];
   const t=$('#fType').value, d=$('#fDept').value, q=$('#fSearch').value.toLowerCase();
@@ -1760,6 +1837,25 @@ function draw(){
     ${ALL_MONTHS.map(m=>`<td class="num ${g._spikes[m]?'spike':''}${window.CAN_EDIT?' editable':''}"${window.CAN_EDIT?` data-edit-app="${encodeURIComponent(g.name)}" data-edit-month="${m}"`:''} title="${g._spikes[m]?'>30% jump vs prior month':(window.CAN_EDIT?'Click to edit this month in the sheet':'')}">${fmtCell(g[m])}</td>`).join('')}
     <td class="num total">${fmtUSD(g.total)}</td></tr>`).join('')
     || `<tr><td colspan="${6+ALL_MONTHS.length+1}" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>`;
+
+  // What every column adds up to, for the rows on screen. It follows the
+  // filters, because a total that ignored them would be read as the total of
+  // what is in front of you and be wrong by however much was filtered out.
+  //
+  // A column is one month for every app, so summing it is unambiguous — except
+  // the current one, which is only billed as far as today. That cell is greyed
+  // and says so rather than inviting a comparison with a whole month beside it.
+  const foot = breakdownTotals(pivoted);
+  $('#tbl tfoot').innerHTML = pivoted.length ? `<tr>
+    <td></td><td class="stickycol foot-lbl">Total</td>
+    <td colspan="4" class="foot-lbl">${pivoted.length} app${pivoted.length===1?'':'s'}${
+      (t||d||q) ? ' matching' : ''}</td>
+    ${ALL_MONTHS.map(m=>{
+      const partial = m === realMonthKey();
+      return `<td class="num${partial?' mtd-col':''}" title="${monthLabel(m)}: ${fmtUSD(foot.byMonth[m])} across ${foot.countByMonth[m]} app${foot.countByMonth[m]===1?'':'s'}${partial?' — still being billed, so this is the month so far':''}">${
+        foot.countByMonth[m] ? fmtShort(foot.byMonth[m]) : '—'}</td>`;
+    }).join('')}
+    <td class="num total" title="Every month above, added up">${fmtShort(foot.grand)}</td></tr>` : '';
 
   $('#tblCards').innerHTML = pivoted.map(g=>{
     const lastM = [...ALL_MONTHS].reverse().find(m=>g[m]!=null);
@@ -2119,6 +2215,14 @@ function showPage(page){
     el.classList.toggle('offpage', !el.dataset.page.split(' ').includes(name));
   });
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === name));
+  // A page showing one card gives it the rest of the window, so the table fills
+  // the screen instead of stopping short with a field of grey beneath it. A
+  // page with several cards (Overview, Invoices) is a stack and keeps its own
+  // heights — stretching one of those would only push the others around.
+  const onPage = [...document.querySelectorAll('main .card[data-page]')].filter(c => !c.classList.contains('offpage'));
+  document.querySelectorAll('main .card[data-page]').forEach(c => c.classList.remove('fill'));
+  if (onPage.length === 1) onPage[0].classList.add('fill');
+  document.body.classList.toggle('page-fill', onPage.length === 1);
   syncMobNav();
   $('#pageTitle').textContent = PAGES[name].title;
   $('#pageSub').textContent = PAGES[name].sub;
