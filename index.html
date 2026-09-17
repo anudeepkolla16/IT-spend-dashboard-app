@@ -68,7 +68,7 @@
   /* The page is as tall as the window, so a short page (Renewals, Passwords)
      puts its footnote at the bottom instead of stranding it halfway up with a
      field of empty grey underneath. */
-  main{padding:8px 28px 10px;max-width:1440px;flex:1 1 auto;min-width:0;min-height:100vh;display:flex;flex-direction:column}
+  main{padding:8px 28px 10px;flex:1 1 auto;min-width:0;min-height:100vh;display:flex;flex-direction:column}
   #dash{flex:1 1 auto}
   .banner{background:var(--danger-soft);border:1px solid rgba(200,49,47,.35);color:#8f1f1e;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:16px;display:none}
   #dash{display:flex;flex-direction:column}
@@ -190,7 +190,8 @@
        height through, or the table runs off the bottom of the card. `:not(.hidden)`
        because an id beats .hidden on specificity — without it these would reappear
        when their tab is not the one showing. */
-    .card.fill > #loginTable:not(.hidden),.card.fill > #invChecklist:not(.hidden),.card.fill > #invFiles:not(.hidden),.card.fill > #pendingList:not(.hidden){
+    .card.fill > *:not(.hidden):has(.tblwrap,.loginwrap,.renewals,.inv-grid,.inv-files,.ov),
+    .card.fill > #loginTable:not(.hidden),.card.fill > #invChecklist:not(.hidden),.card.fill > #invFiles:not(.hidden),.card.fill > #appsVendor:not(.hidden),.card.fill > #pendingList:not(.hidden){
       display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
   }
   td.editable{cursor:text;position:relative}
