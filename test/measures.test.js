@@ -517,3 +517,92 @@ test('payment method reaches the drill-down, the sheet column and all', () => {
   assert.strictEqual(rows.find(r => r.name === 'AWS').pay, 'Amex', 'from a charged row');
   assert.strictEqual(rows.find(r => r.name === 'Adobe').pay, 'HDFC card', 'and from a row with no charges yet');
 });
+
+// --- The monthly breakdown's Total row ---------------------------------------
+//
+// "can we also add monthly total here" — 73 rows of a column nobody can add up
+// in their head.
+
+const MT = (() => {
+  const a = html.indexOf('function breakdownTotals(rows){'), b = html.indexOf('\nfunction draw()', a);
+  return new Function(`
+    const ALL_MONTHS = ['2026-07','2026-08','2026-09'];
+    ${html.slice(a, b)}
+    ; return breakdownTotals;`)();
+})();
+
+test('a month column adds up only the apps actually charged in it', () => {
+  const g = (name, months, total) => ({ name, ...months, total });
+  const t = MT([
+    g('AWS',   { '2026-07': 2260.67, '2026-08': 2374.66, '2026-09': 900 }, 5535.33),
+    g('Adobe', { '2026-08': 37.16 }, 37.16),
+    g('Never', {}, 0),
+  ]);
+  assert.strictEqual(t.byMonth['2026-07'], 2260.67);
+  assert.strictEqual(Math.round(t.byMonth['2026-08'] * 100) / 100, 2411.82);
+  // A month with no figure is not a zero: it counts nobody, so the row can say
+  // "—" instead of "$0", which would read as "we were charged nothing".
+  assert.strictEqual(t.countByMonth['2026-07'], 1);
+  assert.strictEqual(t.countByMonth['2026-08'], 2);
+  assert.strictEqual(t.countByMonth['2026-09'], 1);
+  assert.strictEqual(MT([]).grand, 0);
+  assert.deepStrictEqual(MT([]).countByMonth, { '2026-07': 0, '2026-08': 0, '2026-09': 0 });
+});
+
+test('the grand total is the Total column added up, not the months', () => {
+  // They are the same whenever every charge carries a month. When one does not,
+  // the figure under the Total column still has to equal that column.
+  const t = MT([
+    { name: 'AWS', '2026-07': 100, total: 100 },
+    { name: 'Odd', total: 40 },                    // a charge with no month
+  ]);
+  assert.strictEqual(t.grand, 140);
+  assert.strictEqual(t.byMonth['2026-07'], 100);
+});
+
+test('the Total row follows the filters and flags the part-billed month', () => {
+  assert.match(html, /const foot = breakdownTotals\(pivoted\);/, 'the rows on screen, not the whole sheet');
+  // A second monthTotals() would have quietly replaced the one the trend chart
+  // calls, and the charts are stubbed in the browser harness, so nothing would
+  // have looked wrong until the chart was read.
+  assert.strictEqual((html.match(/function monthTotals\(/g) || []).length, 1, 'one function, one name');
+  assert.match(html, /\$\('#tbl tfoot'\)\.innerHTML = pivoted\.length \?/, 'nothing to total when nothing matches');
+  assert.match(html, /const partial = m === realMonthKey\(\);/);
+  assert.match(html, /still being billed, so this is the month so far/);
+  assert.match(html, /foot\.countByMonth\[m\] \? fmtShort\(foot\.byMonth\[m\]\) : '—'/);
+  // Pinned to the bottom of the scroller, or it is the one row you have to
+  // scroll to find.
+  assert.match(html, /tfoot td\{position:sticky;bottom:0/);
+  // And the export carries the same row.
+  assert.match(html, /const ft = breakdownTotals\(rows\);/);
+});
+
+// --- Pages that fill the window ----------------------------------------------
+//
+// "and keep these to full page" — a card stopping halfway up the screen with
+// the footnote stranded in the grey below it.
+
+test('a page showing one card gives it the window, a stack of cards keeps scrolling', () => {
+  assert.match(html, /const onPage = \[\.\.\.document\.querySelectorAll\('main \.card\[data-page\]'\)\]\.filter\(c => !c\.classList\.contains\('offpage'\)\)/);
+  assert.match(html, /if \(onPage\.length === 1\) onPage\[0\]\.classList\.add\('fill'\)/);
+  assert.match(html, /document\.body\.classList\.toggle\('page-fill', onPage\.length === 1\)/);
+  // Cleared first, or yesterday's page keeps stretching.
+  assert.match(html, /document\.querySelectorAll\('main \.card\[data-page\]'\)\.forEach\(c => c\.classList\.remove\('fill'\)\)/);
+  // The footnote sits at the bottom whether or not the page is framed.
+  assert.match(html, /\.foot\{[^}]*margin-top:auto/);
+  // Framing only where there is room for it: a phone or a short window scrolls.
+  assert.match(html, /@media \(min-width:901px\) and \(min-height:620px\)\{\s*\n\s*body\.page-fill \.content\{height:100vh/);
+  assert.match(html, /body\.page-fill main\{flex:1 1 auto;min-height:0;overflow:hidden\}/);
+  // A hidden tab must not be revealed by the rule that passes height down.
+  for (const id of ['loginTable', 'invChecklist', 'invFiles', 'pendingList']) {
+    assert.match(html, new RegExp(`#${id}:not\\(\\.hidden\\)`), `${id} keeps its hidden state`);
+  }
+});
+
+test('Logout cannot fall off the end of the sidebar', () => {
+  // The name, the editor chip and Logout shared one nowrap line, and Logout was
+  // what the ellipsis ate.
+  assert.match(html, /\.side-foot \.who\{[^}]*flex-wrap:wrap/);
+  assert.match(html, /\.side-foot \.who-name\{[^}]*text-overflow:ellipsis/, 'only the name is clipped');
+  assert.ok(!/\.side-foot \.who\{font-weight:600;color:var\(--txt\);overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/.test(html));
+});

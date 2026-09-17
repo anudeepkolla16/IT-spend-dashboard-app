@@ -654,6 +654,27 @@ folders to sheet rows, so rename it in Excel.
 dashboard re-reads it, and `_amount-log.json` keeps the before/after with
 `attribution: "dashboard-edit"`.
 
+## Reading the Monthly breakdown
+
+The table's last row is a **Total**, pinned to the bottom of the scroller, giving
+each month column's sum across the apps on screen. It follows the filters — a
+search or a department narrows the totals with the rows, and the row says how
+many apps it counted, so a filtered total is never mistaken for the estate's.
+
+- A month nobody was charged in reads **—**, not $0: no figure is not the same
+  as a charge of nothing.
+- The **current month is greyed**, because it is only billed as far as today.
+  Hovering any cell gives the exact figure and how many apps are in it.
+- The figure under **Total** is that column added up, so it matches the chip
+  above the table and the per-row totals beside it.
+- **Export** carries the same row.
+
+Each page also fills the window: the card takes the height that is left and the
+table scrolls inside it, so the sidebar, page header and footnote stay put. A
+page that stacks several cards (Overview, and Invoices when its second card
+shows) scrolls as before, and so does any window under 901×620, where framing
+would leave a table a few rows tall.
+
 ## 🧹 Tidy Archive
 
 Filing drifts. A whole vendor folder gets dragged inside another and its month
