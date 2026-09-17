@@ -780,7 +780,14 @@ the new path, relative to the OneDrive root, and redeploy.
 
 ## Common tasks
 
-**Add someone to the dashboard:** edit `ALLOWED_EMAILS` in Vercel (comma-separated), then redeploy (Deployments → ⋯ → Redeploy on the latest, or push any commit). It takes effect on that deployment; until then a newly added person is refused at sign-in with "isn't on the dashboard's access list".
+**Add someone to the dashboard:** edit `ALLOWED_EMAILS` in Vercel (comma-separated), then redeploy (Deployments → ⋯ → Redeploy on the latest, or push any commit). It takes effect on that deployment; until then a newly added person is still refused at sign-in.
+
+If someone is refused, the page now says which of the two things went wrong, and the same line is in Vercel → Logs (the address only, never the list):
+
+| The page says | What to do |
+|---|---|
+| "this deployment has no access list at all: `ALLOWED_EMAILS` is empty" | Set it in Vercel, then **redeploy** — setting it alone changes nothing. |
+| "that address is not on the dashboard's access list (N on it)" | The list exists, so it is a spelling question. Microsoft signs people in under one exact address (`preferred_username`), and that is the string that has to be on the list — an alias for the same mailbox will not match. The page shows the person the address they were signed in under; copy that. |
 
 **Point at a different / renamed sheet:** update `TARGET_FILE_PATH` to the new relative path, then redeploy.
 
