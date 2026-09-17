@@ -670,10 +670,18 @@ many apps it counted, so a filtered total is never mistaken for the estate's.
 - **Export** carries the same row.
 
 Each page also fills the window: the card takes the height that is left and the
-table scrolls inside it, so the sidebar, page header and footnote stay put. A
-page that stacks several cards (Overview, and Invoices when its second card
-shows) scrolls as before, and so does any window under 901×620, where framing
-would leave a table a few rows tall.
+table scrolls inside it, so the sidebar, page header and footnote stay put, and
+the card is as wide as the page title above it. A page that stacks several cards
+(Overview, and Invoices when its second card shows) scrolls as before, and so
+does any window under 901×620, where framing would leave a table a few rows tall.
+
+A card hands that height to whichever scroller it is showing. Where the scroller
+is not the card's own child — **By vendor**, Passwords, the invoice tabs — the
+wrapper in between has to pass it through, or the table runs out of the bottom of
+the card and over the footnote. A `:has()` rule does that for any wrapper holding
+a known scroller, with the handful of ids listed as well for older browsers. A new
+tab whose table is wrapped in something else needs nothing; one built on a new
+kind of scroller needs its class adding to both.
 
 ## 🧹 Tidy Archive
 

@@ -594,9 +594,21 @@ test('a page showing one card gives it the window, a stack of cards keeps scroll
   assert.match(html, /@media \(min-width:901px\) and \(min-height:620px\)\{\s*\n\s*body\.page-fill \.content\{height:100vh/);
   assert.match(html, /body\.page-fill main\{flex:1 1 auto;min-height:0;overflow:hidden\}/);
   // A hidden tab must not be revealed by the rule that passes height down.
-  for (const id of ['loginTable', 'invChecklist', 'invFiles', 'pendingList']) {
+  for (const id of ['loginTable', 'invChecklist', 'invFiles', 'appsVendor', 'pendingList']) {
     assert.match(html, new RegExp(`#${id}:not\\(\\.hidden\\)`), `${id} keeps its hidden state`);
   }
+  // By vendor was the one the hardcoded list was missing, and its table ran out
+  // of the card and over the footnote. A :has() rule catches the next one
+  // without anybody remembering to add it.
+  assert.match(html, /\.card\.fill > \*:not\(\.hidden\):has\(\.tblwrap,\.loginwrap,\.renewals,\.inv-grid,\.inv-files,\.ov\)/);
+});
+
+test('the page is as wide as the header above it', () => {
+  // main stopped at 1440px while the topbar did not, so a wide screen put the
+  // card in a column narrower than its own title with grey either side.
+  const main = html.match(/\n  main\{[^}]*\}/)[0];
+  assert.ok(!/max-width/.test(main), `main must not cap its width: ${main.trim()}`);
+  assert.match(main, /padding:8px 28px 10px/, 'the same gutter the topbar uses');
 });
 
 test('Logout cannot fall off the end of the sidebar', () => {
