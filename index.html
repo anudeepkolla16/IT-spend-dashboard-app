@@ -191,7 +191,7 @@
        because an id beats .hidden on specificity — without it these would reappear
        when their tab is not the one showing. */
     .card.fill > *:not(.hidden):has(.tblwrap,.loginwrap,.renewals,.inv-grid,.inv-files,.ov),
-    .card.fill > #loginTable:not(.hidden),.card.fill > #invChecklist:not(.hidden),.card.fill > #invFiles:not(.hidden),.card.fill > #appsVendor:not(.hidden),.card.fill > #pendingList:not(.hidden){
+    .card.fill > #loginTable:not(.hidden),.card.fill > #invChecklist:not(.hidden),.card.fill > #invFiles:not(.hidden),.card.fill > #appsVendor:not(.hidden),.card.fill > #pendingList:not(.hidden),.card.fill > #docsList:not(.hidden){
       display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
   }
   td.editable{cursor:text;position:relative}
@@ -305,6 +305,22 @@
   .inv-file .amt{white-space:nowrap;min-width:76px;text-align:right}
   .inv-file .amt.soft{color:var(--muted)}
   @media(max-width:700px){.inv-file{flex-wrap:wrap}.inv-file .who{min-width:0}}
+  /* Agreements & KYC. The file rows reuse .inv-files/.inv-file so the two
+     document lists in the app read the same; only the grouping header, the
+     kind badge and the term chip are new. */
+  .doc-vendor{display:flex;align-items:center;gap:8px;padding:12px 2px 6px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:1}
+  .doc-vendor:first-child{padding-top:4px}
+  .doc-vendor b{font-size:13px}
+  .doc-vendor .cap{font-size:11px}
+  .doc-kind{font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;border-radius:6px;padding:2px 6px;white-space:nowrap;min-width:74px;text-align:center}
+  .doc-kind.order{background:var(--accent-soft);color:var(--accent-ink)}
+  .doc-kind.agreement{background:var(--good-soft);color:var(--good)}
+  .doc-kind.kyc{background:var(--warn-soft);color:var(--warn)}
+  .doc-kind.other{background:var(--chip);color:var(--muted)}
+  .doc-term{font-size:11px;color:var(--muted);white-space:nowrap}
+  .doc-term.soon{color:var(--warn);font-weight:600}
+  .doc-term.past{color:var(--danger);font-weight:600}
+  @media(max-width:700px){.doc-kind{min-width:0}}
 
   /* Needs your answer */
   .pend-row{display:grid;grid-template-columns:1fr auto;gap:8px 16px;padding:12px 0;border-top:1px solid var(--line);align-items:start}
@@ -396,6 +412,7 @@
   <button class="nav-item" data-page="applications"><span class="ico">▤</span>Applications</button>
   <button class="nav-item" data-page="renewals"><span class="ico">📅</span>Renewals</button>
   <button class="nav-item" data-page="invoices"><span class="ico">🧾</span>Invoices</button>
+  <button class="nav-item" data-page="documents"><span class="ico">📑</span>Agreements &amp; KYC</button>
   <div class="nav-sec">Manage</div>
   <button class="nav-item" data-page="questions"><span class="ico">❓</span>Needs your answer<span class="badge zero" id="pendingBadge">0</span></button>
   <button class="nav-item" data-page="rules" id="navRules"><span class="ico">⚙</span>Filing rules</button>
@@ -545,7 +562,30 @@
       </div>
     </div>
 
-    <div class="card" id="loginsCard" data-page="passwords" style="order:9">
+    <div class="card" id="docsCard" data-page="documents" style="order:9">
+      <h3>📑 Agreements &amp; KYC</h3>
+      <div class="cap">Each vendor's signed agreement, order form and KYC paperwork, read straight from the SharePoint <span id="docsRootName">contracts</span> folder. These are contracts, not bills — nothing here is filed into the invoice archive or counted on the Invoice Checklist.</div>
+      <div class="filters">
+        <select id="docsFilter">
+          <option value="all">All documents</option>
+          <option value="order">Only order forms</option>
+          <option value="agreement">Only agreements</option>
+          <option value="kyc">Only KYC paperwork</option>
+          <option value="term">Only documents with a term</option>
+          <option value="expiring">Only terms ending within 90 days</option>
+        </select>
+        <input id="docsSearch" placeholder="Search vendor / file…" style="min-width:240px" />
+        <div class="grow"></div>
+        <span class="chip" id="docsCount" style="align-self:center"></span>
+        <a class="btn ghost hidden" id="docsOpenFolder" target="_blank" rel="noopener">↗ Open folder</a>
+        <button class="btn ghost" id="docsRefresh" title="Read the SharePoint folder again">↻ Rescan folder</button>
+      </div>
+      <div class="inv-summary" id="docsSummary"></div>
+      <div id="docsStatus" class="cap" style="margin-bottom:10px"></div>
+      <div id="docsList"></div>
+    </div>
+
+    <div class="card" id="loginsCard" data-page="passwords" style="order:10">
       <h3>🔑 Passwords</h3>
       <div class="cap">The workbook's <b>Invoices mail id</b> sheet: where each app's invoices arrive, and the login used to fetch them. Passwords stay hidden until you reveal them.</div>
       <div class="filters">
@@ -2176,6 +2216,7 @@ const PAGES = {
   applications: { title: 'Applications',       sub: 'Every app the sheet tracks: what it costs, what it runs at, when it renews, who owns it' },
   renewals:     { title: 'Renewals',           sub: 'What renews next, what it is expected to cost, and what still needs pricing' },
   invoices:     { title: 'Invoices',           sub: 'Which recorded charges have an invoice on file, and which do not' },
+  documents:    { title: 'Agreements & KYC',   sub: 'Signed agreements, order forms and vendor KYC paperwork, per vendor · read from SharePoint, never filed as invoices' },
   questions:    { title: 'Needs your answer',  sub: 'Invoices the sync would not file without asking' },
   rules:        { title: 'Filing rules',       sub: 'Which row an invoice belongs to, and how the sync decides' },
   passwords:    { title: 'Passwords',          sub: 'Where each app sends its invoices, and the login used to fetch them' },
@@ -2231,6 +2272,7 @@ function showPage(page){
   // A chart sized while its page was hidden has no width of its own to keep.
   for (const id of Object.keys(charts)) { try { charts[id].resize(); } catch {} }
   if (name === 'passwords' && !loginRows && !loginLoading) loadLogins(false);
+  if (name === 'documents' && !docsData && !docsLoading) loadDocuments(false);
   if (name === 'rules' && $('#rulesEditor') && $('#rulesEditor').classList.contains('hidden')) $('#rulesBtn').click();
   window.scrollTo({ top: 0, behavior: 'auto' });
 }
@@ -2298,6 +2340,149 @@ $('#sideSearch').onfocus = () => { if (currentPage !== 'applications') routeTo('
 document.addEventListener('keydown', e => {
   if (e.key === '/' && !/input|textarea|select/i.test(document.activeElement.tagName)) { e.preventDefault(); $('#sideSearch').focus(); }
 });
+
+/* ---------------- agreements & KYC: the SharePoint contracts folder ----------------
+   Fetched only when someone opens the page, like the Passwords sheet: it is its
+   own Graph crawl and most visits never look at it.
+
+   This folder is read, never written, and is kept out of the invoice archive on
+   purpose. An order form covering "may 2026 to may 2027" is one commitment, not
+   twelve bills — mirroring it under {archive}/{App}/ would have the Invoice
+   Checklist tick twelve months that were never invoiced. */
+let docsData = null, docsLoading = false;
+const docEsc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const DOC_KINDS = { order:'Order form', agreement:'Agreement', kyc:'KYC', other:'Other' };
+const DOC_DAY = 86400000;
+
+// A term's last day: "2027-05-31" as written, "2027-05" as the end of May
+// (day 0 of the following month is the last day of this one).
+function docTermEnd(term){
+  if (!term || !term.end) return null;
+  const p = String(term.end).split('-').map(Number);
+  if (p.some(n => !Number.isFinite(n))) return null;
+  return p.length >= 3 ? new Date(Date.UTC(p[0], p[1]-1, p[2])) : new Date(Date.UTC(p[0], p[1], 0));
+}
+function docDaysLeft(term){
+  const end = docTermEnd(term);
+  return end ? Math.round((end.getTime() - Date.now()) / DOC_DAY) : null;
+}
+
+async function loadDocuments(force){
+  if (docsLoading) return;
+  docsLoading = true;
+  $('#docsStatus').textContent = 'Reading the agreements & KYC folder…';
+  try{
+    const res = await fetch(`/api/invoices/list?mode=documents${force?'&refresh=1':''}`, {cache:'no-store'});
+    if (res.status === 401){ window.location.href = '/api/auth/login'; return; }
+    // Read as text first: a runtime crash returns a plain-text body, and
+    // res.json() would report that as a JSON syntax error instead of the fault.
+    const raw = await res.text();
+    let json;
+    try{ json = JSON.parse(raw); }
+    catch{ throw new Error(raw.slice(0,160) || ('HTTP '+res.status)); }
+    if (!res.ok || json.error) throw new Error(json.error || ('HTTP '+res.status));
+    docsData = json;
+    renderDocuments();
+  }catch(err){
+    $('#docsStatus').innerHTML = `<span style="color:var(--danger)">Couldn't read the folder: ${docEsc(err.message)}</span>`;
+    if (!docsData) renderDocuments();
+  }finally{ docsLoading = false; }
+}
+
+function renderDocuments(){
+  const box = $('#docsList'), summary = $('#docsSummary');
+  if (!docsData){
+    box.innerHTML = '<button class="btn" id="docsLoad">📑 Load agreements &amp; KYC from SharePoint</button>';
+    $('#docsLoad').onclick = () => loadDocuments(false);
+    $('#docsCount').textContent = '';
+    summary.innerHTML = '';
+    return;
+  }
+
+  $('#docsRootName').textContent = (docsData.root || '').split('/').pop() || 'contracts';
+  const openBtn = $('#docsOpenFolder');
+  openBtn.classList.toggle('hidden', !docsData.rootUrl);
+  if (docsData.rootUrl) openBtn.href = docsData.rootUrl;
+
+  // Nothing at any of the paths tried is a different thing from a folder with
+  // nothing in it, and saying so saves someone hunting for files that are there.
+  if (!docsData.resolved){
+    summary.innerHTML = '';
+    $('#docsCount').textContent = '';
+    $('#docsStatus').innerHTML = `<span style="color:var(--warn)">No agreements folder found. Tried: ${docsData.candidates.map(c=>`<code>${docEsc(c)}</code>`).join(', ')}. Set <code>DOCUMENTS_PATH</code> to its path if it has moved.</span>`;
+    box.innerHTML = '';
+    return;
+  }
+
+  const q = (($('#docsSearch')||{}).value || '').trim().toLowerCase();
+  const f = ($('#docsFilter')||{}).value || 'all';
+  const keepFile = (file, vendor) => {
+    if (q && !vendor.toLowerCase().includes(q) && !file.name.toLowerCase().includes(q)) return false;
+    if (f === 'term') return !!file.term;
+    if (f === 'expiring'){ const d = docDaysLeft(file.term); return d != null && d <= 90; }
+    if (f === 'all') return true;
+    return file.type === f;
+  };
+
+  const groups = (docsData.vendors||[])
+    .map(v => ({ ...v, shown: (v.files||[]).filter(file => keepFile(file, v.vendor)) }))
+    .filter(v => v.shown.length || v.error);
+
+  const t = docsData.totals || {};
+  const expiring = (docsData.vendors||[]).reduce((n, v) =>
+    n + (v.files||[]).filter(file => { const d = docDaysLeft(file.term); return d != null && d <= 90; }).length, 0);
+  summary.innerHTML = [
+    `<span class="chip">${t.vendors||0} vendors</span>`,
+    `<span class="amt-pill" style="background:var(--accent-soft);color:var(--accent-ink)">${t.order||0} order forms</span>`,
+    `<span class="amt-pill" style="background:var(--good-soft);color:var(--good)">${t.agreement||0} agreements</span>`,
+    `<span class="amt-pill" style="background:var(--warn-soft);color:var(--warn)">${t.kyc||0} KYC</span>`,
+    t.other ? `<span class="chip">${t.other} other</span>` : '',
+    expiring ? `<span class="amt-pill" style="background:var(--danger-soft);color:var(--danger)">${expiring} ending within 90 days</span>` : '',
+  ].filter(Boolean).join('');
+
+  const shownCount = groups.reduce((n, v) => n + v.shown.length, 0);
+  $('#docsCount').textContent = `${shownCount} of ${t.files||0} documents`;
+  const at = docsData.syncedAt ? new Date(docsData.syncedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '';
+  $('#docsStatus').innerHTML = `From <code>${docEsc(docsData.root)}</code>${at?` · read ${at}`:''}`
+    + (docsData.truncated ? ' · <span style="color:var(--warn)">the scan ran out of time, some vendors are missing — rescan</span>' : '');
+
+  if (!groups.length){
+    box.innerHTML = '<div class="cap" style="padding:12px 4px">No documents match this filter.</div>';
+    return;
+  }
+
+  box.innerHTML = '<div class="inv-files">' + groups.map(v => {
+    const head = `<div class="doc-vendor"><b>${docEsc(v.vendor)}</b>`
+      + `<span class="cap">${v.shown.length} document${v.shown.length===1?'':'s'}</span>`
+      + `<div class="grow"></div>`
+      + (v.webUrl ? `<a href="${docEsc(v.webUrl)}" target="_blank" rel="noopener" class="cap">open ↗</a>` : '')
+      + `</div>`;
+    if (v.error) return head + `<div class="inv-file"><span style="color:var(--danger)">Couldn't list this folder: ${docEsc(v.error)}</span></div>`;
+    return head + v.shown.map(file => {
+      const days = docDaysLeft(file.term);
+      const termCls = days == null ? '' : days < 0 ? ' past' : days <= 90 ? ' soon' : '';
+      const termTxt = !file.term ? ''
+        : `${monthLabel(file.term.start)} → ${monthLabel(file.term.end)}`
+          + (days == null ? '' : days < 0 ? ` · expired` : ` · ${days}d left`);
+      const where = file.subfolder ? `<span class="when">${docEsc(file.subfolder)}</span>` : '';
+      const when = file.uploadedAt ? new Date(file.uploadedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+      const size = file.size ? `${Math.max(1, Math.round(file.size/1024))} KB` : '';
+      const label = docEsc(file.name);
+      return `<div class="inv-file">
+        <span class="doc-kind ${file.type}">${DOC_KINDS[file.type]||'Other'}</span>
+        ${file.webUrl?`<a href="${docEsc(file.webUrl)}" target="_blank" rel="noopener">${label}</a>`:`<span style="flex:1">${label}</span>`}
+        ${where}
+        <span class="doc-term${termCls}">${termTxt}</span>
+        <span class="when">${size}</span>
+        <span class="when">${when}</span>
+      </div>`;
+    }).join('');
+  }).join('') + '</div>';
+}
+
+$('#docsRefresh').onclick = () => loadDocuments(true);
+$('#docsFilter').onchange = renderDocuments;
+$('#docsSearch').oninput = renderDocuments;
 
 /* ---------------- passwords: the workbook's "Invoices mail id" sheet ---------------- */
 // Fetched only when someone opens the page (sidebar item or the Load button),

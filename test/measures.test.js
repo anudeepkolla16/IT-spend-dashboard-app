@@ -319,7 +319,7 @@ const ROUTER = (() => {
 
 test('every sidebar destination is a route, and an unknown one falls back', () => {
   assert.deepStrictEqual(Object.keys(ROUTER.PAGES),
-    ['overview', 'applications', 'renewals', 'invoices', 'questions', 'rules', 'passwords']);
+    ['overview', 'applications', 'renewals', 'invoices', 'documents', 'questions', 'rules', 'passwords']);
   // The sidebar lists exactly those, in that order.
   const nav = [...html.matchAll(/<button class="nav-item[^"]*" data-page="([a-z]+)"/g)].map(m => m[1]);
   assert.deepStrictEqual(nav, Object.keys(ROUTER.PAGES), 'the nav and the router cannot list different places');
@@ -342,7 +342,8 @@ test('every sidebar destination is a route, and an unknown one falls back', () =
 test('each card declares its page, and the router only hides content', () => {
   for (const [id, page] of [['kpis', 'overview'], ['trendCard', 'overview'], ['changeCard', 'overview'],
                             ['appsCard', 'applications'], ['renewalsCard', 'renewals'],
-                            ['invoiceCard', 'invoices'], ['loginsCard', 'passwords']]) {
+                            ['invoiceCard', 'invoices'], ['docsCard', 'documents'],
+                            ['loginsCard', 'passwords']]) {
     assert.match(html, new RegExp(`id="${id}"[^>]*data-page="[^"]*${page}`), `${id} belongs to ${page}`);
   }
   assert.match(html, /id="pendingCard" data-page="questions rules"/, 'one card can serve two routes');
