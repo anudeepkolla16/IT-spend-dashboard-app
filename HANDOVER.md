@@ -809,13 +809,27 @@ the new path, relative to the OneDrive root, and redeploy.
 
 ## Common tasks
 
-**Add someone to the dashboard:** edit `ALLOWED_EMAILS` in Vercel (comma-separated), then redeploy (Deployments → ⋯ → Redeploy on the latest, or push any commit). It takes effect on that deployment; until then a newly added person is still refused at sign-in.
+**Add someone to the dashboard:** edit `ALLOWED_EMAILS` in Vercel, then redeploy (Deployments → ⋯ → Redeploy on the latest, or push any commit). It takes effect on that deployment; until then a newly added person is still refused at sign-in.
 
-If someone is refused, the page now says which of the two things went wrong, and the same line is in Vercel → Logs (the address only, never the list):
+**How the list is written.** Addresses separated by commas, by new lines, or by
+both — the value box is a textarea, so one per line is fine and does not need
+trailing commas. Case and stray spaces don't matter, and a pasted
+`Ana Example <ana@example.com>` is read as the address inside it. `EDITOR_EMAILS`
+takes the same form.
+
+```
+anudeep.kolla@sarasanalytics.com
+santoshi.ch@sarasanalytics.com
+rajamma@sarasanalytics.com
+subha.kumar@sarasanalytics.com
+```
+
+If someone is refused, the page says which of the three things went wrong, and the same line is in Vercel → Logs (the address only, never the list):
 
 | The page says | What to do |
 |---|---|
 | "this deployment has no access list at all: `ALLOWED_EMAILS` is empty" | Set it in Vercel, then **redeploy** — setting it alone changes nothing. |
+| "no email address could be read out of `ALLOWED_EMAILS`" | The variable is set, but nothing in it contains an `@` — a placeholder, or a note to yourself. Replace it with the addresses and redeploy. |
 | "that address is not on the dashboard's access list (N on it)" | The list exists, so it is a spelling question. Microsoft signs people in under one exact address (`preferred_username`), and that is the string that has to be on the list — an alias for the same mailbox will not match. The page shows the person the address they were signed in under; copy that. |
 
 **Point at a different / renamed sheet:** update `TARGET_FILE_PATH` to the new relative path, then redeploy.

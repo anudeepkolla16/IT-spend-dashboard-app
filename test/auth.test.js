@@ -103,3 +103,55 @@ test('no session cookie is set for anyone refused', async () => {
     assert.strictEqual(out.headers['Set-Cookie'], undefined);
   }
 });
+
+// --- However the list was typed into Vercel ---------------------------------
+//
+// "how to add multiple id's in allowed list" — the value box is a textarea, and
+// splitting on commas alone turned a list pasted one-per-line into a single
+// unmatchable string, which from the outside looks exactly like the variable
+// being empty.
+
+const { emailList } = require('../lib/session');
+
+test('a list is a list however it was typed', () => {
+  const three = ['ana@example.com', 'bo@example.com', 'cy@example.com'];
+  assert.deepStrictEqual(emailList('ana@example.com,bo@example.com,cy@example.com'), three);
+  assert.deepStrictEqual(emailList('ana@example.com, bo@example.com, cy@example.com'), three, 'spaces after the commas');
+  assert.deepStrictEqual(emailList('ana@example.com\nbo@example.com\ncy@example.com'), three, 'one per line, no commas');
+  assert.deepStrictEqual(emailList('ana@example.com,\n  bo@example.com;cy@example.com  '), three, 'and any mixture of the two');
+  assert.deepStrictEqual(emailList('Ana@Example.com,BO@EXAMPLE.COM,cy@example.com'), three, 'case is the owner\'s typing');
+  // Outlook and Teams paste a display name around the address.
+  assert.deepStrictEqual(emailList('Ana Example <ana@example.com>, "Bo" <bo@example.com>'),
+    ['ana@example.com', 'bo@example.com']);
+  // Nothing that could never match is carried as if it were a person.
+  assert.deepStrictEqual(emailList('ana@example.com, , ,'), ['ana@example.com']);
+  assert.deepStrictEqual(emailList('add the team here'), []);
+  assert.deepStrictEqual(emailList(''), []);
+  assert.deepStrictEqual(emailList(undefined), []);
+});
+
+test('a list pasted one per line lets those people in', async () => {
+  const out = await invoke('subha.kumar@sarasanalytics.com',
+    'anudeep.kolla@sarasanalytics.com\nsantoshi.ch@sarasanalytics.com\nrajamma@sarasanalytics.com\nsubha.kumar@sarasanalytics.com');
+  assert.strictEqual(out.statusCode, 302, 'this used to be a 403: the four read as one address');
+});
+
+test('a variable set to something unreadable says so, not that it is empty', async () => {
+  const out = await invoke('ana@example.com', 'add the team here');
+  assert.strictEqual(out.statusCode, 403);
+  assert.match(out.body, /no email address could be read/);
+  assert.match(out.body, /commas, new lines or both/, 'and what to write instead');
+  assert.ok(!/has no access list at all/.test(out.body), 'the variable is set — saying "empty" sends them to the wrong place');
+  assert.match(logged.join('\n'), /holds no readable address/);
+  // Genuinely unset still reads as unset.
+  const unset = await invoke('ana@example.com', '');
+  assert.match(unset.body, /has no access list at all/);
+});
+
+test('EDITOR_EMAILS reads the same way', () => {
+  const { canEdit } = require('../lib/session');
+  process.env.EDITOR_EMAILS = 'anudeep.kolla@sarasanalytics.com\nSantoshi.CH@sarasanalytics.com';
+  assert.strictEqual(canEdit('santoshi.ch@sarasanalytics.com'), true);
+  assert.strictEqual(canEdit('rajamma@sarasanalytics.com'), false);
+  delete process.env.EDITOR_EMAILS;
+});
