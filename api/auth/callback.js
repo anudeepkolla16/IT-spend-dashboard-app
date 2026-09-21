@@ -1,4 +1,4 @@
-const { sign, parseCookies, decodeIdTokenPayload } = require('../../lib/session');
+const { sign, parseCookies, decodeIdTokenPayload, emailList } = require('../../lib/session');
 const { graphFetch } = require('../../lib/graph');
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -56,11 +56,18 @@ module.exports = async (req, res) => {
     // from the other end. Both are named now, and both leave a line in the
     // runtime logs — the address alone, which is already on the refused
     // person's own screen, never the list itself.
-    const allowed = (ALLOWED_EMAILS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    const allowed = emailList(ALLOWED_EMAILS);
     if (!allowed.length) {
-      console.warn(`auth: refused ${email} — ALLOWED_EMAILS is empty on this deployment`);
-      return htmlError(res, 403, `Signed in as <b>${email}</b>, but this deployment has no access list at all: <code>ALLOWED_EMAILS</code> is empty.
-        Nobody can sign in until it is set in Vercel <b>and the app redeployed</b> — env vars are read at deploy time, so setting one changes nothing on its own.`);
+      // Set but unreadable is its own answer: the variable is there, so being
+      // told it is "empty" would send the owner looking in the wrong place.
+      const wasSet = String(ALLOWED_EMAILS || '').trim() !== '';
+      console.warn(`auth: refused ${email} — ALLOWED_EMAILS ${wasSet ? 'holds no readable address' : 'is empty'} on this deployment`);
+      return htmlError(res, 403, wasSet
+        ? `Signed in as <b>${email}</b>, but no email address could be read out of <code>ALLOWED_EMAILS</code> on this deployment —
+           nothing in it contains an "@". It takes addresses separated by commas, new lines or both, e.g.
+           <code>ana@example.com, bo@example.com</code>. Fix it in Vercel and <b>redeploy</b>.`
+        : `Signed in as <b>${email}</b>, but this deployment has no access list at all: <code>ALLOWED_EMAILS</code> is empty.
+           Nobody can sign in until it is set in Vercel <b>and the app redeployed</b> — env vars are read at deploy time, so setting one changes nothing on its own.`);
     }
     if (!allowed.includes(email)) {
       console.warn(`auth: refused ${email} — not among the ${allowed.length} addresses this deployment allows`);
