@@ -46,9 +46,12 @@ export default function middleware(request) {
   // Read-only report access. The IT report agent (a GitHub Actions job) has no
   // browser session; it presents REPORT_TOKEN as a Bearer token and may read
   // only the two data endpoints — never the auth, import, upload or amount
-  // routes, and never the Password page's `?sheet=logins` payload.
+  // routes, never the Password page's `?sheet=logins` payload, and never the
+  // `?mode=documents` drawer, which lists signed contracts and KYC paperwork
+  // (PAN cards, cancelled cheques) that a spend report has no business seeing.
   if (request.method === 'GET' && REPORT_READ_PATHS.has(url.pathname)
-      && url.searchParams.get('sheet') !== 'logins') {
+      && url.searchParams.get('sheet') !== 'logins'
+      && url.searchParams.get('mode') !== 'documents') {
     const want = process.env.REPORT_TOKEN || '';
     const got = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
     if (want && got && got.length === want.length

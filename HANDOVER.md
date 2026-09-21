@@ -587,6 +587,55 @@ position), Sentry's `Total $82.31 USD`, Webflow's `TotalUSD 816.00`, PostHog's `
 
 ---
 
+## 📑 Agreements & KYC page
+
+The sidebar's **Agreements & KYC** item is the contracts drawer: the SharePoint
+folder `Desktop/Anudeep files/Aggrements and Kyc/`, one subfolder per vendor,
+holding signed agreements, order forms and vendor KYC paperwork (GST and Udyam
+certificates, PAN cards, cancelled cheques).
+
+**These are deliberately kept out of the invoice archive.** An order form
+covering "may 2026 to may 2027" is one commitment, not twelve bills. The Invoice
+Checklist counts any file under `{archive}/{App}/` as evidence that month was
+invoiced, so mirroring this folder in there would tick twelve months nothing was
+billed for, and the sheet's own invoice tracker with them. The folder is read
+where it stands and nothing is copied, moved or written.
+
+- Read only when the page is opened (sidebar item, or the **Load** button),
+  through `/api/invoices/list?mode=documents`. Cached five minutes server-side;
+  **↻ Rescan folder** forces a fresh crawl.
+- Each file is sorted by its **name** into one of four kinds — order form,
+  agreement, KYC, other. Name is all there is to go on: the folder carries no
+  metadata and opening fourteen PDFs to classify them would cost more than the
+  page is worth. The spellings on the drive are matched as they are, so
+  "Antropic Aggrement.pdf" still reads as an agreement.
+- A **term** is shown only when the file name gives both ends
+  (`Order Form may 2026 to may 2027.pdf` → `May 2026 → May 2027 · 252d left`).
+  A single date in a name is as likely to be when it was signed as when it runs
+  out, so it is left alone — a wrong expiry is worse than none. Terms ending
+  within 90 days are counted in the summary and coloured.
+- Filters: by kind, "only documents with a term", "only terms ending within
+  90 days", plus a vendor/file search.
+- Files sitting loose at the top of the folder, in no vendor subfolder, are
+  listed under **Unfiled** rather than dropped — a contract nobody filed is
+  exactly the one worth noticing.
+- The folder path is **probed, not hardcoded**, for the same reason the invoice
+  archive is (see below): `DOCUMENTS_PATH`, then
+  `Desktop/Anudeep files/Aggrements and Kyc`, then
+  `Desktop/Anudeep files/Agreements and KYC`, then `Agreements and KYC`. If none
+  exists the page says which paths it tried instead of showing an empty drawer.
+- Not readable with `REPORT_TOKEN`. The read-only report agent may fetch
+  `/api/invoices/list`, but `?mode=documents` is excluded in `middleware.js`
+  alongside `?sheet=logins`: signed contracts, PAN cards and cancelled cheques
+  are no part of a spend report. Anyone who can sign in to the dashboard can
+  open the page.
+
+**Tests:** `test/documents.test.js` pins the classification of every file
+currently in the folder, the term parsing, and that a missing folder reports
+itself rather than reading as empty.
+
+---
+
 ## 🔑 Password page
 
 The sidebar's **Password** item shows the workbook's **Invoices mail id** sheet
@@ -736,6 +785,7 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 | `INVOICE_MAILBOX` | Shared mailbox the invoice sync reads. Defaults to `invoices@sarasanalytics.com` (note the plural) if unset. |
 | `INVOICE_ARCHIVE_PATH` | Where invoices are archived, relative to the OneDrive root. Normally **unset** — the path is probed (see "The archive path is resolved, not hardcoded" below). Set it only if the folder is renamed to something the probe doesn't know. |
 | `INVOICE_SOURCE_PATH` | Older name for the same thing; still honoured, second in the probe order. Prefer `INVOICE_ARCHIVE_PATH`. |
+| `DOCUMENTS_PATH` | Where the agreements/KYC folder lives, relative to the OneDrive root. Normally **unset** — the path is probed (`Desktop/Anudeep files/Aggrements and Kyc` first). Set it only if the folder is renamed or moved somewhere the probe doesn't know. |
 | `SPEND_SHEET_NAME` | Worksheet holding the amounts. Defaults to `Spendings`; only set it if that tab is renamed. |
 | `LOGIN_SHEET_NAME` | Worksheet the Password page shows. Defaults to `Invoices mail id`; only set it if that tab is renamed. |
 | `SLACK_BOT_TOKEN` | `xoxb-…` token of the workspace's Slack app (scopes `chat:write`, `im:write`, `im:history`). Unset = no DMs, runs still work. Set on 2 Sep 2026. |
@@ -771,6 +821,10 @@ Secrets live only in Vercel, never in the repo. Names and purpose:
 - **Invoice archive:** one folder, currently `Desktop/Anudeep files/Invoices/`. Everything reads and
   writes under it — hand-filed invoices, mailbox invoices, dashboard uploads, and the sync's own
   bookkeeping. Inside it: `{vendor or app}/{month}/invoice.pdf`.
+- **Agreements & KYC:** `Desktop/Anudeep files/Aggrements and Kyc/`, one subfolder per vendor
+  (Ar Enterprices, Claude, Clickup, Hubspot, Microsoft, Slack, Sprinto). Signed agreements, order
+  forms and KYC paperwork. **Read-only, and never mirrored into the invoice archive** — see the
+  Agreements & KYC page above for why. Path probed by `resolveDocumentsRoot` in `lib/documents.js`.
 - **Unmatched invoices:** `{archive}/_Unmatched/{month}/…` — invoices whose vendor didn't match an app row.
 - **Bookkeeping files**, all directly inside the archive: `_sync-config.json` (source link +
   folder→app mapping), `_mail-sync.json` (last run, seen message IDs), `_invoice-index.json`
@@ -850,6 +904,8 @@ lib/
   statement.js                 Parses Finance's statement workbook into transactions
   vendor-map.js                Vendor label → app row matching (seeded aliases + descriptor rules)
   spend-sheet.js               Opens the spend workbook, alias map and audit log
+  documents.js                 The Agreements & KYC drawer: probes the contracts folder, groups by vendor,
+                               sorts each file by kind and reads a term off its name. Read-only.
   mail.js                      Graph mail helpers — invoice detection, forwarded-sender parsing
   mail-sync.js                 Files invoice PDFs from the shared mailbox, holds what it is unsure of, totals months, ticks the tracker, sets cells, reports by Slack
   slack.js                     Slack DM: post the run report, read the owner's replies
@@ -869,7 +925,9 @@ api/
   amounts.js                   One route for the amount import; dispatches on `action`
   auth/{login,callback,logout,me}.js   Microsoft OAuth sign-in flow
   invoices/
-    list.js                    Lists an app's invoices; `?mode=checklist` returns the whole archive
+    list.js                    Lists an app's invoices; `?mode=checklist` returns the whole archive,
+                               `?mode=documents` the agreements/KYC folder (one route: the Hobby plan
+                               allows 12 functions and the deployment is at it)
     upload.js                  Manual single-PDF upload from a drill-down modal
     import.js                  Bulk import: preview (suggest matches) + batched commit (skips existing)
     save-sync-config.js        Persists the folder→app mapping to _sync-config.json
