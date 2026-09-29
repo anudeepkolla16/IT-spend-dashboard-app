@@ -225,6 +225,25 @@ The scan caches what it read. A record from before line-item ranges were read (S
 found no period is read again once, so an invoice whose period was there all along is proposed for
 its month; a record that found a period stands.
 
+### Held invoices are re-read when the reader changes
+
+A held invoice keeps the figure the reader gave it when it arrived, and answering the question
+writes *that* figure — so a reader fix has to reach the queue, not just new mail.
+
+Every run re-reads held invoices, but each one **only once per `PARSE_VERSION`** (the same counter
+`_invoice-index.json` uses, stamped on the held item). So a reader fix sweeps the queue once and an
+ordinary run downloads nothing. Bounded to 12 a run, sharing the run's time with the mailbox, so a
+long queue converges over a few runs. The report names only the invoices whose figure actually
+changed, with the old value beside the new; unchanged ones are silent.
+
+Invoices held as **unreadable** are retried on *every* run and never stamped: what they are waiting
+for is a new reader, not a new total.
+
+This was found the hard way. Docusign's September invoice read `143.44` against a real `2,828.58`
+(the tax line, see "Notes / gotchas"). The reader was fixed, but the held item kept `143.44`,
+because re-reading was limited to items held as unreadable and this one was held for want of a
+filing rule. Answering it would have put the tax into the sheet.
+
 ### Invoice totals and the Spendings sheet
 
 The sync totals **every invoice in the app's month folder** — not just the ones that arrived by
@@ -951,6 +970,16 @@ api/
 
 ## Notes / gotchas
 
+- **A tax line printed *above* the total is not the total.** Docusign stacks its summary
+  `SubTotal 2,685.14` / `Tax Total* 143.44` / `Total 2,828.58`, and `\btotal\b` matched the "Total"
+  inside "Tax Total\*" — the earlier match in the text, so it won, and a $2,828.58 invoice read as
+  $143.44 and was offered to the sheet as usable USD. The guard in `lib/invoice-amount.js` had only
+  ever looked *forward* (which is how Luzmo's "Total Sales Tax" was caught); it now refuses a tax,
+  VAT or GST word on **either** side. `Subtotal` is one word, so there is no boundary before its
+  "Total" — it needs no guard and stays readable. `Invoice Balance` is read as a late fallback, below
+  the plain totals, because a part-paid balance is less than the charge and the sheet records the
+  charge. **Any change of this kind must bump `PARSE_VERSION` in `lib/mail-sync.js`**, or every
+  figure already cached in `_invoice-index.json` keeps whatever the old patterns read.
 - **Amounts are USD.** The sheet's native currency; no conversion is applied.
 - **The page is a light, app-style layout** (September 2026): a fixed sidebar (search, section
   navigation, the count of open questions, sync status), a page header with the actions, a KPI
