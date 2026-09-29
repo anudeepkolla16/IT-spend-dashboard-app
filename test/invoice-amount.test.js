@@ -69,6 +69,46 @@ test('an invoice that only states a pre-tax total still yields that', () => {
   assert.strictEqual(r.via, 'total excl. tax');
 });
 
+// Invoices/_Pending/P61-111100734908_20260929070134_1.pdf — Docusign, Sep 2026.
+// Read as $143.44 and offered to the sheet as usable USD against a real
+// $2,828.58: a 20x error. The tax guard only ever looked FORWARD, so it caught
+// "Total … Tax … 32.78" (Luzmo, above) and sailed past "Tax Total* 143.44",
+// where the tax word comes first and the match therefore comes first too.
+const DOCUSIGN_SUMMARY = {
+  columns: 'SubTotal 2,685.14\nTax Total* 143.44\nTotal 2,828.58\nCurrency USD\nAdjustments 0.00\nCredits 0.00\nTax Credits 0.00\nPayments 0.00\nInvoice Balance 2,828.58',
+  stacked: 'SubTotal\n2,685.14\nTax Total*\n143.44\nTotal\n2,828.58\nCurrency\nUSD\nInvoice Balance\n2,828.58',
+  inline: 'SubTotal 2,685.14 Tax Total* 143.44 Total 2,828.58 Currency USD Adjustments 0.00 Credits 0.00 Tax Credits 0.00 Payments 0.00 Invoice Balance 2,828.58',
+};
+
+test('a tax total printed above the total is never taken for it', () => {
+  for (const [layout, text] of Object.entries(DOCUSIGN_SUMMARY)) {
+    const r = extractInvoiceTotal(text);
+    assert.strictEqual(r.amount, 2828.58, `${layout} layout read ${r.amount}`);
+    assert.strictEqual(r.usable, true, layout);
+  }
+});
+
+test('the tax line alone is refused whichever side the tax word sits', () => {
+  // Forward ("Total Sales Tax") is covered above; these are the backward forms.
+  for (const text of ['Tax Total* 143.44', 'VAT Total 20.00', 'GST Total 45.00', 'Sales Tax Total 143.44']) {
+    assert.strictEqual(extractInvoiceTotal(text).amount, null, text);
+  }
+  // A real total still reads, with the tax line right above it.
+  assert.strictEqual(extractInvoiceTotal('VAT Total 20.00\nTotal 120.00 USD').amount, 120);
+  // "Subtotal" is one word — no boundary before "Total" — and must stay readable.
+  assert.strictEqual(extractInvoiceTotal('Subtotal $85.00 Total $85.00 Amount due $85.00 USD').amount, 85);
+});
+
+test('the invoice balance is a fallback, not a preference', () => {
+  // It rescues a summary run onto one line, where "Total" is followed by more
+  // text and matches nothing…
+  const r = extractInvoiceTotal(DOCUSIGN_SUMMARY.inline);
+  assert.strictEqual(r.via, 'invoice balance');
+  // …but a balance already settled is not the month's charge, so the zero rule
+  // keeps looking rather than recording nought.
+  assert.strictEqual(extractInvoiceTotal('Total 500.00 USD Payments 500.00 Invoice Balance 0.00').amount, 500);
+});
+
 test('reads the total from a simple USD invoice', () => {
   const r = extractInvoiceTotal(BUBBLE);
   assert.strictEqual(r.amount, 32);
