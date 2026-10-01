@@ -970,6 +970,18 @@ api/
 
 ## Notes / gotchas
 
+- **The run's deadline is shared, and the writes are not free.** `settleMonths` parses the
+  month's PDFs and then writes: an Excel session, the tracker, every cell, the audit log and the
+  index — each a Graph round trip. The parse loop used to be allowed to run right up to the run's
+  deadline, which went unnoticed for years because almost every PDF came from `_invoice-index.json`
+  and parsing took a second or two. Bumping `PARSE_VERSION` to 3 invalidated all 107 cached reads
+  at once; parsing ran its full 45 seconds, the writes started from there, and the function passed
+  Vercel's 60-second ceiling — **HTTP 504, `FUNCTION_INVOCATION_TIMEOUT`, and the whole run lost**,
+  including the figures it had just spent 45 seconds parsing. `parseBudget` now holds back a share
+  of the window (40%, capped at 20s) for the writes, and takes at most 20 files a run. A sweep
+  therefore spreads over several runs, which is fine: each run persists what it parsed, stamped
+  with the current `PARSE_VERSION`, so the next one carries on. **So a `PARSE_VERSION` bump costs
+  several runs, not one** — expect the first few after one to be slow and to report re-read figures.
 - **A tax line printed *above* the total is not the total.** Docusign stacks its summary
   `SubTotal 2,685.14` / `Tax Total* 143.44` / `Total 2,828.58`, and `\btotal\b` matched the "Total"
   inside "Tax Total\*" — the earlier match in the text, so it won, and a $2,828.58 invoice read as
