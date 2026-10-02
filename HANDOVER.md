@@ -117,8 +117,17 @@ of its points:**
    usage in arrears and September's from one billing the month ahead, and filing by the date put
    August under September. So an invoice stating no period at all is filed by **how its vendor
    bills** — `"period": "arrears"` (the month before its date) or `"advance"` (the month it is
-   dated) on the vendor's rule — and while that is not known the sync **asks**, then remembers the
-   answer on the rule. The month the mail arrived is never assumed.
+   dated) on **the row's rule, or the vendor's** — and while that is not known the sync **asks**,
+   then remembers the answer. The month the mail arrived is never assumed.
+
+   **A convention on a row beats the vendor's**, because one vendor's rows need not bill alike.
+   Anthropic is the case that proved it: the API console meters usage and bills it after the fact
+   (`Usage Sep 1 – Sep 30` on an invoice issued 1 October), while the Claude seats beside it are
+   charged a month ahead. The answer used to be remembered **vendor-wide**, so a single reply about
+   one row replaced Anthropic's seeded `period: "usage"` with a flat `"advance"` — and on
+   2 October the console's September usage, on an invoice stating no period, was filed as October.
+   An answer now lands on the row it was about and says so (`…(Anthropic's other rows are
+   unaffected)`); a vendor-level convention remains the fallback for rows that have none.
 3. *Check the line items.* Where one vendor bills several rows, each row's rule lists `text`
    phrases and the first row whose phrase appears in the invoice wins. Anthropic's three rows
    are told apart by the **invoice number's account prefix** — `Q8MUNTUC-…` is the API console,
@@ -982,6 +991,21 @@ api/
   therefore spreads over several runs, which is fine: each run persists what it parsed, stamped
   with the current `PARSE_VERSION`, so the next one carries on. **So a `PARSE_VERSION` bump costs
   several runs, not one** — expect the first few after one to be slow and to report re-read figures.
+- **A date after a due or paid label is not the amount.** AWS prints
+  `TOTAL AMOUNT DUE ON October 11 , 2026   USD 2,401.67`, and the `amount due` pattern stepped over
+  `" ON October "` and captured **11**, the day of the month. **Every AWS invoice in the archive
+  read as $11**, for months, and the dashboard showed $11 for a month that cost $2,401.67. No month
+  name may now stand between one of those labels and the figure claimed for it, in either direction
+  (`due by 15 March 2027` is the same trap read backwards) — unless a currency code marks the figure
+  as money, which is how AWS's own line is read correctly.
+- **The invoice's own arithmetic is checked against whatever pattern fired.** Every wrong figure
+  this reader has produced was wrong the same way: a pattern matched something that was not the
+  total, and it went into the sheet as `usable` because nothing asked whether it made sense. Each
+  was found by the owner, months apart, never by the sync. So when an invoice states a subtotal and
+  a tax **and prints their sum**, a total that contradicts that sum is reported but **not offered**
+  — the invoice is held and the question asked. Deliberately not "the biggest figure wins": Adobe's
+  unit price is nearly twice its total because a discount sits between them, and that invoice is
+  perfectly good.
 - **A tax line printed *above* the total is not the total.** Docusign stacks its summary
   `SubTotal 2,685.14` / `Tax Total* 143.44` / `Total 2,828.58`, and `\btotal\b` matched the "Total"
   inside "Tax Total\*" — the earlier match in the text, so it won, and a $2,828.58 invoice read as

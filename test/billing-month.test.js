@@ -95,6 +95,127 @@ test('the owner\'s month for an undated invoice is remembered as how the vendor 
   assert.strictEqual(RULES.vendors[0].period, undefined);
 });
 
+// --- One vendor, rows that bill differently ---------------------------------
+//
+// Anthropic's seeded rule says `period: "usage"` — read the line items, and ask
+// if they say nothing. One answer about one of its rows replaced that with a
+// flat vendor-wide "advance", and from then on every Anthropic invoice without
+// a readable period was filed as the month it was dated. On 2 October the API
+// console's September usage, invoiced on 1 October, went into October. Its
+// Claude seats genuinely are billed a month ahead; the console is not, and a
+// single field could not hold both.
+
+const { classify } = require('../lib/invoices/rules');
+
+const ANTHROPIC_ROWS = { version: 1, vendors: [{
+  name: 'Anthropic', domains: ['anthropic.com'], subject: ['Anthropic'], period: 'usage',
+  apps: [
+    { app: 'Anthropic(Api Console)', text: ['Q8MUNTUC'], period: 'arrears' },
+    { app: 'Claude Ai', text: ['2FSKIDHO'], period: 'advance' },
+    { app: 'Claude Ai Max 6 Accounts', text: ['XQRYKLO3'] },
+  ],
+}] };
+const ROW_APPS = ['Anthropic(Api Console)', 'Claude Ai', 'Claude Ai Max 6 Accounts'];
+
+test('a row keeps its own billing convention, whatever the vendor says', () => {
+  assert.strictEqual(conventionFor(ANTHROPIC_ROWS, 'Anthropic(Api Console)'), 'arrears');
+  assert.strictEqual(conventionFor(ANTHROPIC_ROWS, 'Claude Ai'), 'advance');
+  // No convention of its own: the vendor's is the fallback, and "usage" is not
+  // a convention — so this row is still asked about, which is the safe answer.
+  assert.strictEqual(conventionFor(ANTHROPIC_ROWS, 'Claude Ai Max 6 Accounts'), null);
+});
+
+test('a vendor-wide convention still covers the rows that have none', () => {
+  const mixed = { version: 1, vendors: [{
+    name: 'Anthropic', domains: ['anthropic.com'], subject: [], period: 'advance',
+    apps: [{ app: 'Anthropic(Api Console)', text: ['Q8MUNTUC'], period: 'arrears' }, { app: 'Claude Ai', text: ['2FSKIDHO'] }],
+  }] };
+  assert.strictEqual(conventionFor(mixed, 'Anthropic(Api Console)'), 'arrears', 'the row that was told apart');
+  assert.strictEqual(conventionFor(mixed, 'Claude Ai'), 'advance', 'and the vendor for the rest');
+});
+
+test('the rules keep a row\'s convention and drop anything else', () => {
+  const r = normalizeRules({ vendors: [{ name: 'V', domains: ['v.com'], apps: [
+    { app: 'A', text: ['a'], period: 'ARREARS' },
+    { app: 'B', text: ['b'], period: 'usage' },   // not a convention for an undated invoice
+    { app: 'C', text: ['c'], period: 'whenever' },
+  ] }] });
+  assert.strictEqual(r.vendors[0].apps[0].period, 'arrears');
+  assert.strictEqual(r.vendors[0].apps[1].period, undefined);
+  assert.strictEqual(r.vendors[0].apps[2].period, undefined);
+});
+
+test('filing an invoice carries the row\'s convention, not the vendor\'s', () => {
+  const signals = { address: 'billing@anthropic.com', subject: 'Your Anthropic invoice', attachmentNames: ['Invoice-Q8MUNTUC-0205.pdf'] };
+  const v = classify(ANTHROPIC_ROWS, signals, 'Invoice Q8MUNTUC 0205', ROW_APPS);
+  assert.strictEqual(v.app, 'Anthropic(Api Console)');
+  assert.strictEqual(v.period, 'arrears', 'the console meters usage; it is not billed a month ahead');
+
+  const seats = classify(ANTHROPIC_ROWS, { ...signals, attachmentNames: ['Invoice-2FSKIDHO-0012.pdf'] }, 'Invoice 2FSKIDHO 0012', ROW_APPS);
+  assert.strictEqual(seats.app, 'Claude Ai');
+  assert.strictEqual(seats.period, 'advance');
+});
+
+test('an answer about one row is not learned for the whole vendor', () => {
+  // This is the bug: September usage invoiced on 1 October is the console's
+  // September. Learning that must not move the Claude seats with it.
+  // As the live rule stood before the answer: the console not yet told apart.
+  const before = { version: 1, vendors: [{
+    name: 'Anthropic', domains: ['anthropic.com'], subject: [], period: 'usage',
+    apps: [
+      { app: 'Anthropic(Api Console)', text: ['Q8MUNTUC'] },
+      { app: 'Claude Ai', text: ['2FSKIDHO'], period: 'advance' },
+    ],
+  }] };
+  const item = { vendor: 'Anthropic', app: 'Anthropic(Api Console)', invoiceDate: '2026-10-01', periodStart: null };
+  const out = learnPeriod(before, item, '2026-09');
+  const vendor = out.rules.vendors[0];
+  assert.strictEqual(vendor.apps[0].period, 'arrears', 'learned on the row');
+  assert.strictEqual(vendor.period, 'usage', 'and the vendor is left as it was seeded');
+  assert.strictEqual(vendor.apps[1].period, 'advance', 'the seats are untouched');
+  assert.match(out.learned, /Anthropic\(Api Console\) is billed in arrears/);
+  assert.match(out.learned, /other rows are unaffected/);
+});
+
+test('a vendor that bills one row still learns at the vendor', () => {
+  // Nothing to tell apart, so the answer belongs to the vendor as before.
+  const out = learnPeriod(RULES, { vendor: 'Zapier', app: 'Zapier', invoiceDate: '2026-09-01', periodStart: null }, '2026-09');
+  assert.strictEqual(out.rules.vendors[0].period, 'advance');
+  assert.match(out.learned, /Zapier bills the month ahead/);
+});
+
+test('the live rule, as the bug left it, is repaired by the upgrade', () => {
+  const { upgradeRules } = require('../lib/invoices/rules');
+  // _vendor-rules.json on 2 October 2026: the seeded "usage" replaced by a flat
+  // vendor-wide "advance", learned from one answer, with no row told apart.
+  const live = { version: 1, locks: [], locksSeeded: 2, vendors: [{
+    name: 'Anthropic', domains: ['anthropic.com'], subject: ['Anthropic'], period: 'advance',
+    apps: [
+      { app: 'Anthropic(Api Console)', text: ['Q8MUNTUC'] },
+      { app: 'Claude Ai', text: ['2FSKIDHO'] },
+      { app: 'Claude Ai Max 6 Accounts', text: ['XQRYKLO3'] },
+    ],
+  }] };
+  const { rules, changed } = upgradeRules(live);
+  assert.strictEqual(changed, true);
+  const vendor = rules.vendors[0];
+  assert.strictEqual(vendor.apps[0].period, 'arrears', 'the console gets its own convention from the seed');
+  assert.strictEqual(vendor.period, 'advance', "and the owner's vendor-level value is left alone");
+  // Which is what actually matters: the console no longer inherits "advance",
+  // so a 1 October invoice stating no period is September's, not October's.
+  assert.strictEqual(conventionFor(rules, 'Anthropic(Api Console)'), 'arrears');
+  assert.strictEqual(conventionFor(rules, 'Claude Ai'), 'advance', 'the seats keep billing a month ahead');
+});
+
+test('the upgrade never overwrites a convention already on a row', () => {
+  const { upgradeRules } = require('../lib/invoices/rules');
+  const live = { version: 1, locks: [], locksSeeded: 2, vendors: [{
+    name: 'Anthropic', domains: ['anthropic.com'], subject: [], period: 'usage',
+    apps: [{ app: 'Anthropic(Api Console)', text: ['Q8MUNTUC'], period: 'advance' }],
+  }] };
+  assert.strictEqual(upgradeRules(live).rules.vendors[0].apps[0].period, 'advance', "the owner's value is theirs");
+});
+
 // --- Housekeeping the fix leans on ------------------------------------------
 
 test('the filing log keeps one line per file and month, the latest', () => {
