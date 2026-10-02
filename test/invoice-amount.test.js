@@ -109,6 +109,66 @@ test('the invoice balance is a fallback, not a preference', () => {
   assert.strictEqual(extractInvoiceTotal('Total 500.00 USD Payments 500.00 Invoice Balance 0.00').amount, 500);
 });
 
+// Invoices/AWS/Sep-26/invoice2844433441.pdf, and every AWS invoice before it.
+//
+// "TOTAL AMOUNT DUE ON October 11 , 2026   USD 2,401.67" — the `amount due`
+// pattern skipped " ON October " and captured 11, the day of the month. Every
+// AWS invoice in the archive read as $11 and the dashboard showed $11 for a
+// month that cost $2,401.67. Nothing caught it for months.
+const AWS_SEP = 'Amazon Web Services, Inc. Invoice  Account number:   214669062314  Invoice Summary  Invoice Number:   2844433441  Invoice Date:   October 1 , 2026  TOTAL AMOUNT DUE ON October 11 , 2026   USD 2,401.67  This invoice is for the billing period September 1 - September 30 , 2026  Summary  AWS Service Charges   USD 2,401.67  Charges   USD 2,387.70  Credits   USD 0.00  Tax   USD 13.97  Total for this invoice   USD 2,401.67  Detail for Consolidated Bill  Amazon Simple Queue Service   USD 37.58  Charges   USD 37.58';
+const AWS_AUG = 'Invoice Summary  Invoice Number:   2789999141  Invoice Date:   September 1 , 2026  TOTAL AMOUNT DUE ON September 11 , 2026   USD 2,374.66  This invoice is for the billing period August 1 - August 31 , 2026  Greetings from Amazon Web Services';
+
+test('the day of the month is never the amount due', () => {
+  const sep = extractInvoiceTotal(AWS_SEP);
+  assert.strictEqual(sep.amount, 2401.67, `read ${sep.amount} — "DUE ON October 11" must not yield 11`);
+  assert.strictEqual(sep.usable, true);
+  const aug = extractInvoiceTotal(AWS_AUG);
+  assert.strictEqual(aug.amount, 2374.66, `read ${aug.amount}`);
+  assert.strictEqual(aug.usable, true);
+});
+
+test('a date is only stepped over when the figure past it is marked as money', () => {
+  // With the currency code there, the figure is unmistakably the charge…
+  assert.strictEqual(extractInvoiceTotal('Amount due on October 11 , 2026   USD 2,401.67').amount, 2401.67);
+  // …and without it, the day is not taken as the total.
+  assert.strictEqual(extractInvoiceTotal('Amount due on October 11 , 2026').amount, null);
+  assert.strictEqual(extractInvoiceTotal('Total due by 15 March 2027').amount, null);
+});
+
+// --- The invoice's own arithmetic, as a check on the patterns ---------------
+//
+// Every wrong figure this reader has produced was wrong the same way: a
+// pattern matched something that was not the total, and it went into the sheet
+// as usable because nothing asked whether it made sense. The owner found each
+// one, months apart. A total that contradicts the invoice's own subtotal and
+// tax is now refused and held as a question instead.
+
+test('a figure that contradicts the invoice\'s subtotal and tax is not offered', () => {
+  // The Docusign shape, with a pattern reaching the tax line first.
+  const r = extractInvoiceTotal('Subtotal 2,685.14  Tax 143.44  Total 2,828.58  Amount due 143.44');
+  assert.strictEqual(r.amount, 143.44, 'the figure is still reported, so it can be seen');
+  assert.strictEqual(r.usable, false, 'but never written to the sheet');
+  assert.match(r.note, /2,828\.58/, 'and the note names what the invoice itself adds up to');
+});
+
+test('a discount above the total is ordinary and is not flagged', () => {
+  // Adobe: the unit price (69.99) is nearly twice the total (37.16) because a
+  // discount sits between them. "The biggest figure wins" would refuse this
+  // perfectly good invoice — the stated subtotal and tax do agree with 37.16.
+  const r = extractInvoiceTotal(ADOBE);
+  assert.strictEqual(r.amount, 37.16);
+  assert.strictEqual(r.usable, true, r.note);
+});
+
+test('the arithmetic is trusted only when the invoice prints the sum too', () => {
+  // Two lines that happen to match the labels are not a subtotal and its tax.
+  // Without the sum on the page there is nothing to hold the invoice to, so the
+  // reading stands rather than being refused on a guess.
+  const r = extractInvoiceTotal('Subtotal 100.00  Tax 10.00  Total 500.00 USD');
+  assert.strictEqual(r.amount, 500, 'no 110.00 anywhere, so nothing contradicts the total');
+  assert.strictEqual(r.usable, true, r.note);
+});
+
 test('reads the total from a simple USD invoice', () => {
   const r = extractInvoiceTotal(BUBBLE);
   assert.strictEqual(r.amount, 32);
