@@ -49,6 +49,64 @@ test('the invoice that started this moves to the month it bills for', () => {
   assert.strictEqual(v.move.amount, 557.28);
 });
 
+// Invoices/Anthropic(Api Console)/Oct-26/Invoice-Q8MUNTUC-0205.pdf.
+//
+// The console meters usage and bills it in arrears, so the invoice issued
+// 1 October is September's. It states no period the reader can find, and it
+// was already sitting in a month folder — so the scan fell through to "no
+// stated period is not a misfiling", reported "nothing to move", and left the
+// month wrong. That rule holds only while nobody knows how the row bills; the
+// mail sync was by then filing new console invoices by its convention, and
+// this one was out of step with every invoice that followed it.
+const consoleFolder = (extra) => ({
+  app: 'Anthropic(Api Console)',
+  vendorFolder: 'Anthropic(Api Console)',
+  month: '2026-10',
+  monthFolderNames: ['Aug', 'July', 'Oct-26'],
+  convention: 'arrears',
+  ...(extra || {}),
+});
+const consoleFile = (extra) => ({
+  name: 'Invoice-Q8MUNTUC-0205.pdf',
+  path: `${BASE}/Anthropic(Api Console)/Oct-26/Invoice-Q8MUNTUC-0205.pdf`,
+  relPath: 'Oct-26',
+  currentMonth: '2026-10',
+  folderMonth: '2026-10',
+  nameMonth: null,
+  read: true,
+  periodStart: null,          // nothing in the PDF says which month
+  periodEnd: null,
+  invoiceDate: '2026-10-01',
+  invoiceMonth: '2026-10',
+  amount: 16376.29,
+  currency: 'USD',
+  usable: true,
+  ...(extra || {}),
+});
+
+test('an invoice already in a month folder is moved when the row\'s convention contradicts it', () => {
+  const v = planMove(consoleFile(), consoleFolder(), BASE);
+  assert.ok(v && v.move, 'expected a move — "nothing to move" is what left September under October');
+  assert.strictEqual(v.move.fromMonth, '2026-10');
+  assert.strictEqual(v.move.toMonth, '2026-09');
+  assert.match(v.move.via, /billed in arrears/);
+  assert.strictEqual(v.move.amount, 16376.29);
+});
+
+test('a row billing the month ahead is left where it is', () => {
+  // Same shape, opposite convention: an invoice dated and filed in October is
+  // October's, and there is nothing to propose.
+  assert.strictEqual(planMove(consoleFile(), consoleFolder({ convention: 'advance' }), BASE), null);
+});
+
+test('without a known convention the folder month still stands', () => {
+  // The original rule, unchanged: most invoices state no period, and where the
+  // owner filed one is the best thing anyone knows about it.
+  assert.strictEqual(planMove(consoleFile(), consoleFolder({ convention: null }), BASE), null);
+  // And with no readable date there is nothing to reason from either.
+  assert.strictEqual(planMove(consoleFile({ invoiceMonth: null }), consoleFolder(), BASE), null);
+});
+
 test('every path is built from the archive root it was given', () => {
   // The archive has been renamed once already, and hardcoding its old name is
   // what broke the checklist. A move must follow the root the caller resolved.

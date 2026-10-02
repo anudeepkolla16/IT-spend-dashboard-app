@@ -223,12 +223,19 @@ of. The same test runs again at write time against the live sheet — approval s
 consider, never that a cell may be replaced. A month holding any invoice that could not be read as a
 USD total is likewise reported and left alone rather than written short.
 
-Left alone as a matter of course: invoices in a month folder that state no period (the folder is
-somebody's decision, and the date alone says nothing), a period more than two months from where the
-file sits (a contract term misread as a cycle), an annual or quarterly period (no majority month — it
-stays where it starts), and anything filed deeper than `{vendor}/{month}`. A loose invoice with no
-month in its name and no period inside is filed by its date only when the vendor's billing convention
-is on its rule (see point 2 above); otherwise it is reported as undated.
+Left alone as a matter of course: a period more than two months from where the file sits (a contract
+term misread as a cycle), an annual or quarterly period (no majority month — it stays where it
+starts), and anything filed deeper than `{vendor}/{month}`. A loose invoice with no month in its name
+and no period inside is filed by its date only when the row's billing convention is known (see
+point 2 above); otherwise it is reported as undated.
+
+**An invoice in a month folder that states no period** is left alone **only while the row's
+convention is unknown** — then the folder is somebody's decision and the date alone says nothing.
+Once the convention IS known, the folder can be contradicted by it, and the move is proposed. This
+is the gap that kept Anthropic's API console wrong: its October invoice is September's usage, the
+PDF states no period, it was already in `Oct-26`, so the scan reported *"nothing to move"* while
+the mail sync was by then filing new console invoices into September — the archive out of step with
+every invoice that followed it. Proposed, never applied on its own; it is ticked like any other.
 
 The scan caches what it read. A record from before line-item ranges were read (September 2026) that
 found no period is read again once, so an invoice whose period was there all along is proposed for
