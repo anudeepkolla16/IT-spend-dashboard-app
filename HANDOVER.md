@@ -117,8 +117,17 @@ of its points:**
    usage in arrears and September's from one billing the month ahead, and filing by the date put
    August under September. So an invoice stating no period at all is filed by **how its vendor
    bills** — `"period": "arrears"` (the month before its date) or `"advance"` (the month it is
-   dated) on the vendor's rule — and while that is not known the sync **asks**, then remembers the
-   answer on the rule. The month the mail arrived is never assumed.
+   dated) on **the row's rule, or the vendor's** — and while that is not known the sync **asks**,
+   then remembers the answer. The month the mail arrived is never assumed.
+
+   **A convention on a row beats the vendor's**, because one vendor's rows need not bill alike.
+   Anthropic is the case that proved it: the API console meters usage and bills it after the fact
+   (`Usage Sep 1 – Sep 30` on an invoice issued 1 October), while the Claude seats beside it are
+   charged a month ahead. The answer used to be remembered **vendor-wide**, so a single reply about
+   one row replaced Anthropic's seeded `period: "usage"` with a flat `"advance"` — and on
+   2 October the console's September usage, on an invoice stating no period, was filed as October.
+   An answer now lands on the row it was about and says so (`…(Anthropic's other rows are
+   unaffected)`); a vendor-level convention remains the fallback for rows that have none.
 3. *Check the line items.* Where one vendor bills several rows, each row's rule lists `text`
    phrases and the first row whose phrase appears in the invoice wins. Anthropic's three rows
    are told apart by the **invoice number's account prefix** — `Q8MUNTUC-…` is the API console,
