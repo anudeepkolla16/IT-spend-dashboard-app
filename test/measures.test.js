@@ -619,3 +619,65 @@ test('Logout cannot fall off the end of the sidebar', () => {
   assert.match(html, /\.side-foot \.who-name\{[^}]*text-overflow:ellipsis/, 'only the name is clipped');
   assert.ok(!/\.side-foot \.who\{font-weight:600;color:var\(--txt\);overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/.test(html));
 });
+
+// --- an app's contract state, in both tables --------------------------------
+//
+// The Monthly breakdown is a wall of month figures and said nothing about the
+// app behind a row: whether it is still live, and when it next renews. Both now
+// ride under the name in the sticky column. The state itself comes from one
+// function, because two tables answering "is this cancelled?" differently is
+// the kind of thing nobody notices until a cancelled app reads Active in one
+// view and not the other.
+const STATUS = lift(
+  ['appStatus'],
+  "// What an app's contract state is:",
+  'function drawOverview(',
+  // The page's own CANCELLED_RE, lifted rather than written out again: a
+  // second copy here would drift from the one that decides it in the app.
+  `const CANCELLED_RE = ${html.match(/const CANCELLED_RE = (\/.*?\/[a-z]*);/)[1]};
+   const isCancelled = t => CANCELLED_RE.test(String(t || ''));
+   const cycleMonths = c => (String(c).toLowerCase() === 'onetime' ? 0 : 1);
+   const realMonthKey = () => '2026-09';
+   const ALL_MONTHS = ['2026-07', '2026-08', '2026-09', '2026-10'];`
+);
+
+const statusApp = (extra) => ({ kind: 'Apps', name: 'X', cat: 'Monthly', renewalDate: '', ...(extra || {}) });
+const chargedMap = new Map([['X', { m: 100, pattern: 'monthly' }]]);
+
+test('an app that the sheet says is cancelled reads Cancelled, charges or not', () => {
+  // "Cancled after Sep" is how the sheet writes it, and Render kept being
+  // charged for months after — the contract's word beats the charges'.
+  assert.deepStrictEqual(STATUS.appStatus(statusApp({ renewalDate: 'Cancled after Sep', '2026-08': 44.31 }), chargedMap), ['ended', 'Cancelled']);
+  assert.deepStrictEqual(STATUS.appStatus(statusApp({ renewalDate: 'Cancled after june' }), new Map()), ['ended', 'Cancelled']);
+});
+
+test('the other states keep their order', () => {
+  assert.deepStrictEqual(STATUS.appStatus(statusApp(), chargedMap), ['active', 'Active']);
+  assert.deepStrictEqual(STATUS.appStatus(statusApp({ cat: 'Onetime' }), new Map()), ['once', 'One-time']);
+  // Charged at some point, but not lately enough to carry a run-rate.
+  assert.deepStrictEqual(STATUS.appStatus(statusApp({ '2026-07': 12 }), new Map()), ['lapsed', 'Not charged lately']);
+  // A row the sheet carries that has never been charged at all.
+  assert.deepStrictEqual(STATUS.appStatus(statusApp(), new Map()), ['none', 'Never charged']);
+  // Hardware is not a subscription and has no stage of its own.
+  assert.deepStrictEqual(STATUS.appStatus(statusApp({ kind: 'Laptops', '2026-08': 862 }), chargedMap), ['once', 'Hardware']);
+});
+
+test('both tables read their status from the one function', () => {
+  // The guarantee: not that each renders it, but that neither works it out
+  // for itself.
+  assert.match(html, /const st = appStatus\(g, rate\);[\s\S]{0,400}?class="stage \$\{st\[0\]\}"/,
+    'the Monthly breakdown row');
+  assert.match(html, /const stage = appStatus\(g, rate\);/, 'and the Overview row');
+  assert.ok(!/let stage = cancelled \?/.test(html), 'the Overview must not keep its own copy of the rules');
+});
+
+test('the breakdown shows the renewal date beside the name, on one line', () => {
+  assert.match(html, /<td class="stickycol"><div class="nm">\$\{g\.name\}<\/div><div class="rowmeta">/);
+  assert.match(html, /const rn = weeksLeft\(g\.renewalDate\);/, 'the same renewal reading the Overview uses');
+  // It sits in the sticky column; a wrap there pushes every month cell down.
+  assert.match(html, /\.rowmeta\{[^}]*white-space:nowrap/);
+});
+
+test('a row the sheet has never charged shows dashes, not "undefined"', () => {
+  assert.match(html, /<td>\$\{g\.dept\|\|'—'\}<\/td><td>\$\{g\.poc\|\|'—'\}<\/td><td>\$\{g\.cat\|\|'—'\}<\/td><td>\$\{g\.cur\|\|'—'\}<\/td>/);
+});
