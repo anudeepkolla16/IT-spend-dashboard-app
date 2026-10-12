@@ -682,6 +682,15 @@ or payment date** — so a wall of month figures says whether the app behind a r
 when it next falls due, without leaving for the Overview tab and finding the row again. Both sit on
 one `nowrap` line: that column is sticky, and a wrap there pushes every month cell down a row.
 
+**Sorting the breakdown by them**: they are not columns, so there is no header of theirs to click.
+The Name header carries a **Status** and a **Renewal** chip instead — click either to sort, click
+again to reverse. Both read ascending first (most live, and soonest, at the top), and rows that tie
+fall back to the app name, because nine rows all reading "Active" in sheet order are harder to read
+than nine in alphabetical order under each stage. The column label is its own click target
+(`.thlabel`), since the chips fill most of that header. A renewal nothing can be read out of sorts
+last rather than first — `weeksLeft` gives `Infinity` for those and `Infinity - Infinity` is `NaN`,
+which a comparator must never be handed.
+
 **The stage comes from one function, `appStatus`**, which both tables call. Two tables working out
 "is this cancelled?" for themselves is the kind of thing nobody notices until a cancelled app reads
 Active in one view and not the other. In precedence order:
@@ -694,6 +703,10 @@ Active in one view and not the other. In precedence order:
 | **One-time** | a `Onetime` cycle |
 | **Not charged lately** | charged at some point, but not recently enough for a run-rate |
 | **Never charged** | a row the sheet carries that has never been billed |
+
+That order is also the **sort order** (`STAGE_ORDER`), used by both tables. Alphabetically "Active"
+lands between "Not charged lately" and "Never charged", which is no use to someone asking what is
+still costing money.
 
 ## 🔑 Password page
 

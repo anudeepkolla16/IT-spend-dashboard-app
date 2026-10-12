@@ -629,7 +629,7 @@ test('Logout cannot fall off the end of the sidebar', () => {
 // the kind of thing nobody notices until a cancelled app reads Active in one
 // view and not the other.
 const STATUS = lift(
-  ['appStatus'],
+  ['appStatus', 'STAGE_ORDER', 'stageRank'],
   "// What an app's contract state is:",
   'function drawOverview(',
   // The page's own CANCELLED_RE, lifted rather than written out again: a
@@ -680,4 +680,51 @@ test('the breakdown shows the renewal date beside the name, on one line', () => 
 
 test('a row the sheet has never charged shows dashes, not "undefined"', () => {
   assert.match(html, /<td>\$\{g\.dept\|\|'—'\}<\/td><td>\$\{g\.poc\|\|'—'\}<\/td><td>\$\{g\.cat\|\|'—'\}<\/td><td>\$\{g\.cur\|\|'—'\}<\/td>/);
+});
+
+// --- sorting the breakdown by stage and renewal -----------------------------
+
+test('stages sort by how live they are, not alphabetically', () => {
+  // Alphabetically, "Active" lands between "Not charged lately" and "Never
+  // charged", which is no use to someone asking what is still costing money.
+  const order = STATUS.STAGE_ORDER.map(k => STATUS.stageRank([k]));
+  assert.deepStrictEqual(order, [...order].sort((a, b) => a - b), 'the ranks follow the list');
+  assert.ok(STATUS.stageRank(['active']) < STATUS.stageRank(['ended']), 'live before cancelled');
+  assert.ok(STATUS.stageRank(['ended']) < STATUS.stageRank(['none']), 'cancelled before never charged');
+  // A stage the list has never heard of sorts last rather than first, which is
+  // where an unranked row does least harm.
+  assert.ok(STATUS.stageRank(['something-new']) >= STATUS.STAGE_ORDER.length);
+  assert.ok(STATUS.stageRank(undefined) >= STATUS.STAGE_ORDER.length, 'and no stage at all does not throw');
+});
+
+test('both tables order their stages the same way', () => {
+  assert.match(html, /key === 'stage' \? stageRank\(a\.stage\)/, 'the Overview');
+  assert.match(html, /sortKey === 'status' \? stageRank\(appStatus\(g, rate\)\)/, 'and the breakdown');
+});
+
+test('the breakdown sorts by stage and renewal from chips in the Name header', () => {
+  // They show under the name rather than in columns of their own, so there is
+  // no header of theirs to click.
+  assert.match(html, /class="subsort" data-k="status"/);
+  assert.match(html, /class="subsort" data-k="renew"/);
+  // A chip sorts by its own key; the rest of the header still sorts the column.
+  assert.match(html, /const chip = e\.target\.closest\('\.subsort'\);\s*\n\s*const k = chip \? chip\.dataset\.k : th\.dataset\.k;/);
+  // The chips fill most of that header, so the label needs its own target.
+  assert.match(html, /<span class="thlabel">\$\{c\[1\]\}<\/span>/);
+  // Stage and renewal read ascending first: most live, and soonest, at the top.
+  assert.match(html, /const ASC_FIRST = new Set\(\[[^\]]*'status','renew'\]\)/);
+});
+
+test('an unreadable renewal sorts last instead of poisoning the comparator', () => {
+  // weeksLeft gives Infinity for "Cancled after Sep" and for an empty cell, and
+  // Infinity - Infinity is NaN — a comparator handed NaN returns rows in
+  // whatever order the engine likes.
+  assert.match(html, /const renewSort = \(renewalDate\) => \{\s*\n\s*const d = weeksLeft\(renewalDate\)\.sort;\s*\n\s*return Number\.isFinite\(d\) \? d : Number\.MAX_SAFE_INTEGER;/);
+  assert.match(html, /sortKey === 'status' \? stageRank\(appStatus\(g, rate\)\) : renewSort\(g\.renewalDate\)/);
+});
+
+test('rows tying on stage or renewal fall back to the name', () => {
+  // Nine rows all reading "Active" in whatever order the sheet listed them is
+  // harder to read than nine in alphabetical order under each stage.
+  assert.match(html, /const d = v\(a\) - v\(b\);\s*\n\s*return d \? d \* sortDir : String\(a\.name\|\|''\)\.localeCompare\(String\(b\.name\|\|''\)\);/);
 });
