@@ -228,6 +228,13 @@
   /* The status and renewal line under an app's name in the Monthly breakdown
      and in the narrow-screen cards. Kept to one line and nowrap: it sits in
      the sticky column, and a wrap there pushes every month cell down a row. */
+  /* The two sort chips in the Monthly breakdown's Name header. */
+  .thlabel{cursor:pointer}
+  .subsort{margin-left:8px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;
+    border:1px solid var(--line2);border-radius:999px;padding:1px 8px;white-space:nowrap;display:inline-block}
+  .subsort:hover{color:var(--txt);border-color:var(--faint)}
+  .subsort.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+  .subsort[data-dir]:not([data-dir=""])::after{content:' ' attr(data-dir)}
   .rowmeta{display:flex;align-items:center;gap:8px;margin-top:3px;white-space:nowrap}
   .rowmeta .stage{font-size:11px;font-weight:600}
   .rowmeta .when{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -1772,13 +1779,30 @@ function setupTable(all){
   const cols=[['kind','Type'],['name','Name'],['dept','Department'],['poc','POC'],['cat','Cycle'],['cur','Cur']]
     .concat(ALL_MONTHS.map(m=>[m, monthLabel(m)]))
     .concat([['total','Total']]);
+  // Stage and renewal show under each app's name rather than in columns of
+  // their own, so there is no header of theirs to click. They get a chip each
+  // in the Name header instead: sortable without spending the width two more
+  // columns would cost in a table that already scrolls sideways.
+  const subsorts = `<span class="subsort" data-k="status" title="Sort by stage: still live first, cancelled and never-charged last">Status</span>`
+    + `<span class="subsort" data-k="renew" title="Sort by renewal or payment date: soonest first">Renewal</span>`;
   $('#tbl thead').innerHTML = '<tr>'+cols.map(c=>{
     const isNum = ALL_MONTHS.includes(c[0]) || c[0]==='total';
     const cls = [isNum?'num':'', c[0]==='name'?'stickycol':'', c[0]==='total'?'total':''].filter(Boolean).join(' ');
-    return `<th class="${cls}" data-k="${c[0]}">${c[1]}</th>`;
+    // The label is its own target: the chips beside it fill most of the Name
+    // header, so "click the header to sort by the column" needs something to
+    // click that is not a chip.
+    return `<th class="${cls}" data-k="${c[0]}"><span class="thlabel">${c[1]}</span>${c[0]==='name'?subsorts:''}</th>`;
   }).join('')+'</tr>';
-  $('#tbl thead').querySelectorAll('th').forEach(th=>th.onclick=()=>{
-    const k=th.dataset.k; sortDir = (sortKey===k)? -sortDir : (k==='name'||k==='dept'||k==='cat'||k==='cur'||k==='kind'||k==='poc') ? 1 : -1; sortKey=k; draw();
+  // Ascending first for anything read as a word, a stage or a date; descending
+  // first for a figure, where the biggest is what you came to see.
+  const ASC_FIRST = new Set(['name','dept','cat','cur','kind','poc','status','renew']);
+  $('#tbl thead').querySelectorAll('th').forEach(th=>th.onclick=(e)=>{
+    // A chip sorts by its own key; the rest of the header still sorts by the
+    // column, so clicking "Name" beside them does what it always did.
+    const chip = e.target.closest('.subsort');
+    const k = chip ? chip.dataset.k : th.dataset.k;
+    sortDir = (sortKey===k) ? -sortDir : (ASC_FIRST.has(k) ? 1 : -1);
+    sortKey=k; draw();
   });
   draw();
 }
@@ -1874,11 +1898,29 @@ function draw(){
   // The whole sheet, for anything that must not move when a filter does.
   window.PIVOT_ALL = buildPivot(all, {});
   let pivoted = (t || d || q) ? buildPivot(all, { t, d, q }) : window.PIVOT_ALL.slice();
+  const rate = runRateMap(all);
 
   pivoted.sort((a,b)=>{
+    // Stage and renewal are not columns of their own — they are read off the
+    // app rather than looked up on the row, so they are worked out here. Ties
+    // fall back to the name: a screen of rows all reading "Active" in whatever
+    // order the sheet happened to list them is harder to read than one in
+    // alphabetical order under each stage.
+    if (sortKey === 'status' || sortKey === 'renew') {
+      const v = g => sortKey === 'status' ? stageRank(appStatus(g, rate)) : renewSort(g.renewalDate);
+      const d = v(a) - v(b);
+      return d ? d * sortDir : String(a.name||'').localeCompare(String(b.name||''));
+    }
     let x=a[sortKey], y=b[sortKey];
     if (typeof x==='number' || typeof y==='number') return ((x||0)-(y||0))*sortDir;
     return String(x||'').localeCompare(String(y||''))*sortDir;
+  });
+
+  // Which chip in the Name header is doing the sorting, and which way.
+  document.querySelectorAll('#tbl thead .subsort').forEach(c => {
+    const on = sortKey === c.dataset.k;
+    c.classList.toggle('on', on);
+    c.dataset.dir = on ? (sortDir > 0 ? '↑' : '↓') : '';
   });
 
   // The breakdown is a wall of month figures, and the one thing it could not
@@ -1886,7 +1928,6 @@ function draw(){
   // renews — you had to leave for the Overview tab and find the row again.
   // Both ride under the name, in the column that is already sticky, so they
   // stay on screen as the months scroll and cost no extra width.
-  const rate = runRateMap(all);
   $('#tbl tbody').innerHTML = pivoted.map(g=>{
     const st = appStatus(g, rate);
     const rn = weeksLeft(g.renewalDate);
@@ -1965,6 +2006,15 @@ function avatarStyle(name){
 }
 const initials = (name) => String(name||'').split(/[\s()]+/).filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join('') || '·';
 
+// weeksLeft's sort value, made safe to subtract. It is Infinity for a renewal
+// nothing can be read out of ("Cancled after Sep", or an empty cell), and
+// Infinity - Infinity is NaN, which a comparator must never be handed: the
+// rows come back in an order the browser is free to invent.
+const renewSort = (renewalDate) => {
+  const d = weeksLeft(renewalDate).sort;
+  return Number.isFinite(d) ? d : Number.MAX_SAFE_INTEGER;
+};
+
 function weeksLeft(renewalDate){
   const p = parseRenewal(renewalDate);
   if (!p) return { text: renewalDate ? String(renewalDate) : '—', note: '', cls: 'mute', sort: Infinity };
@@ -1992,6 +2042,16 @@ function appStatus(g, rate){
     ? ['lapsed', 'Not charged lately']
     : ['none', 'Never charged'];
 }
+
+// Sorting by stage alphabetically puts Active between "Not charged lately" and
+// "Never charged", which is no use to someone asking what is still costing
+// money. This is the order worth reading: still live first, dead last. Both
+// tables sort by it, for the same reason they share appStatus.
+const STAGE_ORDER = ['active', 'lapsed', 'once', 'ended', 'none'];
+const stageRank = (st) => {
+  const i = STAGE_ORDER.indexOf(st && st[0]);
+  return i === -1 ? STAGE_ORDER.length : i;
+};
 
 // The run-rate lookup both tables read their "Active" from. Built once per
 // draw and handed down, rather than recomputed per row.
@@ -2022,8 +2082,8 @@ function drawOverview(pivoted, all, rateIn){
   });
   const key = ovSort.key, dir = ovSort.dir;
   rows.sort((a, b) => {
-    const va = key === 'name' ? a.g.name : key === 'dept' ? a.g.dept : key === 'renew' ? a.renew.sort : key === 'stage' ? a.stage[1] : key === 'change' ? (a.change ?? -Infinity) : (a[key] ?? -Infinity);
-    const vb = key === 'name' ? b.g.name : key === 'dept' ? b.g.dept : key === 'renew' ? b.renew.sort : key === 'stage' ? b.stage[1] : key === 'change' ? (b.change ?? -Infinity) : (b[key] ?? -Infinity);
+    const va = key === 'name' ? a.g.name : key === 'dept' ? a.g.dept : key === 'renew' ? a.renew.sort : key === 'stage' ? stageRank(a.stage) : key === 'change' ? (a.change ?? -Infinity) : (a[key] ?? -Infinity);
+    const vb = key === 'name' ? b.g.name : key === 'dept' ? b.g.dept : key === 'renew' ? b.renew.sort : key === 'stage' ? stageRank(b.stage) : key === 'change' ? (b.change ?? -Infinity) : (b[key] ?? -Infinity);
     if (typeof va === 'string' || typeof vb === 'string') return String(va).localeCompare(String(vb)) * dir;
     return ((va || 0) - (vb || 0)) * dir;
   });
