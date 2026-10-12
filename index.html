@@ -225,6 +225,15 @@
   .stage{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12px}
   .stage::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor}
   .stage.active{color:var(--good)} .stage.lapsed{color:var(--danger)} .stage.none{color:var(--faint)} .stage.once{color:var(--violet)} .stage.ended{color:var(--muted)}
+  /* The status and renewal line under an app's name in the Monthly breakdown
+     and in the narrow-screen cards. Kept to one line and nowrap: it sits in
+     the sticky column, and a wrap there pushes every month cell down a row. */
+  .rowmeta{display:flex;align-items:center;gap:8px;margin-top:3px;white-space:nowrap}
+  .rowmeta .stage{font-size:11px;font-weight:600}
+  .rowmeta .when{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .rowmeta .when.soon{color:var(--warn);font-weight:600}
+  .rowmeta .when.over{color:var(--danger);font-weight:600}
+  td.stickycol .nm{font-weight:600}
   .weeks{font-size:11px;font-weight:600;margin-top:1px}
   .weeks.ok{color:var(--good)} .weeks.soon{color:var(--warn)} .weeks.over{color:var(--danger)} .weeks.mute{color:var(--faint)}
   .ov th.sorted::after{content:' ↓';color:var(--accent)}
@@ -1872,11 +1881,23 @@ function draw(){
     return String(x||'').localeCompare(String(y||''))*sortDir;
   });
 
-  $('#tbl tbody').innerHTML = pivoted.map(g=>`<tr data-name="${encodeURIComponent(g.name)}">
-    <td><span class="chip">${g.kind}</span></td><td class="stickycol">${g.name}</td>
-    <td>${g.dept}</td><td>${g.poc||'—'}</td><td>${g.cat}</td><td>${g.cur}</td>
+  // The breakdown is a wall of month figures, and the one thing it could not
+  // tell you was whether the app behind a row is still live and when it next
+  // renews — you had to leave for the Overview tab and find the row again.
+  // Both ride under the name, in the column that is already sticky, so they
+  // stay on screen as the months scroll and cost no extra width.
+  const rate = runRateMap(all);
+  $('#tbl tbody').innerHTML = pivoted.map(g=>{
+    const st = appStatus(g, rate);
+    const rn = weeksLeft(g.renewalDate);
+    const when = rn.text === '—' ? '' :
+      `<span class="when ${rn.cls}" title="Renewal / payment date as the sheet writes it: ${String(g.renewalDate||'').replace(/"/g,'&quot;')}">${rn.text}${rn.note ? ' · ' + rn.note : ''}</span>`;
+    return `<tr data-name="${encodeURIComponent(g.name)}">
+    <td><span class="chip">${g.kind}</span></td><td class="stickycol"><div class="nm">${g.name}</div><div class="rowmeta"><span class="stage ${st[0]}">${st[1]}</span>${when}</div></td>
+    <td>${g.dept||'—'}</td><td>${g.poc||'—'}</td><td>${g.cat||'—'}</td><td>${g.cur||'—'}</td>
     ${ALL_MONTHS.map(m=>`<td class="num ${g._spikes[m]?'spike':''}${window.CAN_EDIT?' editable':''}"${window.CAN_EDIT?` data-edit-app="${encodeURIComponent(g.name)}" data-edit-month="${m}"`:''} title="${g._spikes[m]?'>30% jump vs prior month':(window.CAN_EDIT?'Click to edit this month in the sheet':'')}">${fmtCell(g[m])}</td>`).join('')}
-    <td class="num total">${fmtUSD(g.total)}</td></tr>`).join('')
+    <td class="num total">${fmtUSD(g.total)}</td></tr>`;
+  }).join('')
     || `<tr><td colspan="${6+ALL_MONTHS.length+1}" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>`;
 
   // What every column adds up to, for the rows on screen. It follows the
@@ -1900,9 +1921,12 @@ function draw(){
 
   $('#tblCards').innerHTML = pivoted.map(g=>{
     const lastM = [...ALL_MONTHS].reverse().find(m=>g[m]!=null);
+    const st = appStatus(g, rate);
+    const rn = weeksLeft(g.renewalDate);
     return `<div class="appcard" data-name="${encodeURIComponent(g.name)}">
       <div class="appcard-top"><b>${g.name}</b><span class="chip">${g.kind}</span></div>
       <div class="appcard-sub">${g.dept}${g.poc?' · '+g.poc:''} · ${g.cat}</div>
+      <div class="rowmeta"><span class="stage ${st[0]}">${st[1]}</span>${rn.text === '—' ? '' : `<span class="when ${rn.cls}">${rn.text}${rn.note ? ' · ' + rn.note : ''}</span>`}</div>
       <div class="appcard-nums">
         <div><span class="cap">Latest</span>${lastM?fmtUSD(g[lastM]):'—'}${g._spikes[lastM]?' <span class="spike"></span>':''}</div>
         <div><span class="cap">Total</span><b>${fmtUSD(g.total)}</b></div>
@@ -1913,7 +1937,7 @@ function draw(){
   const sum = pivoted.reduce((s,g)=>s+g.total,0);
   $('#rowCount').textContent = `${pivoted.length} apps · ${fmtUSD(sum)}`;
   window.PIVOTED = pivoted;
-  drawOverview(pivoted, all);
+  drawOverview(pivoted, all, rate);
   renderChange();
   if (appsTab === 'vendor') drawVendors();
   // Keep the address bar honest about what is on screen, without a history
@@ -1953,9 +1977,29 @@ function weeksLeft(renewalDate){
   return { text: when, note: `${w} week${w===1?'':'s'} left`, cls: w <= 4 ? 'soon' : 'ok', sort: days };
 }
 
-function drawOverview(pivoted, all){
+// What an app's contract state is: cancelled in the sheet, actively charged,
+// a one-off, lapsed, or never charged. Shared by the Overview and the Monthly
+// breakdown, because two tables answering "is this cancelled?" differently is
+// the kind of thing nobody notices until a cancelled app is still being paid
+// for in one view and not the other.
+function appStatus(g, rate){
+  if (g.kind === 'Laptops') return ['once', 'Hardware'];
+  if (isCancelled(g.renewalDate)) return ['ended', 'Cancelled'];
+  if (rate.get(g.name)) return ['active', 'Active'];
+  if (cycleMonths(g.cat) === 0) return ['once', 'One-time'];
+  const todayKey = realMonthKey(0);
+  return ALL_MONTHS.some(m => g[m] != null && m <= todayKey)
+    ? ['lapsed', 'Not charged lately']
+    : ['none', 'Never charged'];
+}
+
+// The run-rate lookup both tables read their "Active" from. Built once per
+// draw and handed down, rather than recomputed per row.
+const runRateMap = (all) => new Map(trailingRunRateByApp(all.filter(r => r.kind === 'Apps')).map(x => [x.name, x]));
+
+function drawOverview(pivoted, all, rateIn){
   const todayKey = realMonthKey(0), from = realMonthKey(-11);
-  const rate = new Map(trailingRunRateByApp(all.filter(r=>r.kind==='Apps')).map(x => [x.name, x]));
+  const rate = rateIn || runRateMap(all);
   const rows = pivoted.map(g => {
     const months = ALL_MONTHS.filter(m => g[m] != null && m <= todayKey);
     const annual = ALL_MONTHS.filter(m => m >= from && m <= todayKey).reduce((s, m) => s + (g[m] || 0), 0);
@@ -1970,11 +2014,7 @@ function drawOverview(pivoted, all){
     // Three states, kept apart: what the contract says (cancelled), what the
     // charges say (charged lately or not), and whether it feeds the run-rate.
     const cancelled = isCancelled(g.renewalDate);
-    let stage = cancelled ? ['ended', 'Cancelled']
-      : rr ? ['active', 'Active']
-      : once ? ['once', 'One-time']
-      : months.length ? ['lapsed', 'Not charged lately'] : ['none', 'Never charged'];
-    if (g.kind === 'Laptops') stage = ['once', 'Hardware'];
+    const stage = appStatus(g, rate);
     const billed = cancelled ? ' · cancelled in the sheet'
       : rr && rr.newThisMonth ? ' · first charged this month'
       : rr && rr.pattern === 'monthly' && cycleMonths(g.cat) > 1 ? ' · charged monthly' : '';

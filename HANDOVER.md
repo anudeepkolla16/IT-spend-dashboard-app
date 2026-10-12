@@ -671,6 +671,30 @@ itself rather than reading as empty.
 
 ---
 
+## The Applications table
+
+Three tabs over the same rows. **Overview** is one line per app — annual spend, run-rate, change,
+renewal, owner, stage — and is the sortable one. **By vendor** groups the rows under the supplier
+being paid. **Monthly breakdown** is the cell-by-cell pivot, one column per month.
+
+The breakdown also carries, under each app's name in the sticky column, **its stage and its renewal
+or payment date** — so a wall of month figures says whether the app behind a row is still live and
+when it next falls due, without leaving for the Overview tab and finding the row again. Both sit on
+one `nowrap` line: that column is sticky, and a wrap there pushes every month cell down a row.
+
+**The stage comes from one function, `appStatus`**, which both tables call. Two tables working out
+"is this cancelled?" for themselves is the kind of thing nobody notices until a cancelled app reads
+Active in one view and not the other. In precedence order:
+
+| Stage | Means |
+|---|---|
+| **Hardware** | a `Laptops` row — not a subscription, so it has no stage of its own |
+| **Cancelled** | the sheet's renewal cell says so (`Cancled after Sep`, `terminated`, `ended`). The contract's word beats the charges': Render kept being charged for months after it was cancelled |
+| **Active** | it carries a trailing run-rate — charged recently enough to count |
+| **One-time** | a `Onetime` cycle |
+| **Not charged lately** | charged at some point, but not recently enough for a run-rate |
+| **Never charged** | a row the sheet carries that has never been billed |
+
 ## 🔑 Password page
 
 The sidebar's **Password** item shows the workbook's **Invoices mail id** sheet
