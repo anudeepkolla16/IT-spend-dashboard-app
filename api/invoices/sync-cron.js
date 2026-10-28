@@ -264,7 +264,14 @@ module.exports = async (req, res) => {
     // stops early is simply finished by the next one — the mirror self-converges.
     // Both halves share the budget, so neither can starve the other completely.
     const started = Date.now();
-    const HARD_DEADLINE = started + 45 * 1000;
+    // Every phase reads; only the last one writes, and the writing is not
+    // bounded by this at all — the Excel session, the tracker, each cell and
+    // the audit log take as long as they take, after the deadline has passed.
+    // At 45 seconds a run that used its whole budget reading had 15 left to
+    // write in, and did not make it: HTTP 504, with the figures parsed and
+    // the sheet untouched. 35 leaves the writes about 25 seconds, and the
+    // reading self-converges over runs the way the mirror always has.
+    const HARD_DEADLINE = started + 35 * 1000;
     const out = { ok: true, ranAt: new Date().toISOString(), mode, archive: archiveRoot.path, archiveFound: archiveRoot.resolved };
 
     // Mailbox first, then the mirror. The mailbox pass files invoices into the

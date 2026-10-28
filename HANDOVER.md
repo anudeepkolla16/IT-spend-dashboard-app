@@ -1035,6 +1035,16 @@ api/
   therefore spreads over several runs, which is fine: each run persists what it parsed, stamped
   with the current `PARSE_VERSION`, so the next one carries on. **So a `PARSE_VERSION` bump costs
   several runs, not one** — expect the first few after one to be slow and to report re-read figures.
+- **The run's budget has to cover the walking, not just the reading.** The first 504 was the parse
+  loop running to the deadline; the reserve fixed that. The second was the loop *around* it: every
+  touched month costs two or three Graph listings before a single PDF is read, and that walk had no
+  deadline of its own, so a run still arrived at the write phase with nothing left and died having
+  parsed the figures and written none. The touched-month loop now stops on the same `budget.deadline`
+  the parsing does, reporting `monthsDeferred`; the months left over are touched again by the next
+  run's reconcile. **`HARD_DEADLINE` is 35s inside a 60s function**, not 45 — nothing bounds the write
+  phase (an Excel session, the tracker, every cell, the audit log), so the reading has to stop early
+  enough that the writing fits. `test/parse-budget.test.js` ties the two together against
+  `vercel.json`, so raising one without the other fails.
 - **A date after a due or paid label is not the amount.** AWS prints
   `TOTAL AMOUNT DUE ON October 11 , 2026   USD 2,401.67`, and the `amount due` pattern stepped over
   `" ON October "` and captured **11**, the day of the month. **Every AWS invoice in the archive
