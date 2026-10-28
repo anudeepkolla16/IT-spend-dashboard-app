@@ -385,12 +385,17 @@ test('a normal run only looks at mail since the last successful run', () => {
 });
 
 test('a rescan widens the window instead of honouring the watermark', () => {
-  const state = { lastRunAt: '2026-08-25T11:07:00Z' };
+  // The watermark is relative to now rather than a fixed date. A rescan only
+  // reaches further back than the last run while that run is newer than the
+  // lookback window, so a date written in here stops being newer the moment
+  // enough real time passes — which is how this test came to fail on its own
+  // sixty days later, with nothing wrong in the code it guards.
+  const state = { lastRunAt: new Date(Date.now() - 3600 * 1000).toISOString() };  // an hour ago
   const since = sinceFor(state, { rescan: true }, 60);
   assert.notStrictEqual(since, state.lastRunAt, 'rescan must not reuse the watermark');
   assert.ok(Date.parse(since) < Date.parse(state.lastRunAt), 'rescan must reach further back');
-  // Messages that arrived before the last run are what a rescan exists to find.
-  assert.ok(Date.parse('2026-08-25T08:46:00Z') >= Date.parse(since));
+  // Mail that arrived before the last run is what a rescan exists to find.
+  assert.ok(Date.parse(new Date(Date.now() - 3 * 86400000).toISOString()) >= Date.parse(since));
 });
 
 test('the first ever run falls back to the lookback window', () => {

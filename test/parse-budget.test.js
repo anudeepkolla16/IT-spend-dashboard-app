@@ -68,3 +68,36 @@ test('the budget starts empty and not already exhausted', () => {
   assert.deepStrictEqual(b.fresh, []);
   assert.strictEqual(b.exhausted, false);
 });
+
+// --- the walk, not just the reading ----------------------------------------
+//
+// The reserve above bounds how long the run spends PARSING. It did not bound
+// how long it spends WALKING: every touched month costs two or three Graph
+// listings before a single PDF is read, and that loop ran to the deadline
+// whatever the budget said. A run then reached the write phase — an Excel
+// session, the tracker, every cell, the audit log — with no time left, and
+// died at the function's hard limit having parsed the figures and written
+// none of them. A second 504, on the same page as the first.
+
+const fs = require('node:fs');
+const path = require('node:path');
+const mailSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'mail-sync.js'), 'utf8');
+const cronSrc = fs.readFileSync(path.join(__dirname, '..', 'api', 'invoices', 'sync-cron.js'), 'utf8');
+const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
+
+test('walking a month stops on the same budget that stops parsing one', () => {
+  assert.match(mailSrc, /for \(const \{ app, month, folder, alsoFolders, emptied \} of touched\.values\(\)\) \{[\s\S]{0,900}?if \(Date\.now\(\) > budget\.deadline\) \{ budget\.exhausted = true; deferred\+\+; continue; \}/,
+    'the touched-month loop must check the deadline before listing anything');
+  assert.match(mailSrc, /if \(deferred\) summary\.monthsDeferred = deferred;/,
+    'and the run should say how many months it left for the next one');
+});
+
+test('the reading deadline leaves the writing real time under the hard limit', () => {
+  // Nothing bounds the write phase: it takes as long as its Graph round trips
+  // take, starting whenever the reading stops. So the reading has to stop
+  // early enough that the writing still fits.
+  const read = Number(cronSrc.match(/const HARD_DEADLINE = started \+ (\d+) \* 1000;/)[1]);
+  const limit = vercel.functions['api/invoices/sync-cron.js'].maxDuration;
+  assert.ok(limit - read >= 20,
+    `${read}s of reading inside a ${limit}s function leaves ${limit - read}s to open an Excel session, tick the tracker, write every cell and append the log`);
+});
