@@ -525,7 +525,7 @@ test('payment method reaches the drill-down, the sheet column and all', () => {
 // in their head.
 
 const MT = (() => {
-  const a = html.indexOf('function breakdownTotals(rows){'), b = html.indexOf('\nfunction draw()', a);
+  const a = html.indexOf('function breakdownTotals(rows, months){'), b = html.indexOf('\nfunction draw()', a);
   return new Function(`
     const ALL_MONTHS = ['2026-07','2026-08','2026-09'];
     ${html.slice(a, b)}
@@ -562,7 +562,7 @@ test('the grand total is the Total column added up, not the months', () => {
 });
 
 test('the Total row follows the filters and flags the part-billed month', () => {
-  assert.match(html, /const foot = breakdownTotals\(pivoted\);/, 'the rows on screen, not the whole sheet');
+  assert.match(html, /const foot = breakdownTotals\(pivoted, months\);/, 'the rows on screen, over the months on screen');
   // A second monthTotals() would have quietly replaced the one the trend chart
   // calls, and the charts are stubbed in the browser harness, so nothing would
   // have looked wrong until the chart was read.
@@ -575,7 +575,7 @@ test('the Total row follows the filters and flags the part-billed month', () => 
   // scroll to find.
   assert.match(html, /tfoot td\{position:sticky;bottom:0/);
   // And the export carries the same row.
-  assert.match(html, /const ft = breakdownTotals\(rows\);/);
+  assert.match(html, /const ft = breakdownTotals\(rows, months\);/);
 });
 
 // --- Pages that fill the window ----------------------------------------------
