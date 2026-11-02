@@ -3583,6 +3583,14 @@ async function runMailSync(rescan){
       unreadable.slice(0,8).forEach(f => lines.push(
         `  · ${f.app} ${f.month}: sheet has ${f.current==null?'nothing':Number(f.current).toLocaleString('en-US',{minimumFractionDigits:2})}, invoices that read ${Number(f.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})} — fix or re-save the unreadable PDF listed below, then run this again`));
     }
+    // A folder the run stopped short of is NOT a folder with a bad PDF in it.
+    // Saying so sends you hunting for a file that reads perfectly well.
+    const unfinished = filled.filter(f => f.reason === 'folder-total-deferred');
+    if (unfinished.length){
+      lines.push(`\n${unfinished.length===1?'1 cell is':unfinished.length+' cells are'} waiting on the next run — this one ran out of time before reading the whole folder. Nothing is wrong with these:`);
+      unfinished.slice(0,8).forEach(f => lines.push(
+        `  · ${f.app} ${f.month}: ${Number(f.invoiceTotal).toLocaleString('en-US',{minimumFractionDigits:2})} read so far — run this again to finish the folder`));
+    }
     const loose = json.looseIncluded || [];
     if (loose.length){
       lines.push(`\nCounted invoices filed loose in the vendor folder, dated by their file name:`);
@@ -3992,7 +4000,9 @@ async function submitAnswers(answers, row){
     const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2});
     (r.amountsWritten||[]).forEach(w => lines.push(`Spendings ${w.app} ${w.month} = ${fmt(w.amount)}`));
     (r.amountsUpdated||[]).forEach(u => lines.push(`Spendings ${u.app} ${u.month}: ${fmt(u.previous)} → ${fmt(u.amount)}`));
-    (r.amountsSkippedFilled||[]).forEach(f => lines.push(`${f.app} ${f.month} not written yet — an invoice in that month could not be used (readable ones come to ${fmt(f.invoiceTotal)})`));
+    (r.amountsSkippedFilled||[]).forEach(f => lines.push(f.reason === 'folder-total-deferred'
+      ? `${f.app} ${f.month} not written yet — the run ended before the whole folder was read (${fmt(f.invoiceTotal)} so far); run it again`
+      : `${f.app} ${f.month} not written yet — an invoice in that month could not be used (readable ones come to ${fmt(f.invoiceTotal)})`));
     if (r.tracker && r.tracker.marked) lines.push(`Ticked ${r.tracker.marked} tracker cell${r.tracker.marked===1?'':'s'}.`);
     (r.errors||[]).forEach(e => lines.push(`Error: ${e}`));
     if (r.slack) lines.push(r.slack.sent ? 'Sent you a Slack DM.' : `No Slack DM — ${r.slack.why}.`);
