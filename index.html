@@ -639,6 +639,7 @@
         <input id="fSearch" placeholder="Search name / POC…" />
         <div class="grow"></div>
         <span class="chip" id="rowCount"></span>
+        <button class="btn ghost hidden" id="monthWindowBtn"></button>
         <button class="btn ghost" id="exportBtn">⬇ Export</button>
       </div>
       <div class="ov" id="appsOverview"></div>
@@ -1266,17 +1267,21 @@ $('#invTrackBtn').onclick = async () => {
 /* ---------------- export currently-shown table ---------------- */
 $('#exportBtn').onclick = () => {
   const rows = window.PIVOTED || [];
-  const header = ['Type','Name','Department','POC','Cycle','Currency', ...ALL_MONTHS.map(monthLabel), 'Total'];
+  // "currently-shown" includes the month window: exporting columns that are not
+  // on screen, under a Total that is, would not add up in the spreadsheet either.
+  const months = shownMonths();
+  const header = ['Type','Name','Department','POC','Cycle','Currency', ...months.map(monthLabel),
+    months.length < ALL_MONTHS.length ? `Total (last ${months.length} months)` : 'Total'];
   const data = rows.map(g => [
     g.kind, g.name, g.dept, g.poc||'', g.cat, g.cur,
-    ...ALL_MONTHS.map(m => g[m] ? Math.round(g[m]*100)/100 : ''),
-    Math.round(g.total*100)/100
+    ...months.map(m => g[m] ? Math.round(g[m]*100)/100 : ''),
+    Math.round(windowedTotal(g, months)*100)/100
   ]);
   // The same Total row the table shows, so the export is not a figure short of
   // what it was exported from.
-  const ft = breakdownTotals(rows);
+  const ft = breakdownTotals(rows, months);
   const totalRow = rows.length ? [['', 'Total', `${rows.length} apps`, '', '', '',
-    ...ALL_MONTHS.map(m => ft.countByMonth[m] ? Math.round(ft.byMonth[m]*100)/100 : ''),
+    ...months.map(m => ft.countByMonth[m] ? Math.round(ft.byMonth[m]*100)/100 : ''),
     Math.round(ft.grand*100)/100]] : [];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...data, ...totalRow]), 'Spend');
@@ -1798,6 +1803,52 @@ function monthRange(months, through){
 }
 
 let ALL_MONTHS = [];
+
+// How many months the BREAKDOWN TABLE shows. Only the table: ALL_MONTHS stays
+// the full range, because the run-rate, the annual cost, the stage, the
+// forecast, the charts and the modal all read it, and a column you chose not
+// to look at must never move a figure.
+//
+// The table gains a column a month and never drops one, on a table that
+// already scrolls sideways. Twelve is where it stays readable and is the
+// window every other figure on the page is quoted over.
+const MONTH_WINDOW = 12;
+const MONTH_WINDOW_KEY = 'saras.monthWindow';
+let monthWindow = MONTH_WINDOW;              // 0 = every month on record
+try { const v = localStorage.getItem(MONTH_WINDOW_KEY); if (v !== null) monthWindow = Number(v) || 0; } catch(e){}
+
+function shownMonths(){
+  return monthWindow > 0 ? ALL_MONTHS.slice(-monthWindow) : ALL_MONTHS;
+}
+
+// The Total column is the row's own cells added up. Windowed, that has to be
+// the months ON SCREEN: a row whose figures are in front of you and do not add
+// up to the number beside them is worse than no total at all. Unwindowed it
+// stays g.total, which also catches a charge whose month could not be read.
+function windowedTotal(g, cols){
+  return cols.length === ALL_MONTHS.length ? (g.total || 0) : cols.reduce((s, m) => s + (g[m] || 0), 0);
+}
+
+function renderWindowBtn(){
+  const btn = $('#monthWindowBtn');
+  if (!btn) return;
+  const n = ALL_MONTHS.length;
+  btn.textContent = monthWindow > 0 ? `📅 Last ${monthWindow} months` : `📅 All ${n} months`;
+  btn.title = monthWindow > 0
+    ? `Showing the last ${monthWindow} months. Click to show all ${n}.`
+    : `Showing all ${n} months on record. Click to show the last ${MONTH_WINDOW}.`;
+}
+
+$('#monthWindowBtn').onclick = () => {
+  monthWindow = monthWindow > 0 ? 0 : MONTH_WINDOW;
+  try { localStorage.setItem(MONTH_WINDOW_KEY, String(monthWindow)); } catch(e){}
+  // Sorting by a month that is no longer a column leaves the table in an order
+  // nothing on screen explains.
+  if (ALL_MONTHS.includes(sortKey) && !shownMonths().includes(sortKey)){ sortKey = 'total'; sortDir = -1; }
+  renderHead();
+  draw();
+};
+
 function setupTable(all){
   const depts=[...new Set(all.map(r=>r.dept))].sort();
   ALL_MONTHS = monthRange([...new Set(all.filter(r=>r.month).map(r=>r.month))].sort(), realMonthKey());
@@ -1805,9 +1856,19 @@ function setupTable(all){
   ['#fType','#fDept'].forEach(s=>$(s).onchange=draw);
   $('#fSearch').oninput = draw;
 
+  renderHead();
+  draw();
+}
+
+// The header is rebuilt whenever the columns change — a new sync, or the month
+// window being switched — so it cannot drift from the rows beneath it.
+function renderHead(){
+  renderWindowBtn();
+  const months = shownMonths();
+  const windowed = months.length < ALL_MONTHS.length;
   const cols=[['kind','Type'],['name','Name'],['dept','Department'],['poc','POC'],['cat','Cycle'],['cur','Cur']]
-    .concat(ALL_MONTHS.map(m=>[m, monthLabel(m)]))
-    .concat([['total','Total']]);
+    .concat(months.map(m=>[m, monthLabel(m)]))
+    .concat([['total', windowed ? `Total · ${months.length} mo` : 'Total']]);
   // Stage and renewal show under each app's name rather than in columns of
   // their own, so there is no header of theirs to click. They get a chip each
   // in the Name header instead: sortable without spending the width two more
@@ -1815,7 +1876,7 @@ function setupTable(all){
   const subsorts = `<span class="subsort" data-k="status" title="Sort by stage: still live first, cancelled and never-charged last">Status</span>`
     + `<span class="subsort" data-k="renew" title="Sort by renewal or payment date: soonest first">Renewal</span>`;
   $('#tbl thead').innerHTML = '<tr>'+cols.map(c=>{
-    const isNum = ALL_MONTHS.includes(c[0]) || c[0]==='total';
+    const isNum = months.includes(c[0]) || c[0]==='total';
     const cls = [isNum?'num':'', c[0]==='name'?'stickycol':'', c[0]==='total'?'total':''].filter(Boolean).join(' ');
     // The label is its own target: the chips beside it fill most of the Name
     // header, so "click the header to sort by the column" needs something to
@@ -1833,7 +1894,6 @@ function setupTable(all){
     sortDir = (sortKey===k) ? -sortDir : (ASC_FIRST.has(k) ? 1 : -1);
     sortKey=k; draw();
   });
-  draw();
 }
 // registered once (not per-sync) since #tbl tbody / #tblCards persist across re-syncs
 $('#tbl tbody').addEventListener('click', e=>{
@@ -1901,9 +1961,10 @@ function buildPivot(all, filt){
 // Not monthTotals(), which already exists and answers a different question: it
 // takes the raw rows and returns a month → sum map for the trend chart. Two
 // functions of one name in one script is the later one silently winning.
-function breakdownTotals(rows){
+function breakdownTotals(rows, months){
+  const cols = months || ALL_MONTHS;
   const byMonth = {}, countByMonth = {};
-  for (const m of ALL_MONTHS){
+  for (const m of cols){
     let sum = 0, n = 0;
     for (const g of rows || []){
       const v = g[m];
@@ -1917,7 +1978,13 @@ function breakdownTotals(rows){
   // charge carries a month, which the sheet's own layout guarantees — but a row
   // whose month could not be read would otherwise go missing from the one
   // number a reader checks the column against.
-  const grand = (rows || []).reduce((sum, g) => sum + (g.total || 0), 0);
+  //
+  // Windowed, that reasoning inverts: the Total column is the months on screen,
+  // so the figure under it has to be those months, not the whole history.
+  const windowed = cols.length < ALL_MONTHS.length;
+  const grand = windowed
+    ? cols.reduce((sum, m) => sum + byMonth[m], 0)
+    : (rows || []).reduce((sum, g) => sum + (g.total || 0), 0);
   return { byMonth, countByMonth, grand };
 }
 
@@ -1957,6 +2024,7 @@ function draw(){
   // renews — you had to leave for the Overview tab and find the row again.
   // Both ride under the name, in the column that is already sticky, so they
   // stay on screen as the months scroll and cost no extra width.
+  const months = shownMonths();
   $('#tbl tbody').innerHTML = pivoted.map(g=>{
     const st = appStatus(g, rate);
     const rn = weeksLeft(g.renewalDate);
@@ -1965,10 +2033,10 @@ function draw(){
     return `<tr data-name="${encodeURIComponent(g.name)}">
     <td><span class="chip">${g.kind}</span></td><td class="stickycol"><div class="nm">${g.name}</div><div class="rowmeta"><span class="stage ${st[0]}">${st[1]}</span>${when}</div></td>
     <td>${g.dept||'—'}</td><td>${g.poc||'—'}</td><td>${g.cat||'—'}</td><td>${g.cur||'—'}</td>
-    ${ALL_MONTHS.map(m=>`<td class="num ${g._spikes[m]?'spike':''}${window.CAN_EDIT?' editable':''}"${window.CAN_EDIT?` data-edit-app="${encodeURIComponent(g.name)}" data-edit-month="${m}"`:''} title="${g._spikes[m]?'>30% jump vs prior month':(window.CAN_EDIT?'Click to edit this month in the sheet':'')}">${fmtCell(g[m])}</td>`).join('')}
-    <td class="num total">${fmtUSD(g.total)}</td></tr>`;
+    ${months.map(m=>`<td class="num ${g._spikes[m]?'spike':''}${window.CAN_EDIT?' editable':''}"${window.CAN_EDIT?` data-edit-app="${encodeURIComponent(g.name)}" data-edit-month="${m}"`:''} title="${g._spikes[m]?'>30% jump vs prior month':(window.CAN_EDIT?'Click to edit this month in the sheet':'')}">${fmtCell(g[m])}</td>`).join('')}
+    <td class="num total">${fmtUSD(windowedTotal(g, months))}</td></tr>`;
   }).join('')
-    || `<tr><td colspan="${6+ALL_MONTHS.length+1}" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>`;
+    || `<tr><td colspan="${6+months.length+1}" style="text-align:center;color:var(--muted);padding:20px">No matching records</td></tr>`;
 
   // What every column adds up to, for the rows on screen. It follows the
   // filters, because a total that ignored them would be read as the total of
@@ -1977,17 +2045,17 @@ function draw(){
   // A column is one month for every app, so summing it is unambiguous — except
   // the current one, which is only billed as far as today. That cell is greyed
   // and says so rather than inviting a comparison with a whole month beside it.
-  const foot = breakdownTotals(pivoted);
+  const foot = breakdownTotals(pivoted, months);
   $('#tbl tfoot').innerHTML = pivoted.length ? `<tr>
     <td></td><td class="stickycol foot-lbl">Total</td>
     <td colspan="4" class="foot-lbl">${pivoted.length} app${pivoted.length===1?'':'s'}${
       (t||d||q) ? ' matching' : ''}</td>
-    ${ALL_MONTHS.map(m=>{
+    ${months.map(m=>{
       const partial = m === realMonthKey();
       return `<td class="num${partial?' mtd-col':''}" title="${monthLabel(m)}: ${fmtUSD(foot.byMonth[m])} across ${foot.countByMonth[m]} app${foot.countByMonth[m]===1?'':'s'}${partial?' — still being billed, so this is the month so far':''}">${
         foot.countByMonth[m] ? fmtShort(foot.byMonth[m]) : '—'}</td>`;
     }).join('')}
-    <td class="num total" title="Every month above, added up">${fmtShort(foot.grand)}</td></tr>` : '';
+    <td class="num total" title="Every month above, added up${months.length < ALL_MONTHS.length ? ` — the ${months.length} on screen, not all ${ALL_MONTHS.length} on record` : ''}">${fmtShort(foot.grand)}</td></tr>` : '';
 
   $('#tblCards').innerHTML = pivoted.map(g=>{
     const lastM = [...ALL_MONTHS].reverse().find(m=>g[m]!=null);
@@ -1999,12 +2067,12 @@ function draw(){
       <div class="rowmeta"><span class="stage ${st[0]}">${st[1]}</span>${rn.text === '—' ? '' : `<span class="when ${rn.cls}">${rn.text}${rn.note ? ' · ' + rn.note : ''}</span>`}</div>
       <div class="appcard-nums">
         <div><span class="cap">Latest</span>${lastM?fmtUSD(g[lastM]):'—'}${g._spikes[lastM]?' <span class="spike"></span>':''}</div>
-        <div><span class="cap">Total</span><b>${fmtUSD(g.total)}</b></div>
+        <div><span class="cap">Total</span><b>${fmtUSD(windowedTotal(g, months))}</b></div>
       </div>
     </div>`;
   }).join('') || '<div class="cap" style="text-align:center;padding:20px">No matching records</div>';
 
-  const sum = pivoted.reduce((s,g)=>s+g.total,0);
+  const sum = pivoted.reduce((s,g)=>s+windowedTotal(g, months),0);
   $('#rowCount').textContent = `${pivoted.length} apps · ${fmtUSD(sum)}`;
   window.PIVOTED = pivoted;
   drawOverview(pivoted, all, rate);
@@ -2145,6 +2213,8 @@ function setAppsTab(tab){
   $('#appsVendor').classList.toggle('hidden', tab !== 'vendor');
   document.querySelector('#appsCard .tblwrap').classList.toggle('hidden', tab !== 'monthly');
   $('#tblCards').classList.toggle('on', tab === 'monthly');
+  // It picks the table's columns, so it has nothing to say on the other tabs.
+  $('#monthWindowBtn').classList.toggle('hidden', tab !== 'monthly');
   if (tab === 'vendor') drawVendors();
 }
 $('#appsTabs').querySelectorAll('button').forEach(b => b.onclick = () => setAppsTab(b.dataset.tab));
