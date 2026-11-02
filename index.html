@@ -1768,10 +1768,39 @@ function renderRunRate(apps){
 }
 
 let sortKey='total', sortDir=-1;
+
+// Every month from the first on record to the current one, whether or not it
+// carries a figure.
+//
+// The columns used to be the distinct months the rows happened to mention, and
+// a month nobody was charged for simply did not exist. On 2 November the
+// breakdown ran Jan to Oct: not one app had a November figure yet, because the
+// month's invoices were still being read. There was nowhere to see the month,
+// no cell to type one into, and no "month so far" footer — and the same gap
+// would swallow a quiet month in the middle of the range, leaving two columns
+// side by side that are not consecutive months.
+//
+// The current month is always included even when the latest figure is older,
+// which is the whole of the November case. A span wider than twenty years is
+// not a sheet, it is a bad date, so that falls back to the months themselves
+// rather than rendering ten thousand columns.
+const MAX_SPAN_MONTHS = 240;
+function monthRange(months, through){
+  if (!months.length) return [];
+  const idx = m => { const [y, n] = String(m).split('-').map(Number); return y * 12 + (n - 1); };
+  const key = i => `${Math.floor(i / 12)}-${String(i % 12 + 1).padStart(2, '0')}`;
+  const first = idx(months[0]);
+  const last = Math.max(idx(months[months.length - 1]), through ? idx(through) : -Infinity);
+  if (!(last >= first) || last - first > MAX_SPAN_MONTHS) return months;
+  const out = [];
+  for (let i = first; i <= last; i++) out.push(key(i));
+  return out;
+}
+
 let ALL_MONTHS = [];
 function setupTable(all){
   const depts=[...new Set(all.map(r=>r.dept))].sort();
-  ALL_MONTHS = [...new Set(all.filter(r=>r.month).map(r=>r.month))].sort();
+  ALL_MONTHS = monthRange([...new Set(all.filter(r=>r.month).map(r=>r.month))].sort(), realMonthKey());
   $('#fDept').innerHTML = '<option value="">All departments</option>'+depts.map(d=>`<option>${d}</option>`).join('');
   ['#fType','#fDept'].forEach(s=>$(s).onchange=draw);
   $('#fSearch').oninput = draw;
