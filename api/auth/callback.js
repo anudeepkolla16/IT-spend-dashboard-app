@@ -1,4 +1,5 @@
 const { sign, parseCookies, decodeIdTokenPayload, emailList } = require('../../lib/session');
+const { recordActivityStandalone } = require('../../lib/activity');
 const { graphFetch } = require('../../lib/graph');
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -76,6 +77,11 @@ module.exports = async (req, res) => {
         address of the same mailbox will not match. Ask the dashboard owner to add it, and to redeploy afterwards.`);
     }
     console.log(`auth: signed in ${email}`);
+    // Who is using the dashboard. Recorded before the redirect because work
+    // started after a response has been sent may not survive on a serverless
+    // function — and it never throws, so a log that cannot be written does
+    // not stop anyone signing in.
+    await recordActivityStandalone('sign-in', email, 'Signed in', name || '');
 
     const session = sign({ email, name, exp: Date.now() + SESSION_TTL_MS });
     res.setHeader('Set-Cookie', [

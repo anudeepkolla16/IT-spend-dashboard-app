@@ -1,5 +1,6 @@
 const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, uploadFileContent, resolveArchiveRoot, graphFetch } = require('../../lib/graph');
 const { requireEditor } = require('../../lib/require-editor');
+const { recordActivity } = require('../../lib/activity');
 const { planTidy, applyTidy } = require('../../lib/invoices/organize');
 const { planBackfill, applyBackfill } = require('../../lib/invoices/tracker');
 
@@ -80,6 +81,19 @@ module.exports = async (req, res) => {
     if (!upn) throw new Error('Missing TARGET_USER_UPN env var');
 
     const token = await getGraphToken();
+
+    // The ones that change something. A plan is a dry run and leaves no trace
+    // worth keeping; an apply moves files or copies them into the archive.
+    const IMPORT_LABEL = {
+      'tracker-apply': 'Ticked the invoice tracker',
+      'tidy-apply': 'Tidied the archive',
+      commit: 'Imported invoices from a folder',
+    };
+    if (IMPORT_LABEL[mode]) {
+      const driveForLog = await resolveDriveId(token, upn);
+      await recordActivity(token, driveForLog, 'import', session.email,
+        IMPORT_LABEL[mode], `mode=${mode}${commitApp ? ` · ${commitApp}` : ''}`);
+    }
 
     // Tidying works on the archive itself, so it needs no source link. It shares
     // this route because each file under api/ counts against the Hobby plan's
