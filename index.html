@@ -165,6 +165,13 @@
   select,.filters input,input[data-month],input[data-amount]{background:var(--panel);border:1px solid var(--line2);color:var(--txt);border-radius:8px;padding:7px 10px;font-size:12.5px;font-family:inherit}
   select:focus,input:focus,textarea:focus{outline:2px solid rgba(42,120,214,.35);outline-offset:1px;border-color:var(--accent)}
   .hidden{display:none}
+  /* Controls that change the sheet or the archive. Hidden unless the signed-in
+     account is on the editor list — `can-edit` goes on <body> once /api/auth/me
+     answers, so these start hidden and stay hidden for a reader. !important
+     because .toolbar.open out-specifies a plain class on small screens.
+     This is presentation only: lib/require-editor.js is what actually stops a
+     write, and it stops one whether or not a button was ever on screen. */
+  body:not(.can-edit) .admin-only{display:none!important}
   .offpage{display:none!important}
   .foot{color:var(--faint);font-size:11.5px;text-align:center;padding:26px 0 8px;margin-top:auto}
   /* The single card on a page takes the height that is left, and hands it to
@@ -430,8 +437,8 @@
   <button class="nav-item" data-page="invoices"><span class="ico">🧾</span>Invoices</button>
   <button class="nav-item" data-page="documents"><span class="ico">📑</span>Agreements &amp; KYC</button>
   <div class="nav-sec">Manage</div>
-  <button class="nav-item" data-page="questions"><span class="ico">❓</span>Needs your answer<span class="badge zero" id="pendingBadge">0</span></button>
-  <button class="nav-item" data-page="rules" id="navRules"><span class="ico">⚙</span>Filing rules</button>
+  <button class="nav-item admin-only" data-page="questions"><span class="ico">❓</span>Needs your answer<span class="badge zero" id="pendingBadge">0</span></button>
+  <button class="nav-item admin-only" data-page="rules" id="navRules"><span class="ico">⚙</span>Filing rules</button>
   <button class="nav-item" data-page="passwords"><span class="ico">🔑</span>Password</button>
   <div class="side-foot">
     <div class="who" id="whoami"></div>
@@ -446,8 +453,8 @@
     <div class="sub" id="pageSub">Apps, subscriptions and hardware · from the SharePoint sheet · all figures in $ (USD)</div>
   </div>
   <div class="grow"></div>
-  <button class="btn ghost maint-toggle" id="maintToggle" aria-expanded="false">⋯ Maintenance</button>
-  <div class="toolbar" id="toolbar">
+  <button class="btn ghost maint-toggle admin-only" id="maintToggle" aria-expanded="false">⋯ Maintenance</button>
+  <div class="toolbar admin-only" id="toolbar">
     <button class="btn ghost" id="fixTotalsBtn">🧮 Check Totals</button>
     <button class="btn ghost" id="periodsBtn" title="Re-read every archived invoice's billing period and re-file the ones that were filed by their arrival date">🗓 Recheck Periods</button>
     <button class="btn ghost" id="amountsBtn">💰 Update Amounts</button>
@@ -933,6 +940,8 @@ document.querySelectorAll('#renewalTabs .tab-btn').forEach(btn=>btn.onclick=()=>
     // handler checks the session itself, because a page cannot enforce this.
     window.CAN_EDIT = !!me.canEdit;
     document.body.classList.toggle('can-edit', !!me.canEdit);
+    // Answering a held question writes, so the whole queue is for editors.
+    if (me.canEdit && typeof loadPending === 'function') loadPending(true);
     if (window.MODEL) draw();
   }catch{}
 })();
@@ -1471,7 +1480,7 @@ function renderKPIs(all){
       <div class="donutwrap"><canvas id="deptChart" role="img" aria-label="Spend by department over the last 12 months"></canvas><div class="center">Last 12<br>months by<br>department</div></div>
       <div class="donut-legend" id="deptLegend"></div>
     </div>
-    <div class="ktiles-actions">
+    <div class="ktiles-actions admin-only">
       <button class="atile fetch" id="tileFetch"><span class="ic">📧</span>Fetch invoices from the mailbox</button>
       <button class="atile import" id="tileImport"><span class="ic">📥</span>Import invoices from a folder</button>
     </div>`;
@@ -4148,7 +4157,9 @@ $('#rulesSave').onclick = async () => {
     status.textContent = 'Save failed: ' + err.message;
   }
 };
-loadPending(true);
+// The queue is loaded from the auth block instead, once it is known whether
+// this account may answer anything: a reader asking for it now earns a 403,
+// and CAN_EDIT is still undefined this early.
 
 // Last, deliberately: showPage reads state (`charts`, `loginRows`) that `let`
 // declares further down this script, and calling it any earlier dies in the

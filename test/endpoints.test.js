@@ -242,19 +242,28 @@ test('only saves a vendor mapping that points at a real app row', async () => {
 // plan's 12-function limit, so the dispatcher is what the browser actually hits.
 const amountsRoute = require('../api/amounts');
 
+// Every action on this route writes to the workbook or reads the audit trail,
+// so the route is gated on the editor list before it dispatches. These tests
+// drive it as an editor; the one below checks a reader cannot.
+process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-secret';
+process.env.EDITOR_EMAILS = 'editor@example.com';
+const { sign: signSession } = require('../lib/session');
+const asEditor = `session=${signSession({ email: 'editor@example.com', exp: Date.now() + 60000 })}`;
+const asReader = `session=${signSession({ email: 'reader@example.com', exp: Date.now() + 60000 })}`;
+
 test('dispatches an action to the right handler', async () => {
   const { status, body } = await invoke(amountsRoute, {
     action: 'preview',
     contentBase64: statementBuffer(STATEMENT).toString('base64'),
     filename: 'june.xlsx',
-  });
+  }, asEditor);
   assert.strictEqual(status, 200);
   assert.ok(Array.isArray(body.proposals), 'should return the preview payload');
 });
 
 test('rejects an unknown or missing action instead of guessing one', async () => {
   for (const action of ['', 'delete-everything']) {
-    const { status, body } = await invoke(amountsRoute, { action });
+    const { status, body } = await invoke(amountsRoute, { action }, asEditor);
     assert.strictEqual(status, 400);
     assert.match(body.error, /Unknown action/);
   }
@@ -265,10 +274,29 @@ test('an apply routed through the dispatcher still writes the right cell', async
   const { status } = await invoke(amountsRoute, {
     action: 'apply',
     cells: [{ app: 'AWS', month: '2026-06', amount: 2525.33 }],
-  });
+  }, asEditor);
   assert.strictEqual(status, 200);
   assert.strictEqual(written.length, 1);
   assert.strictEqual(written[0].address, 'M4');
+});
+
+test('a reader cannot apply amounts, however they reach the route', async () => {
+  // The dashboard hides the control from them. That was the only thing
+  // stopping them, and it stops nobody who opens the console.
+  const { status, body } = await invoke(amountsRoute, {
+    action: 'apply',
+    cells: [{ app: 'AWS', month: '2026-06', amount: 999999 }],
+  }, asReader);
+  assert.strictEqual(status, 403);
+  assert.match(body.error, /not/i);
+  assert.strictEqual(written.length, 0, 'and nothing reached the sheet');
+});
+
+test('an unknown action from a reader is refused for being theirs, not for being unknown', async () => {
+  // The gate comes before the dispatch, so probing the route tells you
+  // nothing about which actions exist.
+  const { status } = await invoke(amountsRoute, { action: 'delete-everything' }, asReader);
+  assert.strictEqual(status, 403, 'not 400');
 });
 
 test.after(() => { excel.writeCells = realWriteCells; });

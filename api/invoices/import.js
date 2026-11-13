@@ -1,4 +1,5 @@
 const { getGraphToken, resolveDriveId, encodeGraphPath, sanitizeSegment, listFilesRecursive, uploadFileContent, resolveArchiveRoot, graphFetch } = require('../../lib/graph');
+const { requireEditor } = require('../../lib/require-editor');
 const { planTidy, applyTidy } = require('../../lib/invoices/organize');
 const { planBackfill, applyBackfill } = require('../../lib/invoices/tracker');
 
@@ -68,6 +69,11 @@ module.exports = async (req, res) => {
       res.status(405).json({ error: 'Method not allowed' });
       return;
     }
+    // This route copies PDFs into the archive and writes the sync config; it
+    // had no check of its own at all and leaned on the middleware, which only
+    // asks whether you are signed in.
+    const session = requireEditor(req, res);
+    if (!session) return;
     const { sourceUrl, mode, mapping, appNames, folderId, targetApp: commitApp, offset, moves, marks } = req.body || {};
 
     const upn = (process.env.TARGET_USER_UPN || '').trim();
