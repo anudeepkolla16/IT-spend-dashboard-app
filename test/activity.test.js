@@ -128,6 +128,37 @@ test('the feed merges sign-ins with the cell writes, newest first', async () => 
   assert.match(bySync.what, /nothing → \$425\.00/, 'an empty cell reads as nothing, not as $0.00');
 });
 
+test('a metadata edit is not read as an amount', async () => {
+  // lib/amounts/edit.js writes two kinds of row into the same audit log: a
+  // month cell, which holds money, and a field edit — department, owner,
+  // billing cycle, renewal date, payment method — which has no month at all
+  // and whose values are words. Formatting every row as currency filled the
+  // page with `Bubble Starter null: $NaN → $NaN`.
+  stored = { entries: [] };
+  logEntries = [
+    { at: '2026-11-13T05:00:00.000Z', by: 'boss@x.com', sheet: 'Spendings', attribution: 'dashboard-edit',
+      cells: [{ app: 'Bubble Starter', month: null, field: 'dept', address: 'B12', before: null, after: 'Product' }] },
+    { at: '2026-11-13T04:00:00.000Z', by: 'boss@x.com', sheet: 'Spendings', attribution: 'dashboard-edit',
+      cells: [{ app: 'Hubspot', month: null, field: 'renewalDate', address: 'B37', before: '29/06/2027', after: '29/06/2028' }] },
+  ];
+  const { body } = await askFeed();
+  const [dept, renewal] = body.entries;
+  assert.strictEqual(dept.what, 'Bubble Starter dept: nothing → "Product"');
+  assert.strictEqual(renewal.what, 'Hubspot renewalDate: "29/06/2027" → "29/06/2028"');
+  for (const e of body.entries) {
+    assert.doesNotMatch(e.what, /NaN/, 'a word is not a number');
+    assert.doesNotMatch(e.what, /\bnull\b/, 'and a missing month is not the word null');
+  }
+});
+
+test('a month cell that somehow holds a word says so rather than NaN', async () => {
+  stored = { entries: [] };
+  logEntries = [{ at: '2026-11-13T05:00:00.000Z', by: 'boss@x.com',
+    cells: [{ app: 'Zoom', month: '2026-11', address: 'P9', before: 'n/a', after: 119 }] }];
+  const { body } = await askFeed();
+  assert.strictEqual(body.entries[0].what, 'Zoom 2026-11: "n/a" → $119.00');
+});
+
 test('the people list counts only people, and remembers when each was last here', async () => {
   stored = { entries: [
     { at: '2026-11-10T08:00:00.000Z', kind: 'sign-in', by: 'reader@x.com', what: 'Signed in' },
@@ -187,6 +218,16 @@ test('the activity route is reachable only as an editor', () => {
   assert.match(src, /const ROUTES = \{[^}]*activity[^}]*\}/, 'it hangs off the gated route');
   assert.ok(src.indexOf('requireEditor(req, res)') < src.indexOf('const handler = ROUTES[action]'),
     'and the gate runs before the dispatch');
+});
+
+test('the feed scrolls when it is the only card on the page', () => {
+  // A single-card page gets `.fill`, and `main` above it is overflow:hidden.
+  // A scroller that is not named in that block is clipped: no scrollbar, and
+  // everything past the fold unreachable.
+  const html = read('index.html');
+  assert.match(html, /\.card\.fill > #actList\{[^}]*overflow:auto[^}]*\}/);
+  assert.match(html, /\.card\.fill > #actList\{[^}]*min-height:0[^}]*\}/,
+    'a flex child will not shrink below its content without this');
 });
 
 test('the page is editor-only too, and in the router', () => {
