@@ -4,6 +4,7 @@ const {
   graphFetch, graphListAll, resolveArchiveRoot, archiveFile,
 } = require('../../lib/graph');
 const { requireEditor } = require('../../lib/require-editor');
+const { recordActivity } = require('../../lib/activity');
 const { runMailSync, resolvePending, collectSlackAnswers, notify, readRules, writeRules } = require('../../lib/mail-sync');
 const { scanPeriods, applyBackfill } = require('../../lib/invoices/period-backfill');
 const { readPending } = require('../../lib/invoices/pending');
@@ -175,6 +176,26 @@ module.exports = async (req, res) => {
 
     const token = await getGraphToken();
     const targetDriveId = await resolveDriveId(token, upn);
+
+    // What a person did, recorded where it happens rather than at each of the
+    // five places a run can finish. It records the attempt, not the outcome:
+    // a sync that failed halfway is still something someone did, and leaving
+    // it out would make the log quietly incomplete exactly when it matters.
+    // `pending` and `inspect` only read, so they are not events.
+    const RUN_LABEL = {
+      mail: 'Fetched invoices from the mailbox',
+      folders: 'Mirrored the invoice source folders',
+      periods: 'Checked billing periods',
+      'periods-apply': 'Applied billing-period moves',
+      'pending-resolve': 'Answered a held invoice question',
+      'rules-save': 'Saved the filing rules',
+      tidy: 'Tidied the archive',
+      all: 'Ran the full invoice sync',
+    };
+    if (session && RUN_LABEL[mode]) {
+      await recordActivity(token, targetDriveId, 'sync', session.email,
+        RUN_LABEL[mode], `mode=${mode}`);
+    }
     const archiveRoot = await resolveArchiveRoot(token, targetDriveId, { fresh: true });
 
     // Loaded once and shared: the mailbox pass needs the folder->app mapping to

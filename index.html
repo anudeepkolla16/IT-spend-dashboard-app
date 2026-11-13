@@ -172,6 +172,33 @@
      This is presentation only: lib/require-editor.js is what actually stops a
      write, and it stops one whether or not a button was ever on screen. */
   body:not(.can-edit) .admin-only{display:none!important}
+
+  /* The Activity feed. A log is a wall of near-identical lines, so the shape
+     does the reading: what happened on the left, who and when on the right,
+     and the kind as a chip you can scan down rather than a word in a sentence. */
+  .act-people{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .act-person{display:flex;flex-direction:column;gap:2px;align-items:flex-start;text-align:left;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;cursor:pointer;font:inherit;color:inherit}
+  .act-person:hover{border-color:var(--accent)}
+  .act-person.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .act-person .cap{font-size:11px}
+  .act-feed{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .act-row{display:grid;grid-template-columns:96px 1fr auto auto;gap:12px;align-items:center;
+    padding:9px 12px;border-bottom:1px solid var(--line)}
+  .act-row:last-child{border-bottom:none}
+  .act-row:nth-child(even){background:var(--rowalt,rgba(127,127,127,.04))}
+  .act-main{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .act-main b{font-weight:600}
+  .act-main .cap{font-size:11px}
+  .act-who{color:var(--muted);font-size:12px;white-space:nowrap}
+  .act-when{color:var(--muted);font-size:12px;white-space:nowrap;min-width:84px;text-align:right}
+  @media (max-width:760px){
+    .act-row{grid-template-columns:1fr auto;row-gap:2px}
+    .act-row .stage{grid-column:1}
+    .act-when{grid-column:2;grid-row:1}
+    .act-main{grid-column:1/-1}
+    .act-who{grid-column:1/-1}
+  }
   .offpage{display:none!important}
   .foot{color:var(--faint);font-size:11.5px;text-align:center;padding:26px 0 8px;margin-top:auto}
   /* The single card on a page takes the height that is left, and hands it to
@@ -440,6 +467,7 @@
   <button class="nav-item admin-only" data-page="questions"><span class="ico">❓</span>Needs your answer<span class="badge zero" id="pendingBadge">0</span></button>
   <button class="nav-item admin-only" data-page="rules" id="navRules"><span class="ico">⚙</span>Filing rules</button>
   <button class="nav-item" data-page="passwords"><span class="ico">🔑</span>Password</button>
+  <button class="nav-item admin-only" data-page="activity"><span class="ico">👣</span>Activity</button>
   <div class="side-foot">
     <div class="who" id="whoami"></div>
     <div class="sub"><span class="dot" id="syncDot"></span><span id="syncLabel">Connecting to SharePoint…</span></div>
@@ -626,6 +654,28 @@
       </div>
       <div id="loginStatus" class="cap" style="margin-bottom:10px"></div>
       <div id="loginTable"></div>
+    </div>
+
+    <div class="card admin-only" id="activityCard" data-page="activity" style="order:11">
+      <h3>👣 Activity</h3>
+      <div class="cap">Who signed in, who ran the invoice jobs, and every cell this app has written — newest first. Sign-ins and runs come from <b>_activity-log.json</b>; the cell writes are the same audit trail the sheet keeps in <b>_amount-log.json</b>.</div>
+      <div class="filters">
+        <select id="actKind">
+          <option value="all">Everything</option>
+          <option value="sign-in">Only sign-ins</option>
+          <option value="edit">Only edits by a person</option>
+          <option value="sync">Only invoice jobs</option>
+          <option value="sync-write">Only cells the sync wrote</option>
+        </select>
+        <select id="actWho"><option value="">Everyone</option></select>
+        <input id="actSearch" placeholder="Search app / detail…" style="min-width:240px" />
+        <div class="grow"></div>
+        <span class="chip" id="actCount" style="align-self:center"></span>
+        <button class="btn ghost" id="actRefresh" title="Read the logs again">↻ Reload</button>
+      </div>
+      <div id="actStatus" class="cap" style="margin-bottom:10px"></div>
+      <div id="actPeople"></div>
+      <div id="actList"></div>
     </div>
 
     <div class="card" id="appsCard" data-page="applications" style="order:3">
@@ -2428,6 +2478,7 @@ const PAGES = {
   questions:    { title: 'Needs your answer',  sub: 'Invoices the sync would not file without asking' },
   rules:        { title: 'Filing rules',       sub: 'Which row an invoice belongs to, and how the sync decides' },
   passwords:    { title: 'Passwords',          sub: 'Where each app sends its invoices, and the login used to fetch them' },
+  activity:     { title: 'Activity',           sub: 'Who has used the dashboard and what they changed · sign-ins, syncs and every cell written' },
 };
 const DEFAULT_PAGE = 'overview';
 let currentPage = null, routeApplied = false;
@@ -2481,6 +2532,7 @@ function showPage(page){
   for (const id of Object.keys(charts)) { try { charts[id].resize(); } catch {} }
   if (name === 'passwords' && !loginRows && !loginLoading) loadLogins(false);
   if (name === 'documents' && !docsData && !docsLoading) loadDocuments(false);
+  if (name === 'activity' && !actData && !actLoading) loadActivity(false);
   if (name === 'rules' && $('#rulesEditor') && $('#rulesEditor').classList.contains('hidden')) $('#rulesBtn').click();
   window.scrollTo({ top: 0, behavior: 'auto' });
 }
@@ -4160,6 +4212,105 @@ $('#rulesSave').onclick = async () => {
 // The queue is loaded from the auth block instead, once it is known whether
 // this account may answer anything: a reader asking for it now earns a 403,
 // and CAN_EDIT is still undefined this early.
+
+/* ---------------- who used this, and what they changed ----------------
+   Two logs, one feed. `_activity-log.json` holds the things that leave no
+   cell behind — a sign-in, a mailbox sync, an archive tidy, an import — and
+   `_amount-log.json` is the audit trail the sheet writer already kept, one
+   line per cell with what was there before. The server merges them; this
+   draws the result and filters it.
+
+   The whole page is editor-only, markup and route alike: /api/amounts is
+   gated before it dispatches, so a reader asking for this gets a 403 rather
+   than a list of who has been in here. */
+let actData = null, actLoading = false, actKind = 'all', actWho = '', actQuery = '';
+
+const ACT_LABEL = {
+  'sign-in':    ['signed in',  'ok'],
+  edit:         ['edit',       'gap'],
+  sync:         ['ran a job',  ''],
+  'sync-write': ['sync wrote', ''],
+  import:       ['import',     ''],
+};
+
+async function loadActivity(force){
+  if (actLoading) return;
+  actLoading = true;
+  $('#actStatus').textContent = 'Reading the logs…';
+  try{
+    const res = await fetch('/api/amounts?action=activity', { cache:'no-store' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+    actData = json;
+    // The "Everyone" list is built from the feed, so it only ever offers
+    // names that have something to show.
+    const who = $('#actWho');
+    const people = (json.people || []).map(p => p.by).sort();
+    who.innerHTML = '<option value="">Everyone</option>' +
+      people.map(p => `<option${p === actWho ? ' selected' : ''}>${p}</option>`).join('');
+    renderActivity();
+  }catch(err){
+    $('#actStatus').innerHTML = `<span style="color:var(--danger)">Couldn't read the activity log: ${err.message}</span>`;
+  }finally{
+    actLoading = false;
+  }
+}
+
+function actAgo(iso){
+  const then = new Date(iso);
+  if (isNaN(then)) return '';
+  const mins = Math.round((Date.now() - then.getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+function renderActivity(){
+  if (!actData) return;
+  const all = actData.entries || [];
+  const q = actQuery.toLowerCase();
+  const rows = all.filter(e =>
+    (actKind === 'all' || e.kind === actKind) &&
+    (!actWho || e.by === actWho) &&
+    (!q || `${e.what} ${e.detail} ${e.by}`.toLowerCase().includes(q)));
+
+  const people = (actData.people || []).slice().sort((a,b) => String(b.lastAt).localeCompare(String(a.lastAt)));
+  $('#actPeople').innerHTML = people.length ? `<div class="act-people">${people.map(p => `
+    <button class="act-person${actWho === p.by ? ' on' : ''}" data-who="${p.by}">
+      <b>${p.by}</b>
+      <span class="cap">${p.events} action${p.events === 1 ? '' : 's'}${p.signIns ? ` · ${p.signIns} sign-in${p.signIns === 1 ? '' : 's'}` : ''} · last ${actAgo(p.lastAt)}</span>
+    </button>`).join('')}</div>` : '';
+  document.querySelectorAll('#actPeople .act-person').forEach(b => b.onclick = () => {
+    actWho = (actWho === b.dataset.who) ? '' : b.dataset.who;
+    $('#actWho').value = actWho;
+    renderActivity();
+  });
+
+  const c = actData.counts || {};
+  $('#actCount').textContent = `${rows.length} of ${all.length}`;
+  $('#actStatus').textContent = all.length
+    ? `${c.events || 0} sign-in${(c.events || 0) === 1 ? '' : 's'} and job run${(c.events || 0) === 1 ? '' : 's'}, ${c.writes || 0} cell write${(c.writes || 0) === 1 ? '' : 's'}.`
+    : 'Nothing recorded yet. Sign-ins and invoice jobs are logged from now on; cell writes go back as far as the sheet audit trail.';
+
+  $('#actList').innerHTML = rows.length ? `<div class="act-feed">${rows.map(e => {
+    const [label, cls] = ACT_LABEL[e.kind] || [e.kind, ''];
+    const when = new Date(e.at);
+    return `<div class="act-row">
+      <span class="stage ${cls}">${label}</span>
+      <div class="act-main"><b>${e.what || ''}</b>${e.detail ? `<span class="cap">${e.detail}</span>` : ''}</div>
+      <div class="act-who">${e.by || ''}</div>
+      <div class="act-when" title="${isNaN(when) ? '' : when.toLocaleString()}">${actAgo(e.at)}</div>
+    </div>`;
+  }).join('')}</div>` : '<div class="cap" style="text-align:center;padding:20px">Nothing matches those filters.</div>';
+}
+
+$('#actKind').onchange = (e) => { actKind = e.target.value; renderActivity(); };
+$('#actWho').onchange  = (e) => { actWho  = e.target.value; renderActivity(); };
+$('#actSearch').oninput = (e) => { actQuery = e.target.value; renderActivity(); };
+$('#actRefresh').onclick = () => { actData = null; loadActivity(true); };
 
 // Last, deliberately: showPage reads state (`charts`, `loginRows`) that `let`
 // declares further down this script, and calling it any earlier dies in the

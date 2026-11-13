@@ -319,7 +319,7 @@ const ROUTER = (() => {
 
 test('every sidebar destination is a route, and an unknown one falls back', () => {
   assert.deepStrictEqual(Object.keys(ROUTER.PAGES),
-    ['overview', 'applications', 'renewals', 'invoices', 'documents', 'questions', 'rules', 'passwords']);
+    ['overview', 'applications', 'renewals', 'invoices', 'documents', 'questions', 'rules', 'passwords', 'activity']);
   // The sidebar lists exactly those, in that order.
   const nav = [...html.matchAll(/<button class="nav-item[^"]*" data-page="([a-z]+)"/g)].map(m => m[1]);
   assert.deepStrictEqual(nav, Object.keys(ROUTER.PAGES), 'the nav and the router cannot list different places');
