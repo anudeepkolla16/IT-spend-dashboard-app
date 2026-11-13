@@ -220,6 +220,11 @@
     .card.fill{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
     .card.fill .tblwrap,.card.fill .loginwrap,.card.fill .renewals,.card.fill .inv-grid,.card.fill .inv-files,.card.fill .ov{
       max-height:none;flex:1 1 auto;min-height:0;overflow:auto}
+    /* The Activity feed is the card's own child rather than a wrapper around
+       one, so it is the scroller itself. Without this it is clipped by
+       `main{overflow:hidden}` above and everything past the fold is simply
+       unreachable — no scrollbar, no way down. */
+    .card.fill > #actList{flex:1 1 auto;min-height:0;overflow:auto}
     /* A scroller that is not the card's own child needs its wrapper to pass the
        height through, or the table runs off the bottom of the card. `:not(.hidden)`
        because an id beats .hidden on specificity — without it these would reappear
