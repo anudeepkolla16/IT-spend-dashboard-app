@@ -3,7 +3,7 @@ const {
   encodeGraphPath, sanitizeSegment, readJsonFile, uploadFileContent,
   graphFetch, graphListAll, resolveArchiveRoot, archiveFile,
 } = require('../../lib/graph');
-const { verify, parseCookies } = require('../../lib/session');
+const { requireEditor } = require('../../lib/require-editor');
 const { runMailSync, resolvePending, collectSlackAnswers, notify, readRules, writeRules } = require('../../lib/mail-sync');
 const { scanPeriods, applyBackfill } = require('../../lib/invoices/period-backfill');
 const { readPending } = require('../../lib/invoices/pending');
@@ -154,10 +154,14 @@ module.exports = async (req, res) => {
     const secret = process.env.CRON_SECRET;
     const auth = req.headers['authorization'] || '';
     const isCron = !!secret && auth === `Bearer ${secret}`;
-    const isUser = !!verify(parseCookies(req.headers.cookie).session);
-    if (!isCron && !isUser) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
+    // Every mode here either writes to the sheet or moves files in SharePoint,
+    // so a person running it has to be on the editor list. Being signed in was
+    // once enough, which made hiding the buttons the only thing standing
+    // between a reader and the archive.
+    let session = null;
+    if (!isCron) {
+      session = requireEditor(req, res);
+      if (!session) return;
     }
 
     // ?mode=mail or ?mode=folders runs just one half; the cron runs both.
