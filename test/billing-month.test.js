@@ -229,15 +229,21 @@ test('the filing log keeps one line per file and month, the latest', () => {
   assert.deepStrictEqual(mergeEntries(undefined, undefined), []);
 });
 
-test('Recheck Periods re-reads a cached record that found no period under the old reader', () => {
+test('Recheck Periods re-reads every record an older reader left behind', () => {
+  // A record that HAD found a period used to stand regardless of version, on
+  // the assumption that a reader only ever finds more. Version 3 broke that:
+  // an invoice bracketed by its own previous and next cycles now names no
+  // period of its own, so a cached period can be the stale answer too. Only
+  // the current version's records stand.
   const periods = cachedReads({ periods: [
-    { path: 'a.pdf', read: true, periodStart: '2026-08-01', periodEnd: '2026-08-31' },   // old read, period found: stands
-    { path: 'b.pdf', read: true, periodStart: null, invoiceMonth: '2026-09' },          // old read, none found: read again
-    { path: 'c.pdf', read: false, note: 'scanned' },                                     // old failure: read again
-    { path: 'd.pdf', read: true, periodStart: null, pv: PERIOD_VERSION },                // current reader: stands
+    { path: 'a.pdf', read: true, periodStart: '2026-08-01', periodEnd: '2026-08-31' },   // old read, period found: read again
+    { path: 'b.pdf', read: true, periodStart: null, invoiceMonth: '2026-09' },           // old read, none found: read again
+    { path: 'c.pdf', read: false, note: 'scanned' },                                      // old failure: read again
+    { path: 'd.pdf', read: true, periodStart: null, pv: PERIOD_VERSION },                 // current reader: stands
+    { path: 'e.pdf', read: true, periodStart: '2026-10-15', pv: PERIOD_VERSION },         // current reader: stands
   ] });
-  assert.deepStrictEqual([...periods.keys()].sort(), ['a.pdf', 'd.pdf']);
-  assert.strictEqual(PERIOD_VERSION, 2);
+  assert.deepStrictEqual([...periods.keys()].sort(), ['d.pdf', 'e.pdf']);
+  assert.ok(PERIOD_VERSION >= 3, 'the Apify records have to be read again');
 });
 
 test('the sync passes the vendor\'s convention, and the backfill gets the rules', () => {
@@ -249,4 +255,73 @@ test('the sync passes the vendor\'s convention, and the backfill gets the rules'
   assert.ok(!/usageRange/.test(sync), 'the usage opt-in is gone: every vendor\'s line items are read');
   const cron = fs.readFileSync(path.join(__dirname, '..', 'api', 'invoices', 'sync-cron.js'), 'utf8');
   assert.match(cron, /scanPeriods\(token, targetDriveId, \{[^}]*rules \}\)/);
+});
+
+/* ---------- an invoice that settles one cycle and buys the next ----------
+ *
+ * "Apify invoice is for nov month."
+ *
+ * Apify's 15 November invoice names two billing periods and says what each one
+ * is, relative to itself:
+ *
+ *   Platform usage in the previous billing period from 2026-10-15 to 2026-11-14
+ *   Prepayment for the next billing period    from 2026-11-15 to 2026-12-14
+ *
+ * The extractor took the first range it found and filed the invoice under
+ * October. Reading order was never a reason to prefer one: the invoice sits
+ * BETWEEN those periods and names neither as its own, so the row's convention
+ * decides — and Apify bills in advance, which puts it in November.
+ */
+
+const APIFY_NOV = 'Page 1 of 2  Invoice #202611151493  Date: November 15, 2026  Supplier  Apify Technologies s.r.o. '
+  + 'Services  Regular subscription payment Platform usage in the previous billing period from 2026-10-15 to 2026-11-14  '
+  + 'Platform usage from 2026-10-15 to 2026-11-14   $41.08  Usage prepaid by the subscription plan   -$29.00  '
+  + 'Prepayment for the next billing period from 2026-11-15 to 2026-12-14  Starter plan (monthly)   $29.00  '
+  + 'Total amount   41.08 USD  Breakdown of platform usage from 2026-10-15 to 2026-11-14';
+
+const { monthForInvoice } = require('../lib/mail-sync');
+
+test('an invoice bracketed by its own two cycles names no period of its own', () => {
+  assert.strictEqual(extractBillingPeriod(APIFY_NOV), null,
+    'the first range in the text is not the invoice\'s period');
+});
+
+test('so the vendor convention places it, and Apify bills in advance', () => {
+  const placed = monthForInvoice(APIFY_NOV, '2026-11', { convention: 'advance', vendor: 'Apify' });
+  assert.strictEqual(placed.month, '2026-11', 'November, where the owner files it');
+  assert.match(placed.via, /advance/);
+});
+
+test('only a document that brackets itself declines to say', () => {
+  // One label is a statement, not an ambiguity: an invoice that has just
+  // measured a cycle is a plain arrears bill, and one that buys the cycle
+  // ahead is a plain prepayment. Each names its period and is read as before.
+  const arrearsOnly = 'Invoice  Date: November 15, 2026  Usage in the previous billing period from 2026-10-01 to 2026-10-31  Total 50.00 USD';
+  assert.strictEqual(extractBillingPeriod(arrearsOnly).start, '2026-10-01');
+
+  const prepayOnly = 'Invoice  Date: November 15, 2026  Prepayment for the next billing period from 2026-11-15 to 2026-12-14  Total 29.00 USD';
+  assert.strictEqual(extractBillingPeriod(prepayOnly).start, '2026-11-15');
+});
+
+test('line items with different service windows are not that, and keep their month', () => {
+  // dbt's September invoice lists August usage above September seats and says
+  // nothing about a previous or next cycle. The test above pins it to August;
+  // this one guards against the Apify rule reaching it.
+  assert.strictEqual(extractBillingPeriod(DBT_MIXED).start, '2026-08-01');
+  // And dbt's November invoice, the same shape, is likewise untouched.
+  const dbtNov = 'Invoice number   C70CD8FE   0007  Date of issue   November 1, 2026  '
+    + 'Usage - Successful Models Built, Tier 1     0 - 15000    Oct 1   Oct 31, 2026 217   $0.00   $0.00  '
+    + 'Seats - Developer License Nov 1   Nov 30, 2026 1   $100.00   $100.00  Total   $106.25';
+  assert.ok(extractBillingPeriod(dbtNov), 'it still reads a period');
+});
+
+test('a period repeated through one invoice is one period, not several', () => {
+  // Apify prints its usage window four times — summary, line item, breakdown
+  // heading, breakdown body. Counting repeats as separate periods would make
+  // every such invoice look ambiguous.
+  const repeated = 'Invoice  Date: November 15, 2026  Period from 2026-10-15 to 2026-11-14  '
+    + 'usage from 2026-10-15 to 2026-11-14  Breakdown from 2026-10-15 to 2026-11-14  Total 41.08 USD';
+  const p = extractBillingPeriod(repeated);
+  assert.ok(p, 'one cycle written three times still names a period');
+  assert.strictEqual(p.start, '2026-10-15');
 });
