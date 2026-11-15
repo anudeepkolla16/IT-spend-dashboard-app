@@ -405,14 +405,26 @@ test('a scan that runs past its deadline says so instead of reporting false gaps
   } finally { stub.restore(); }
 });
 
-// --- The invoice's own period dates it before its file name ---------------
+// --- A hand-named file is dated by its name, not by a period read out of it ---
 //
-// Slack's "July 26 invoice.pdf" is the Salesforce invoice dated 28 July for
-// service from 12 August 2026, and August is where the sheet charges it. The
-// name said July; the checklist showed August charged with no invoice and July
-// with an invoice nothing was charged for. Recheck Periods and the mail sync
-// both record the period they read, and the crawl now uses it.
-test('a period already read out of the PDF beats the file name, a subfolder beats both', async () => {
+// The period used to win, on the strength of one example: Slack's
+// "July 26 invoice.pdf", dated 28 July, states a period beginning 12 August,
+// and the comment claimed August was where the sheet charges it.
+//
+// It is not. The sheet charges Slack in July and holds nothing at all in
+// August — the owner's own screenshot reads "Aug 2026 · recorded charge none ·
+// 1 invoice on file" — and that period runs 2026-08-12 to 2027-02-11, a
+// six-month contract term rather than a billing cycle. The rule was built on
+// the case it got wrong.
+//
+// What it did everywhere else: GitHub bills in arrears, so "Aug 26.pdf" is
+// dated 8 August and covers July. It is $540.95 and the sheet's August cell is
+// $541 — the same charge — but the period moved it to July, and every GitHub
+// month read "Missing" with the invoice listed in the panel below it.
+//
+// So a loose file is dated by its name, which is the owner's own statement of
+// which month it is. The period still dates a file whose name says nothing.
+test('a hand-named file keeps its name\'s month, and a subfolder beats both', async () => {
   const stub = stubGraph({
     index: {
       periods: [
@@ -437,15 +449,15 @@ test('a period already read out of the PDF beats the file name, a subfolder beat
   try {
     const inv = await buildInventory('tok', nextDrive());
     const by = Object.fromEntries(inv.files.map(f => [f.name, f]));
-    assert.equal(by['July 26 invoice.pdf'].month, '2026-08');
-    assert.equal(by['July 26 invoice.pdf'].monthSource, 'period');
+    assert.equal(by['July 26 invoice.pdf'].month, '2026-07', 'July, where the sheet charges it');
+    assert.equal(by['July 26 invoice.pdf'].monthSource, 'filename');
     assert.equal(by['March 2, 2026 invoice.pdf'].month, '2026-03', 'a far period is ignored');
     assert.equal(by['March 2, 2026 invoice.pdf'].monthSource, 'filename');
     assert.equal(by['Receipt-1.pdf'].month, '2026-04', 'the mail sync\'s record dates a name that says nothing');
-    assert.equal(by['Receipt-1.pdf'].monthSource, 'period');
+    assert.equal(by['Receipt-1.pdf'].monthSource, 'period', 'which is what the period is still for');
     assert.equal(by['adobe-jul.pdf'].month, '2026-07');
     assert.equal(by['adobe-jul.pdf'].monthSource, 'folder');
-    assert.equal(inv.datedFromPeriodCount, 2);
+    assert.equal(inv.datedFromPeriodCount, 1, 'only the file whose name says nothing');
   } finally {
     stub.restore();
   }
@@ -461,4 +473,77 @@ test('periodsByPath keys the index the way the crawl builds paths', () => {
   assert.deepEqual(m.get('A/y.pdf'), { start: '2026-02-01', end: '2026-02-01' });
   assert.equal(m.has('A/none.pdf'), false);
   assert.equal(periodsByPath(null).size, 0);
+});
+
+/* ---------- GitHub: an arrears invoice, counted a month early ----------
+ *
+ * "june pdf is there but still showing missing — same I saw for many apps."
+ *
+ * GitHub bills in arrears, so every invoice is dated in the month after the
+ * one it covers. The loose files are named for the month they are FOR, and the
+ * sheet charges them there; the period in each one points at the month before.
+ * Taking the period moved every file back a month, so each charged month read
+ * "Missing" while its invoice sat in the list below.
+ *
+ * The amounts settle which is right: Aug 26.pdf is $540.95 and the sheet's
+ * August cell holds $541.
+ */
+test('an arrears invoice is counted in the month it is named for', async () => {
+  const stub = stubGraph({
+    index: {
+      periods: [
+        { path: `${ARCHIVE_PATH}/Github/Aug 26.pdf`, read: true, periodStart: '2026-07-01', periodEnd: '2026-07-31' },
+        { path: `${ARCHIVE_PATH}/Github/June 26.pdf`, read: true, periodStart: '2026-05-01', periodEnd: '2026-05-31' },
+        { path: `${ARCHIVE_PATH}/Github/Jan 26.pdf`, read: true, periodStart: '2025-12-01', periodEnd: '2025-12-31' },
+      ],
+      entries: [],
+    },
+    children: {
+      'root-inv': [folder('f-gh', 'Github')],
+      'f-gh': [file('g1', 'Aug 26.pdf'), file('g2', 'June 26.pdf'), file('g3', 'Jan 26.pdf')],
+    },
+  });
+  try {
+    const inv = await buildInventory('tok', nextDrive());
+    const by = Object.fromEntries(inv.files.map(f => [f.name, f]));
+    assert.equal(by['Aug 26.pdf'].month, '2026-08', 'not July, where its billing period starts');
+    assert.equal(by['June 26.pdf'].month, '2026-06');
+    assert.equal(by['Jan 26.pdf'].month, '2026-01', 'and not back into the previous year');
+    for (const f of inv.files) assert.equal(f.monthSource, 'filename');
+  } finally {
+    stub.restore();
+  }
+});
+
+test('the checklist and the mail sync date a loose file the same way', async () => {
+  // mail-sync says so in as many words — "Loose files are dated by their name,
+  // exactly as the checklist dates them, so the two agree on which month an
+  // invoice belongs to" — and the period override had quietly made it false.
+  // When they disagree the sync totals a month the checklist calls empty.
+  const { monthFromFileName, detectDayFirst } = require('../lib/invoices/inventory');
+  const names = ['Aug 26.pdf', 'June 26.pdf', 'Jan 26.pdf', 'July 26 invoice.pdf'];
+  const dayFirst = detectDayFirst(names);
+
+  const stub = stubGraph({
+    index: {
+      periods: names.map((n, i) => ({
+        path: `${ARCHIVE_PATH}/Github/${n}`, read: true,
+        periodStart: `2026-0${i + 1}-01`, periodEnd: `2026-0${i + 1}-28`,
+      })),
+      entries: [],
+    },
+    children: {
+      'root-inv': [folder('f-gh', 'Github')],
+      'f-gh': names.map((n, i) => file(`g${i}`, n)),
+    },
+  });
+  try {
+    const inv = await buildInventory('tok', nextDrive());
+    for (const f of inv.files) {
+      const sync = monthFromFileName(f.name, f.uploadedAt, dayFirst);
+      assert.equal(f.month, sync, `${f.name}: the checklist and the sync must agree`);
+    }
+  } finally {
+    stub.restore();
+  }
 });
